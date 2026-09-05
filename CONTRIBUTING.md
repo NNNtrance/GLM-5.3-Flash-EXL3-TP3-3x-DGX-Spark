@@ -1,10 +1,18 @@
 # Contributing — help us close the gaps
 
-This repository is a **private draft** and is overwritten in place while the work continues. If you
-have access to it and comparable hardware, the items below are the ones a second cluster could
-actually settle.
+If you own comparable hardware, the items below are the ones a second cluster could actually settle.
+Every one of them is something we could not run, not something we could not be bothered to run — the
+reason is given with each.
 
-If you run one, please open a pull request adding your raw output under
+**Before you open anything, three things will save you time:**
+
+- [docs/14 — Troubleshooting](docs/14-troubleshooting.md) indexes every failure we hit by symptom,
+  with the exact log line. If your stack is misbehaving, look there before you open an issue.
+- [audit/](audit/README.md) is a post-install self-check with our own numbers next to each step. Run
+  it before reporting that something is slow: it tells you *which* thing differs from ours.
+- [STYLE-GUIDE.md](STYLE-GUIDE.md) governs anything written here, including evidence tiers.
+
+If you run one of the items below, please open a pull request adding your raw output under
 `results/community/<your-handle>/<item>/` plus a short Markdown summary. Every number needs its
 settings — image tag and which `cuda-exl3` commit, TP and EP, quantization, KV dtype, draft method
 and `k`, `gpu-memory-utilization`, `--block-size`, `HAREM_SW_BLOCK_SIZE`,

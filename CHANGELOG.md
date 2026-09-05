@@ -1,13 +1,72 @@
 # Changelog
 
 Dated entries for the stack this repository documents. This is a working record, not a release
-history — the repository is a **private draft** and is overwritten in place as the work continues.
+history — it is overwritten in place as the work continues.
 
 Speed figures are aggregate output tok/s on `scripts/hizset-v2.jsonl` at `reasoning_effort: low`,
 temperature 0. Entries up to and including *production configuration 4* are medians of sweep rounds
 3–5 with rounds 1–2 discarded; from *production configuration 5* onwards they are medians of three
 rounds, which is what the persisted MLA tuner cache bought — see
 [docs/09](docs/09-measurement-protocol.md) §1 and [docs/12](docs/12-tuner-cache.md).
+
+---
+
+## 2026-09-05 (night) — release pass: production configuration 10, two retractions, and the environment record
+
+**Production configuration 10 = production 9 with one line changed**, `GPU_MEMORY_UTILIZATION`
+0.80 → 0.83 `[measured-here]`. KV pool **5,168,044 → 5,619,834 (+8.7 %)**; C1/C4/C8 69.8/134.6/192.4
+→ 70.5/144.6/194.0, all inside their bands; prefill-fresh 1,687/1,769/1,779 against 1,745–1,774;
+quality gates full, cold and warm. **Swap stayed flat at ~0.1 GB per node through the rounds**, which
+is the number 0.85 failed on. `MemAvailable` 8–10 GB, `MemFree` 0.9–1.2 GiB of reclaimable page
+cache. `[docs/11](docs/11-open-issues.md)` §2.4 predicted +11 % from production 7's geometry and the
+measured figure is +8.7 % — the method held, the base did not. **0.85 will not be attempted.**
+
+**Two retractions, both of ours, both from re-reading raw data we already had:**
+
+- **The "−2.4 points of draft acceptance" cost of production 9 does not exist** `[retracted]`. It is
+  an artefact of `scripts/bench-sweep.py` cycling `prompts[i % 12]`, so C1 and C2 see only 8 of the
+  12 prompts while C4–C8 see all twelve, and the two groups differ by about 8 points. Pooled by draft
+  token over five levels and three boots: **+0.18 points**, and the sign reverses at C6. The cold
+  probe is identical on both arms. `accept_len = 1 + k × acceptance` on all 90 rows, so the
+  "acceptance" and "tokens per step" costs were one number written twice. Net throughput effect
+  **+0.24 %**. Front page, [docs/11](docs/11-open-issues.md) §2.26 and
+  [audit/](audit/README.md) §6 corrected.
+- **Production 9 *was* re-profiled**, and this repository said it had not been `[retracted]`. The
+  torch-profiler run against the live production-9 server (three ranks, no restart) landed 40 minutes
+  after the README and `docs/10` were written. Dense stage **45.3 % → 25.9 %** of a C1 step
+  (42.90 → 21.90 ms); new C1 ranking MoE trellis GEMM 32.5 %, NCCL 26.1 %‡, dense EXL3 GEMM 15.0 %,
+  remaining BF16 10.3 %; prefill chunk MoE 28.1 %, NCCL 14.0 %, dense EXL3 13.4 %; C8 MoE 56.3 %.
+  ‡ NCCL and CPU-gap at C1 are **CUPTI-inflated** — 2,738 kernel launches per step, so with the
+  profiler off the two together are ≤17.19 ms rather than 29.1, and the step wall is 72.52 ms rather
+  than 84.44. **And the arithmetic missed something:** the full-scope dense stage is **+17.3 ms,
+  +10.4 % in *prefill*** at M=1,792. The wall stayed flat only because three other classes gave it
+  back. The plugin author reproduced the shape on his own card and withdrew a "cuBLAS parity" claim
+  from his README.
+
+**New in the repository, for the release:**
+
+- **[docs/00](docs/00-hardware-and-os.md) rewritten as a complete environment record** — firmware
+  (SBIOS/EC/SoC/USB-C PD, and why below `0104` costs a quarter of the fabric silently), the
+  `dgx-spark-mlnx-hotplug` root cause and the file to remove, the physical cabling (**three** cables
+  carrying six links, not six cables — corrected), the PCIe Gen5 x4 ceiling read on 12 of 12
+  endpoints, every version with the command that prints it, **the six OS-level changes we made and
+  the three we deliberately did not**, the `swappiness=0` lock-up, the memory rules and the settle
+  gate, and the mesh plugin's build and binary identities.
+- **[docs/14](docs/14-troubleshooting.md)** — all 83 failures by symptom with the exact log line, a
+  triage order, and a ranked index of the twenty that produced **no error message at all**.
+- **[audit/](audit/README.md)** — a post-install self-check with our numbers beside each step, a
+  provenance table for every headline figure, and the retraction index.
+- **[charts/](charts/)** — four figures, generated from committed CSVs by a standard-library script.
+- `results/configs/production-configurations.csv`, `results/configs/kv-pool-progression.csv`,
+  `results/profile/step-breakdown.csv`.
+
+**Corrections made in place:** `docs/10` §4.2 carried "2048-token chunk, 1.109 s" — a chunk size taken
+from the flag rather than the trace and a wall from an earlier configuration. The measured values are
+**1,792 tokens** (7 × 256) at **962.55 ms** (production 7) and **961.73 ms** (production 9), which
+moves prefill's effective bandwidth from 53 to about **61 GB/s**. `LICENSES.md` and `CREDITS.md` named
+the fallback checkpoint as the production one and pinned `cuda-exl3` at `f4987cf`; both now say
+`turboderp/GLM-5.3-Flash-exl3` (MIT) and `754421f`. Category speeds are production 9's
+(code 61.7 · math 79.6 · JSON 72.8 · prose 29.1) rather than five configurations old.
 
 ---
 

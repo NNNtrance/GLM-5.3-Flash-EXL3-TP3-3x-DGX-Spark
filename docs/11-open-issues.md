@@ -331,7 +331,39 @@ Sub-items left open by the closure, both small `[not tested]`:
   is most of the 6.7 % a dump boot reads low. Worth ~2.3 GiB of pool on dump boots only, so it changes
   no production number and is low priority.
 
-### 2.4 The memory ladder above 0.80 — 0.83 is designed and waiting on approval
+### 2.4 The memory ladder above 0.80 — 0.83 was approved, run, and is production 10
+
+**CLOSED, and taken** `[measured-here]`. The rung below was designed and costed here and then run on
+the evening of 5 September as **production configuration 10** — production 9 with a single line
+changed, `GPU_MEMORY_UTILIZATION` 0.80 → 0.83:
+
+| | production 9 @ 0.80 | production 10 @ 0.83 |
+|---|---|---|
+| KV pool at `max_model_len` 1,000,000 | 5,168,044 | **5,619,834** (+8.7 %) |
+| C1 / C4 / C8 tok/s | 69.8 / 134.6 / 192.4 | 70.5 / 144.6 / 194.0 — inside the bands |
+| Prefill, fresh | 1,745–1,774 | 1,687 / 1,769 / 1,779 |
+| Quality gates, cold and warm | full | full |
+| Swap under load, three nodes | ~0.1 GB | ~0.1 GB, **flat through the rounds** |
+| `MemAvailable` after the rounds | 12–13 GB | **8–10 GB** |
+| `MemFree` after the rounds | — | 0.9–1.2 GiB, reclaimable page cache |
+
+**+8.7 % rather than the +11 % predicted below**, which is the useful part: the prediction assumed
+production 7's pool and geometry, and production 9's is different. The prediction's *method* held; its
+base did not.
+
+**What it cost, and the line is not left empty.** `MemFree` now sits below the 2 GiB figure this page
+has used as a floor. The number that decides whether that matters is **swap growth, and it did not
+move** — 0.85's rejection was never about `MemFree` in the abstract, it was about 1.6 GB of swap
+appearing under load. `MemAvailable` at 8–10 GB per node is the honest headroom figure and it is well
+clear. **0.85 will not be attempted on this stack**; the rung after 0.83 is a soak, not another rung.
+
+The design, the arithmetic and the reasoning that produced it are kept below, because the method is
+the transferable part.
+
+<details>
+<summary>The original item, as written before the rung was run</summary>
+
+#### 2.4 (original) The memory ladder above 0.80 — 0.83 is designed and waiting on approval
 
 0.85 was measured and rejected on the free-memory rule; 0.88 was never attempted. Three things have
 changed since that verdict was recorded, and all of them argue for re-running it rather than carrying
@@ -366,6 +398,8 @@ from ~12.3 GB free under load to about **8.4 GB**, still clear of the 4 GiB rule
 +6.08 GiB of budget, head node at ~5.8 GB) is the rung after it and only after a soak. It is one boot
 and it is reversible in one line, but it is a **production memory change** and it is **held for the
 stack owner's decision**, not deferred for technical reasons.
+
+</details>
 
 ### 2.5 `--max-num-batched-tokens 3072`
 
@@ -779,10 +813,20 @@ on its own — this is a bundle item like §2.19, and the honest summary was tha
 old checkpoint scope was close to its floor, with §2.22 the one lever that was not.
 
 **§2.22 has since been taken, and that changes the size of this item rather than its content.** The
-budget above is 3.477 ms of a **92.64 ms** step; production 9's step is **70.3 ms**, so the same
-absolute milliseconds — the boundaries, the dispatch, the one synchronous D2H — are now a larger
-share of a shorter step, and this has not been re-profiled `[not tested]`. The four fixes are
-unchanged and so are their absolute gains; only the percentages move, and they move upward.
+budget above is 3.477 ms of a **92.64 ms** step; production 9's step is **70.3 ms** (72.52 ms on the
+re-profile's own boot), so the same absolute milliseconds — the boundaries, the dispatch, the one
+synchronous D2H — are a larger share of a shorter step. The four fixes are unchanged and so are their
+absolute gains; only the percentages move, and they move upward.
+
+**Production 9 has now been profiled** ([10](10-results-and-roofline.md) §5) `[measured-here]`, and
+the C1 idle row it prints is **8.43 %** — but that figure is **not** comparable to the 3.75 % above
+and must not be quoted against it. Production 9 launches 2,738 kernels per step against production
+7's count, so CUPTI's per-boundary cost lands much harder: the trace's wall is 84.44 ms where the
+profiler-off step is 72.52 ms, and NCCL plus the CPU gap together come to **≤17.19 ms** with the
+profiler off rather than the 29.1 ms printed. **Subtracting the instrument on this arm has not been
+done properly** `[not tested]`, and until it is, the honest statement is that the idle budget is
+small, per-kernel dispatch dominated, and of unknown exact size on production 9. This is the third
+time on this stack that a number has had to be read against the cost of the tool that produced it.
 
 ### 2.24 Two patch trees and two fast-load sidecars, and the merge that is owed
 
@@ -831,12 +875,42 @@ A second, smaller half of the same item survives from §2.1: whatever dense BF16
 Ampere-class `cutlass_80_*` kernels on an sm_121 part, at **79 %** of what `torch.matmul` reaches on
 the same device. That is cuBLAS/vLLM work and it is now worth proportionally less than it was.
 
-### 2.26 The 2.4 points of draft acceptance production 9 cost
+### 2.26 The 2.4 points of draft acceptance production 9 cost — **RETRACTED: it was our harness**
 
-Draft acceptance at C1 went **64.4 % → 61.9 %** and accepted tokens per step **5.50 → 5.34** when the
-checkpoint changed `[measured-here]`. The gate is ≥60 % and it passed comfortably; the step-time win
-pays for it several times over. It is listed because it is a real regression with a plausible
-mechanism and no measurement behind the mechanism.
+**`[retracted]`. There is no acceptance regression.** Pooled by draft token across all five
+concurrency levels and three independent boots, production 9 reads **62.27 %** against production 8's
+**62.09 %** — **+0.18 points**, inside that arm's own ±1.4-point boot-to-boot spread. At TP=2 the
+full-scope arm was +1.10 points. The 700-token cold probe is identical on both (42.53 % against
+42.51 %). Net effect on throughput: **+0.24 %**.
+
+**The mechanism, and it is worth more than the number.** `scripts/bench-sweep.py` cycles
+`prompts[i % 12]`, so **C1 and C2 see only the first eight of the twelve prompts** while C4–C8 see
+all twelve. The two groups differ: p0–p7 run −1.6 points against the mean and p8–p11 **+6.5**. A
+two-group prompt-mix model explains all five levels at **R² = 0.97**, and the same sign pattern
+appears independently in the TP=2 pair (R² = 0.91). So the *sign of the difference changes with
+concurrency*: honest pooled C1 is −1.68 points at a permutation-test **p = 0.11** — not significant —
+while **C6 is +1.35 the other way**. Reading a per-level median instead of pooling by draft token is
+what produced the headline.
+
+**And it was never two costs.** `accept_len = 1 + k × acceptance` holds on all 90 rows to ±0.005, so
+"acceptance −2.4 points" and "tokens per step −3 %" are **the same number written twice**.
+
+**Confound, stated honestly:** the two arms ran on different images (`754421f` against `62f53e6`).
+Those intervening commits touch the loader and debug paths rather than decode arithmetic, and **the
+drafter is byte-identical in both arms** — but it is not a single-variable experiment.
+
+**Action: none.** There is nothing to repair on the model side. The thing to fix is the measuring
+instrument: give `bench-sweep.py` a unique prompt per request so per-level acceptance becomes
+comparable — at the cost of breaking comparison with every number already published here, which is
+why it has not been done yet. **k stays at 7.**
+
+The hypothesis this section used to carry is kept below, because it was reasonable and it was wrong,
+and because the two observations that "supported" it are the ones that should have raised the alarm:
+acceptance was flat on the cold probe and equal at C8. **A regression that only appears at one
+concurrency level is a property of the harness until proven otherwise.**
+
+<details>
+<summary>The original hypothesis, as written before the raw data was re-read</summary>
 
 **The hypothesis:** the DFlash2 drafter was trained against a BF16 head, and this checkpoint's
 `lm_head` is 6-bit, so the target's logits are perturbed relative to what the drafter expects. Two
@@ -855,6 +929,8 @@ against 61.74 %), where the verify batch is larger.
 
 Worth about 3 % of single-stream throughput if fully recovered `[estimate]`. It is not worth a boot
 on its own; it is worth carrying into the next arm that touches the drafter.
+
+</details>
 
 ---
 

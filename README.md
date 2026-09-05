@@ -1,9 +1,11 @@
 # GLM-5.3-Flash (EXL3 4bpw) on 3× NVIDIA DGX Spark — vLLM, cuda-exl3, TP=3 + EP, DFlash2
 
-> **Status: work in progress, private draft.** This repository is being written while the work is
-> still going on. Numbers, flags and patches are current as of **5 September 2026** and will be
-> overwritten in place as the stack moves. Nothing here has been reviewed for release yet. Sections
-> marked *open* in [docs/11-open-issues.md](docs/11-open-issues.md) are the honest edge of what we know.
+> **Status: release candidate.** Numbers, flags and patches are current as of **5 September 2026**
+> and describe **production configuration 9** (and configuration 10, which is the same thing with one
+> line changed). The stack is still moving and this file is overwritten in place when it does.
+> Sections marked *open* in [docs/11-open-issues.md](docs/11-open-issues.md) are the honest edge of
+> what we know; [docs/11 §1](docs/11-open-issues.md) is what we published and then had to withdraw,
+> and [audit/](audit/README.md) §6 indexes it. **Read the retractions before you quote a number.**
 
 A reproducible recipe for serving **`zai-org/GLM-5.3-Flash`** as an **EXL3 4-bit** checkpoint on three
 DGX Spark (GB10) nodes with vLLM and the `cuda-exl3` kernels: the two-layer image build, expert
@@ -17,9 +19,12 @@ step.
 
 This is the EXL3 sibling of our NVFP4 recipe,
 [`NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark`](https://github.com/NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark),
-which serves the same model on the same three nodes through a different quantization path. Cluster
-setup, fabric wiring, the DGX OS update story and the memory rules are shared between the two; where
-this repository is thin on those, that one is thorough.
+which serves the same model on the same three nodes through a different quantization path. The two
+share a cluster, a fabric and a set of memory rules, but **this repository is self-contained**:
+[docs/00](docs/00-hardware-and-os.md) is a complete environment record down to firmware, the hotplug
+fix, the PCIe ceiling and every OS-level setting we did and did not change, and
+[docs/14](docs/14-troubleshooting.md) indexes all 83 failures we hit by symptom with the exact log
+line. You do not need the sibling to follow this.
 
 > **About the name "HAREM".** HAREM is simply the name we gave our three-node setup. It is hardcoded
 > in several places in the stack — patch markers (`HAREM-TP3`, `HAREM-GB10-TOPK`), environment
@@ -48,14 +53,15 @@ same script, because that arm's documented run-to-run spread is about 7 %.
 | Quality gates | correctness probe **10/10**, code exam **12/12** | 10/10 · 12/12 | cold **and** after a full benchmark, both arms `[measured-here]` |
 | MMLU sample (35 questions per subject, 1,995 q) | **86.47 ±0.74** | 86.4 ±0.7 | measured at TP=3 on the production checkpoint; 0.07 points apart, a tenth of either bar `[measured-here]` |
 | Speed, realistic (12 short English code prompts) | C1 **69.9** tok/s total (**75.9** per stream) · C8 **197.2** total (28.6 per stream) | 56.9 / 62.4 · 175.4 / 26.7 | **+22.9 % / +21.7 % at C1, +12.5 % at C8** `[measured-here]` |
-| Draft acceptance · accepted tokens per step | 61.9 % · **5.34** | 64.4 % · 5.50 | −2.4 points and −3 %; the gate is ≥60 %. **This is the cost** — the whole gain is step time `[measured-here]` |
+| Draft acceptance · accepted tokens per step | 61.9 % · 5.34 | 64.4 % · 5.50 | the gate is ≥60 %. **The 2.4-point gap is our own harness, not the checkpoint** — pooled by draft token over five concurrency levels and three boots it is **+0.18 points** `[retracted]`, see below |
 | Prefill, fresh unseen ~8.5K prompts | **1,738** tok/s (warm repeated 7K prompt: 1,575) | 1,776 (1,537) | both inside the ±3 % equality band: **equal** `[measured-here]` |
 | TTFT | **0.280** s at C1, **0.826** s at C8 | 0.344 / 0.906 | −18.6 % and −8.8 % `[measured-here]` |
 | KV pool | **5,165,289 tokens** at `gpu-memory-utilization 0.80` | 4,696,969 | **+10.0 %**, about 5.2 concurrent 1M-token requests; read from a load boot with a settled baseline `[measured-here]` |
 | Consumed memory per node (weights + non-torch) | **58.3 – 59.1 GiB** | 62.1 – 62.4 GiB | **−3.4 GiB**, which is where the pool came from `[measured-here]` |
 | Cold boot, container start → API ready | **251 s** (weights 58 s) | 264 s (weights 73 s) | a fast-load boot; the one-off dump boot that produces the sidecar is 620 s `[measured-here]` |
 | Free host RAM at rest / swap | 12.1 / 13.5 / 13.4 GiB · ~0.1 GiB | 12.3 / 13.5 / 13.5 · ~0.1 | rule: never below 4 GiB free `[measured-here]` |
-| Speed by category, C1 | — | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 tok/s | acceptance 46 / 56 / 55 / **13 %** — prose is where a k=7 draft is wasted. **Measured five configurations ago**; not re-run since `[not tested]` |
+| Speed by category, C1 | code **61.7** · math **79.6** · JSON **72.8** · prose **29.1** tok/s | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 | acceptance 46 / 58 / 54 / **13 %** — every category +30–35 %, and prose is still where a k=7 draft is wasted `[measured-here]` |
+| KV pool at the 0.83 rung (**production 10**) | **5,619,834 tokens** | — | +8.7 % again, one line changed, no speed number outside its band; swap flat `[measured-here]` |
 
 **Production configuration 9 is a different checkpoint, and it is the largest single move this stack
 has made.** Every configuration from 1 to 8 served `scope: glm53_routed_experts_only` weights:
@@ -75,6 +81,20 @@ did not reproduce either — it is flat on that probe and 2.4 points lower on th
 cost, and the line is not left empty: **2.4 points of acceptance, 3 % of accepted tokens per step, a
 second patch tree to keep in step with the first, and a second 53 GB fast-load sidecar per node**
 ([13](docs/13-full-scope-checkpoint.md) §7.4, [11](docs/11-open-issues.md) §2.24).
+
+**The "cost" line in that table was wrong, and the correction is a lesson about the instrument rather
+than about the stack** `[retracted]`. We published 2.4 points of lost draft acceptance as the price of
+production 9. It is an artefact of our own sweep harness: `bench-sweep.py` cycles `prompts[i % 12]`,
+so **C1 and C2 see only the first eight of the twelve prompts** while C4–C8 see all twelve, and the
+two groups differ by about 8 points of acceptance. Pooled by draft token across all five levels and
+three independent boots, production 9 reads **62.27 %** against production 8's **62.09 %** — **+0.18
+points**, inside that arm's own ±1.4-point boot-to-boot spread. The sign even reverses at C6 (+1.35).
+A 700-token cold probe is identical on both arms (42.53 % against 42.51 %). And because
+`accept_len = 1 + k × acceptance` holds on all 90 rows to ±0.005, "acceptance −2.4 points" and
+"tokens per step −3 %" were never two costs — they are **the same number written twice**. Net effect
+on throughput: **+0.24 %**. The real costs of production 9 are the ones that remain: a second patch
+tree, a second 53 GB sidecar per node, and a **prefill** regression on the dense path
+([docs/14](docs/14-troubleshooting.md) §7.8, [11](docs/11-open-issues.md) §2.26).
 
 **None of it was about quantization.** The checkpoint would not load for three reasons — a missing
 `packed_modules_mapping`, two lines that pin the attention stack to BF16 whatever the weights hold,
@@ -125,15 +145,28 @@ worth 8–26 % of pool; acting on it would have over-committed the head node
 ([07](docs/07-kv-and-draft-page.md) §1.1, [08](docs/08-fast-boot.md) §5.1,
 [11](docs/11-open-issues.md) §2.3).
 
-**That breakdown is production 7's, and production 9 was built to delete its largest row.** The
-45.3 % dense-BF16 column is what a `routed_experts_only` checkpoint costs; the arm that removed it
-took 17.8 ms off a 88.2 ms step, measured, on the same three nodes. The percentages above have **not**
-been re-profiled on production 9 `[not tested]` — the profiler run costs a six-minute window and
-7–8 GiB of host RAM per node, and the next question after it is a different one. What can be said
-arithmetically is that the class that was 45 % of a decode step is now mostly 4–6 bit, so whatever the
-new ranking is, it is not that one. The rest of the trace stands: the NCCL class is still **100 %
-exposed**, and the C1 idle budget is still **3.75 %** rather than the 5.8 % we published
+**That breakdown is production 7's, and production 9 was built to delete its largest row — and
+production 9 has now been profiled too `[measured-here]`.** The 45.3 % dense-BF16 column is what a
+`routed_experts_only` checkpoint costs, and the arm that removed it took ~18 ms off an 88.2 ms step.
+The same protocol was then run against the production-9 server, live, all three ranks, no restart:
+the dense stage is **25.9 % of a C1 step (21.90 ms) against production 7's 45.3 % (42.90 ms)** — that
+21 ms *is* the whole of the +22 %, since acceptance moved the wrong way. The new C1 ranking is MoE
+trellis GEMM **32.5 %**, NCCL **26.1 %**, dense EXL3 GEMM **15.0 %**, remaining BF16 linears
+**10.3 %** (of which nearly half is the drafter's). Per prefill chunk: MoE trellis GEMM **28.1 %**,
+NCCL **14.0 %**, dense EXL3 GEMM **13.4 %**, hyper-connection mixing **11.9 %**, MLA **8.3 %**, KDA
+**8.0 %**. At C8 the MoE stage is **56.3 %**. The structural findings carry over unchanged: the NCCL
+class is still **100 % exposed** (measured comm/compute overlap 0.00 ms) and the C1 idle budget is
+still small. **Read two of those numbers with care** — at C1 the NCCL and CPU-gap rows are inflated by
+the profiler itself, because production 9 launches 2,738 kernels per step; with the profiler off the
+two together are ≤17.19 ms rather than 29.1 `[measured-here]`. Full tables and every class in
+[`results/profile/step-breakdown.csv`](results/profile/step-breakdown.csv) and
+[`charts/step-breakdown-prod9.svg`](charts/step-breakdown-prod9.svg)
 ([10](docs/10-results-and-roofline.md) §5, [11](docs/11-open-issues.md) §2.23).
+
+One thing the re-profile changed that the arithmetic did not predict: **the full-scope checkpoint made
+the dense stage in *prefill* slower, not faster** — 184.73 ms against production 7's 167.39 ms,
+**+10.4 %** — while wall-clock prefill stayed inside the ±3 % equality band. The gain is a decode
+gain, and it is confined to decode.
 
 Behind it, two `NCCL_ALGO` arms and one memory rung. `Tree` is measured and rejected on this fabric —
 4–6× slower on the sizes that matter — while `Ring,Tree` came back *inside the sweep's own repeat
@@ -166,7 +199,7 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 
 ## Read in this order
 
-1. [00 — Hardware and OS](docs/00-hardware-and-os.md) — three Sparks, the fabric, the versions we ran, desktop off.
+1. [00 — Hardware, firmware and OS](docs/00-hardware-and-os.md) — **the complete environment record.** Three Sparks and their firmware, the ring cabling and what the fabric ceiling really is, every version we ran, the hotplug fix that stops a single-node reboot killing the fabric, the six OS-level changes we made and the three we deliberately did not, and the memory rules. Read it even if you think you know this layer.
 2. [01 — Model and license](docs/01-model-and-license.md) — the two EXL3 checkpoints, their pinned revisions, and two licences, one of which is not one you have seen before.
 3. [02 — Image build](docs/02-image-build.md) — the two-layer Docker recipe, pinned to a `cuda-exl3` commit.
 4. [03 — TP=3 padding and sidecars](docs/03-tp3-padding-and-sidecars.md) — why an EXL3 tensor cannot be split three ways, and the shape surgery that makes it possible anyway.
@@ -180,44 +213,100 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 12. [11 — Open issues](docs/11-open-issues.md) — what is unresolved, what we retracted, and what we never ran.
 13. [12 — The MLA tuner cache](docs/12-tuner-cache.md) — the measurement tax a process-local cache was charging, and the shorter protocol that removes it.
 14. [13 — The full-scope checkpoint](docs/13-full-scope-checkpoint.md) — the three independent reasons a fully quantized checkpoint would not load, none of them about quantization; the loader patch; the TP=3 padded-load port; and what the dense stage is worth, measured twice. **This is the production recipe.**
-15. [systemd](systemd/README.md) — a unit **template**, not installed anywhere, with the three things wrong with it named. This stack starts by hand; read this before a reboot.
-16. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
+15. [14 — Troubleshooting](docs/14-troubleshooting.md) — **all 83 failures we hit, indexed by symptom, with the exact log line.** A triage order at the top, and a ranked index of the twenty that produced no error message at all. If something is wrong right now, start here.
+16. [audit/](audit/README.md) — a post-install self-check with our own numbers beside each step, the provenance table for every headline figure, and the retraction index. Run `audit/run-audit.sh` before you conclude anything about your install.
+17. [charts/](charts/) — four figures generated from the CSVs in [`results/`](results/README.md) by [`charts/make-charts.py`](charts/make-charts.py), standard library only, so you can regenerate them and check the bars against the rows.
+18. [systemd](systemd/README.md) — a unit **template**, not installed anywhere, with the three things wrong with it named. This stack starts by hand; read this before a reboot.
+19. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
 
-## Quick path (for an AI coding agent)
+## The four figures
+
+| | |
+|---|---|
+| [Decode throughput by production configuration](charts/speed-by-configuration.svg) | C1 and C8 across all nine configurations, with the `cuda-exl3` commit under each |
+| [KV pool by configuration](charts/kv-pool-progression.svg) | every rung, including the one we measured and rejected |
+| [Where a step actually goes](charts/step-breakdown-prod9.svg) | production 9, profiled on the live server, prefill and both decode regimes |
+| [The one number production 9 was built to move](charts/dense-stage-prod7-vs-prod9.svg) | the dense stage, 45.3 % → 25.9 % of a single-stream step |
+
+## Quick start — ten steps, for a person or their AI coding agent
+
+Each step ends in a **check**. Do not go on until it passes: on this stack the expensive failures are
+the silent ones, and every check below exists because something got past us once.
 
 ```text
-0.  Read docs/00 and confirm three DGX Spark nodes, DGX OS up to date, ibv_devinfo 4/4 on each.
-1.  Read docs/01 and download turboderp/GLM-5.3-Flash-exl3, branch 4.05bpw, at revision 2a30229e
-    (165 GB, MIT). That is the production checkpoint: full scope, so the dense path and the head
-    are quantized too. brandonmusic/GLM-5.3-Flash-tr3-4bpw at b20c49ba is the fallback if your
-    image predates the padded-load path; its licence is the ShapleyMCG License 1.0, not MIT.
-    Verify what you got - sha256 23/23 against the repository's own metadata - before building on it.
-2.  Download incoai/GLM-5.3-Flash-DFlash2 (the draft). It is CC BY-NC-ND 4.0 and our permission
-    for it does not transfer to you (LICENSES.md). The recipe runs without it, about 2.6x slower
-    at a single stream.
-3.  Build the NCCL mesh plugin on every node from autoscriptlabs/nccl-mesh-plugin at commit
-    19924dcc, per its README, with patches/kernel/0004, 0005 and 0006 applied. Do not skip docs/06:
-    the default channel count costs 13 % of C8, and unpatched the plugin uses one cable of each
-    pair. Read your own port_xmit_data counters before believing any bandwidth number.
-4.  Build the image (docs/02) on every node from the same source tarball, pinned to cuda-exl3
-    754421f or later - the padded-load path (f3e3090 + 754421f) is not optional at TP=3 with this
-    checkpoint. Verify by behaviour (pytest) rather than by binary hash - see docs/02.
-5.  Build the two sidecars: patches/tp3full/pad-tp3full.py for the model (padded config.json AND
-    the rewritten quantization_config.json that carries the packed mapping - patches/tp3/pad-tp3.py
-    does not write the second one and the load then fails), patches/tp3/pad-tp3.py --draft for the
-    drafter. They are symlink trees plus rewritten config files, not copies of the weights (docs/03).
-6.  Copy scripts/ and patches/tp3full/ to ~/exl3-zeus/ on every node; hard-link tp3full-prelude.sh
-    to the name tp3-prelude.sh inside that directory. Derive each node's env from
-    envs/env.tp3-full.example with sed, per node, never by copying the file between nodes.
-7.  Boot: worker-2 first, then worker-1, then head. Read the boot gates before the numbers - the
-    [padload] line, the ten patch anchors, the assert 5 pad audit, and the CUDA_EXL3_DEBUG_NAMES
-    tally (expect 203 EXL3 / 113 bf16). Then the two quality gates (scripts/correctness-probe.py,
-    scripts/code-exam.py), cold and again warm. Point CUDA_EXL3_TUNE_CACHE at a directory under the
-    /cache mount (docs/12) before the first boot, or every benchmark you run will be measuring the
-    tuner rather than the change.
-8.  Optional but recommended: build the per-rank fast-load sidecar (docs/08). It takes one
-    ~10-minute dump boot and cuts every subsequent boot from 620 s to 251 s.
+ 1. HARDWARE AND OS.  Read docs/00 end to end. Bring all three nodes to SBIOS 0104+ with
+    fwupdmgr, remove /etc/nvidia/cx7-hotplug-enabled on all three, set multi-user.target,
+    leave vm.swappiness at 60, and reboot ALL THREE TOGETHER (never one).
+    CHECK: `ibv_devinfo | grep -c PORT_ACTIVE` prints 4 on every node, and
+           `sudo lspci -vv | grep -A2 ConnectX` reports Speed 32GT/s, Width x4. If it says
+           x2, your SBIOS is too old and you are measuring a different machine.
+
+ 2. FABRIC.  Bring up the six /24 fabric links, MTU 9000, ipv4.never-default yes. Pick a
+    private range that does NOT collide with your LAN -- NVIDIA's playbook uses 192.168.0-5
+    and on a typical home network that takes your router down (docs/00 section 4.5).
+    CHECK: ping across each second link, bound to the interface, from BOTH ends. Six pings.
+           Every node ends with four fabric neighbours resolved. If one fails, STOP.
+
+ 3. MODEL.  Download turboderp/GLM-5.3-Flash-exl3, branch 4.05bpw, revision 2a30229e
+    (165 GB, MIT). That is the production checkpoint: full scope, so the dense path and the
+    head are quantized too. brandonmusic/GLM-5.3-Flash-tr3-4bpw at b20c49ba is the fallback
+    if your image predates the padded-load path; its licence is the ShapleyMCG License 1.0,
+    not MIT, so read LICENSES.md before you use it.
+    CHECK: sha256 23/23 against the repository's own metadata, on each node independently.
+
+ 4. DRAFTER.  Download incoai/GLM-5.3-Flash-DFlash2. It is CC BY-NC-ND 4.0 and OUR PERMISSION
+    DOES NOT TRANSFER TO YOU (LICENSES.md). The recipe runs without it, about 2.6x slower at
+    a single stream: set SPEC_METHOD= empty.
+    CHECK: you have read the licence and it permits what you intend to do.
+
+ 5. MESH PLUGIN.  Build autoscriptlabs/nccl-mesh-plugin at 19924dcc on EVERY node, with
+    patches/kernel/0004, 0005 and 0006 applied. Do not skip docs/06: the default channel
+    count costs 13 % of C8, and unpatched the plugin puts every channel on one link of each
+    pair. Set NCCL_MAX_NCHANNELS=8 -- 16 is 2.5x WORSE on the decode-sized message.
+    CHECK: `make test-unit` gives test_routing 13/13, and after your first benchmark ALL FOUR
+           port_xmit_data counters per node have moved, not two.
+
+ 6. IMAGE.  Build on every node from the same source tarball (tar, not git archive -- it drops
+    the untracked Dockerfile silently), pinned to cuda-exl3 754421f or later. The padded-load
+    path (f3e3090 + 754421f) is NOT optional at TP=3 with this checkpoint. docs/02.
+    CHECK: verify by BEHAVIOUR, not by hash -- the upstream pytest suite, expect
+           44 passed / 41 skipped, exit 0. Binary hashes differ between identical builds on
+           this toolchain (docs/14 section 7.10).
+
+ 7. SIDECARS.  patches/tp3full/pad-tp3full.py for the model -- it writes the padded config.json
+    AND the rewritten quantization_config.json carrying the packed mapping; patches/tp3/pad-tp3.py
+    does not write the second one and the load then fails. patches/tp3/pad-tp3.py --draft for
+    the drafter. They are symlink trees, not copies (docs/03).
+    CHECK: each sidecar is mounted at its OWN host path inside the container. Mount one
+           anywhere else and the relative symlinks dangle, reported as "no safetensors found"
+           rather than as a mount error (docs/14 section 2.11).
+
+ 8. CONFIGURE.  Copy scripts/ and patches/tp3full/ to ~/exl3-zeus/ on every node; hard-link
+    tp3full-prelude.sh to the name tp3-prelude.sh inside that directory. Derive each node's
+    env from envs/env.tp3-full.example WITH SED, per node -- never copy the file between
+    nodes. Point CUDA_EXL3_TUNE_CACHE at a directory under the /cache mount BEFORE the first
+    boot, or every benchmark you run measures the tuner rather than your change (docs/12).
+    CHECK: MASTER_ADDR is rank 0's MANAGEMENT address, never a fabric one. A fabric address
+           hangs the rendezvous silently; scripts/start-tp3.sh refuses one outright.
+
+ 9. BOOT.  worker-2 first, then worker-1, then head. Read the gates BEFORE any number: the
+    [padload] line, the ten patch anchors, the assert-5 pad audit, and the
+    CUDA_EXL3_DEBUG_NAMES tally (expect 203 EXL3 / 113 bf16). Then the quality gates,
+    scripts/correctness-probe.py and scripts/code-exam.py, COLD and again WARM.
+    CHECK: 10/10 and 12/12 in BOTH states. The defect class this stack produces hides on a
+           fresh allocator, so a cold-only pass proves nothing (docs/09 section 5).
+
+10. VERIFY AND MEASURE.  Run audit/run-audit.sh and compare against audit/README.md. Before
+    you trust the KV pool, confirm all three ranks' "Free memory on device" lines agree within
+    1 GiB -- the pool is a delta between two /proc/meminfo readings and it runs BACKWARDS
+    (docs/14 section 5.8). Optional but recommended: take one FASTLOAD_MODE=dump boot (~620 s)
+    and switch to load, which cuts every later boot to 251 s (docs/08).
+    CHECK: the audit's numbers land in the bands in audit/README.md. Where they do not,
+           docs/14-troubleshooting.md indexes every failure we hit by symptom.
 ```
+
+**If a step fails, go to [docs/14](docs/14-troubleshooting.md) before you go to an issue tracker.**
+Its §0 is a triage order and its §1 indexes the exact error strings.
 
 Evidence tiers used throughout: `[measured-here]`, `[measured-here, raw lost]`, `[reported]`,
 `[estimate]`, `[not tested]`, `[retracted]`.

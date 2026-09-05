@@ -359,13 +359,27 @@ experts touched per layer is `288 × (1 − e^(−8·tokens/288))`.
 |---|---|---|---|---|---|
 | Decode C1, DFlash2 k=7 | 89.1 ms per engine step (measured directly, §5.3) | 8 verify tokens → ~19 of 96 experts per layer: 10.6 GB expert + 5.3 GB dense ≈ **15.9 GB** | ≈ **178 GB/s** | ≈ **79 %** | ≈ 2 % |
 | Decode C8, DFlash2 k=7 | 223 ms per engine step (measured directly, §5.3) | 64 verify tokens → ~80 of 96 experts per layer: 44.3 GB + 5.3 GB ≈ **49.6 GB** | ≈ **222 GB/s** | ≈ **99 %** | ≈ 6 % |
-| Prefill, 2048-token chunk | 1.109 s per chunk (measured directly, §5.2) | every expert touched: 53.3 GB + 5.3 GB ≈ **58.6 GB** | ≈ **53 GB/s** | ≈ **23 %** | ≈ 24 % |
+| Prefill, **1,792**-token chunk | **962.55 ms** per chunk, production 7 (mean of 3 ranks, measured directly, §5.2); production 9 measures **961.73 ms** — equal | every expert touched: 53.3 GB + 5.3 GB ≈ **58.6 GB** | ≈ **61 GB/s** | ≈ **27 %** | ≈ 24 % |
+
+**The prefill row's chunk is 1,792 tokens, not 2,048** `[measured-here]`. With `--block-size 256` the
+scheduler issues **7 × 256 = 1,792** of the 2,048 tokens `--max-num-batched-tokens` budgets, so
+12.5 % of the budget is unused before it is argued about. This row previously read "2048-token chunk,
+1.109 s" — a chunk size taken from the flag rather than the trace, and a wall from an earlier
+configuration. Both are corrected here against the measured values in
+[`../results/profile/measured-prod7.md`](../results/profile/measured-prod7.md) §1–§2 and the
+production-9 profile summarised in §5 and
+[`../results/profile/step-breakdown.csv`](../results/profile/step-breakdown.csv). The byte column is
+unchanged, because at prefill every local expert is read once per layer whatever the chunk size — so
+the effective bandwidth rises from the 53 GB/s this table used to print to about **61 GB/s**, while
+the compute share barely moves (tokens and wall fell by 12.5 % and 13.2 %). Percentages elsewhere in
+this document that were computed against a 1,109 ms chunk are corrected in place; §5.5 shows the
+working for the one that mattered.
 
 **Reading.** Decode with the draft is **at** the memory roof, not near it — the C8 row lands at 99 %
 of the measured ruler, which is a way of saying the byte model and the measurement agree rather than
 that the hardware is saturated to the last percent. Faster kernels buy nothing there; the levers are
 fewer bytes (a checkpoint that also quantizes attention) or higher acceptance. **Prefill is far from
-both roofs**, at under a quarter of bandwidth and under a quarter of compute, and that is where
+both roofs**, at a bit over a quarter of bandwidth and under a quarter of compute, and that is where
 kernel work can still pay. §5 replaces this arithmetic with a measured breakdown.
 
 Assumptions, and they are not small: KV reads are ignored (short contexts), the draft model's own
@@ -407,15 +421,44 @@ Production configuration **8** differs from this arm by one image (`62f53e6`) an
 number outside its band, so this breakdown is read as production 8's as well — with the `had_in` row
 now a little smaller than the 5.6 % printed here `[not tested]`.
 
-**Production configuration 9 is a different matter, and this section has not been re-profiled on it**
-`[not tested]`. Production 9 changed the checkpoint specifically to remove the largest row below —
-dense BF16 GEMM, 45.3 % of a C1 step — and it took 17.8 ms off an 88.2 ms step (§2.3). So the
-*shares* below are production 7 and 8's, not today's: whatever the current ranking is, that row is no
-longer at the top of it. What does carry forward unchanged is everything the trace established about
-*structure* rather than proportion — that the NCCL class is 100 % exposed, that the C1 idle budget is
-3.75 % and mostly per-kernel dispatch, and that two of our published targets did not exist. Re-running
-it costs a six-minute window and 7–8 GiB of host RAM per node, and it is on the list rather than
-done.
+**Production configuration 9 has since been profiled with the same protocol, and the shares below
+are superseded for that arm** `[measured-here]`. The run was made against the live production-9
+server on the evening of 5 September 2026 — three ranks, `/start_profile` and `/stop_profile` only,
+no restart and no reconfiguration — over the same three windows: a fresh unseen 8,497-token prompt
+(six chunks, four of them 1,792 tokens), 94 steady C1 decode steps, and 79 C8 decode steps.
+
+| Class | Prefill chunk | Decode C1 | Decode C8 |
+|---|---|---|---|
+| MoE trellis GEMM | **28.1 %** | **32.5 %** | **56.3 %** |
+| NCCL collectives | 14.0 % | 26.1 % ‡ | — |
+| Dense EXL3 GEMM | 13.4 % | 15.0 % | — |
+| Hyper-connection mixing | 11.9 % | 2.6 % | — |
+| MLA attention | 8.3 % | 0.8 % | — |
+| KDA / GDN linear attention | 8.0 % | 1.8 % | — |
+| Remaining BF16 linears | 3.8 % | 10.3 % | — |
+| CPU gap (GPU idle) | 0.9 % | 8.4 % ‡ | — |
+| **Dense stage total** (EXL3 GEMM + EXL3 Hadamard + remaining BF16) | **19.2 %** (184.73 ms) | **25.9 %** (21.90 ms) | — |
+
+‡ **CUPTI-inflated at C1 and not comparable to the production-7 column.** Production 9 launches
+2,738 kernels per step, so the profiler adds about 16 % to the step; with it off, NCCL and the CPU
+gap together are **≤17.19 ms** rather than the 29.1 the trace prints. Wall per step was 84.44 ms
+with the profiler on against 72.52 ms with it off. On prefill the same overhead is +1.4 %, so the
+prefill column is safe to read at face value. Every class, with its milliseconds and call counts, is
+in [`../results/profile/step-breakdown.csv`](../results/profile/step-breakdown.csv).
+
+**What moved, and it is one row.** The dense stage went from **45.3 % / 42.90 ms** of a C1 step to
+**25.9 % / 21.90 ms** — the 21 ms that is the whole of production 9's +22 %, since draft acceptance
+moved the *wrong* way by 2.4 points. **What did not move:** the NCCL class is still 100 % exposed
+(measured comm/compute overlap 0.00 ms per prefill step), the MoE trellis GEMM is still the largest
+compute class in every window, and both of the targets we retracted in §5.8 are still absent.
+
+**And one thing the arithmetic did not predict.** In *prefill* the full-scope dense stage is
+**slower**, not faster: 184.73 ms against 167.39 ms, **+10.4 %**. Wall-clock prefill still landed
+inside the ±3 % equality band, so no published prefill figure changes — but the full-scope gain is a
+**decode** gain and it does not generalise to the prefill path.
+
+The production-7 and production-8 shares below are kept as measured, because they are the control the
+paragraph above is read against.
 
 ### 5.1 The totals, and what a day of fabric and cache work did
 

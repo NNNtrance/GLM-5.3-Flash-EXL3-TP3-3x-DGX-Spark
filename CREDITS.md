@@ -25,9 +25,11 @@ at `main`.
 - **Link:** https://huggingface.co/zai-org/GLM-5.3-Flash
 - **Licence:** **MIT** — confirmed on the model card metadata (`license: mit`).
 
-### `brandonmusic/GLM-5.3-Flash-tr3-4bpw` — the checkpoint we actually load
+### `brandonmusic/GLM-5.3-Flash-tr3-4bpw` — the checkpoint configurations 1–8 loaded, and the fallback
 
-- **What we use it for:** the production checkpoint. 175.6 GB across 120 safetensors shards; EXL3
+- **What we use it for:** the production checkpoint for configurations **1 through 8**, and now the
+  documented fallback and rollback for images that predate the padded-load path. 175.6 GB across 120
+  safetensors shards; EXL3
   trellis at 4 bits per weight with the `mcg` codebook; `quantization_config.scope:
   glm53_routed_experts_only`, so attention, KDA, the shared expert and `lm_head` stay BF16. We do not
   modify it on disk — the shape changes go into a sidecar directory of symlinks plus one rewritten
@@ -40,23 +42,28 @@ at `main`.
   `license_name: shapleymcg-license-1.0`, and the licence text is in the repository's `LICENSE` file.
   Read it: it is short, it is not an OSI-approved open-source licence by its own statement, and it
   excludes one named individual from every right it grants. Detail in [LICENSES.md](LICENSES.md).
+  **If you run production configuration 9 you do not need this licence at all** — the production
+  checkpoint below is plain MIT.
 - **What its card reports** `[reported]`: base model `zai-org/GLM-5.3-Flash-BF16`; KL divergence
   against BF16 of **0.0246 nats** over 51,175 positions.
 - We do not mirror or redistribute these weights.
 
-### `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw — the full-scope checkpoint we measured
+### `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw — **the production checkpoint**
 
-- **What we use it for:** the measurement arm that put a number on this stack's largest open item —
-  what the unquantized dense stage is actually worth ([docs/13](docs/13-full-scope-checkpoint.md)).
-  Loaded at TP=2 on 5 September 2026: +24.3 % per stream, MMLU sample inside the control's error bar.
-  **Not in production**, and not yet loadable at TP=3.
+- **What we use it for:** **the weights production configuration 9 serves**, at TP=3 with expert
+  parallelism, since the evening of 5 September 2026. It began as the measurement arm that put a
+  number on this stack's largest open item — what the unquantized dense stage is actually worth
+  ([docs/13](docs/13-full-scope-checkpoint.md)) — and then became production once the loader work and
+  the plugin's padded-load path (`f3e3090` + `754421f`) let it load into TP=3 shapes. At TP=2 it
+  measured +24.3 % per stream with the MMLU sample inside the control's error bar; at TP=3 it is
+  +21.7 % per stream, +12.5 % at C8, +10.0 % of KV pool, quality unchanged `[measured-here]`.
 - **Revision:** branch `4.05bpw`, commit `2a30229e67012798ba9f0cd832bb78abf4c363d5` (28 August 2026).
   165.2 GB / 153.8 GiB across 19 shards; exl3 v1.4.4, `mul1` codebook, full scope — routed experts at
   4 bits, dense and attention at 5–6, `lm_head` at 6, calibrated on 250 rows × 2,048 columns. Verified
   here with `sha256` 23/23 against the repository's own metadata, independently on two nodes.
 - **Link:** https://huggingface.co/turboderp/GLM-5.3-Flash-exl3
 - **Licence:** **MIT** — the `LICENSE` file is the MIT text, "Copyright (c) 2026 Z.AI Co., Ltd", and
-  the card carries `license: mit`. More permissive than the checkpoint we run in production: no
+  the card carries `license: mit`. More permissive than the fallback checkpoint above: no
   attribution condition and no exclusion clause. Read it yourself; different publisher, different
   terms.
 - We do not modify it on disk and we do not redistribute it. Everything needed to serve it is a

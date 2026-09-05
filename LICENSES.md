@@ -4,11 +4,17 @@ This page is a summary for readers, not legal advice. The full per-component det
 revision we ran and the URL where we confirmed each licence, is in [CREDITS.md](CREDITS.md).
 
 **Short version.** This repository is Apache-2.0. Most of what it stands on is MIT or Apache-2.0 and
-you can use it commercially. Three things are not ordinary: the **checkpoint** is under a bespoke
-licence that is permissive but not open source; the **DFlash2 draft model** is non-commercial and
-no-derivatives; and the **NVIDIA CUDA / cuDNN / NCCL binaries** inside the container image are under
-NVIDIA's own restricted terms. Those are why we publish instructions and patches rather than a
+you can use it commercially. Three things are not ordinary: the **fallback checkpoint** is under a
+bespoke licence that is permissive but not open source; the **DFlash2 draft model** is non-commercial
+and no-derivatives; and the **NVIDIA CUDA / cuDNN / NCCL binaries** inside the container image are
+under NVIDIA's own restricted terms. Those are why we publish instructions and patches rather than a
 prebuilt image or mirrored weights.
+
+**Which checkpoint you land on decides which of those applies to you.** Since production
+configuration 9 the weights we serve are `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw, which is **MIT**
+— ordinary, permissive, nothing unusual. The bespoke licence belongs to
+`brandonmusic/GLM-5.3-Flash-tr3-4bpw`, which is now the **fallback** for images that predate the
+padded-load path. Both rows are in the table; read the one you are actually going to download.
 
 ## The table
 
@@ -16,9 +22,10 @@ prebuilt image or mirrored weights.
 |---|---|---|---|
 | This recipe: `docs/`, `patches/`, `scripts/`, `bench/`, `envs/`, `systemd/`, `results/` | this repository | **Apache-2.0** ([LICENSE](LICENSE)) | Use, modify, redistribute, commercially. Keep the notice. A credit or link back is appreciated, not required. |
 | `zai-org/GLM-5.3-Flash` (base model) | — | **MIT** ([model card](https://huggingface.co/zai-org/GLM-5.3-Flash)) | Free to use, including commercially. Keep the copyright notice. |
-| **`brandonmusic/GLM-5.3-Flash-tr3-4bpw`** (the weights we load) | HF `b20c49ba` | **ShapleyMCG License 1.0** — `license: other`, `license_name: shapleymcg-license-1.0` on the [model card](https://huggingface.co/brandonmusic/GLM-5.3-Flash-tr3-4bpw); text in the repository's `LICENSE` file | **Read it. It is short and it is unusual.** See the section below. |
+| **`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw** (**the weights we load in production**) | branch `4.05bpw`, HF `2a30229e` | **MIT** ([model card](https://huggingface.co/turboderp/GLM-5.3-Flash-exl3)) | Free to use, including commercially. Keep the copyright notice. Nothing unusual here — this is the row that applies to production configuration 9. |
+| **`brandonmusic/GLM-5.3-Flash-tr3-4bpw`** (the **fallback** weights, and what configurations 1–8 loaded) | HF `b20c49ba` | **ShapleyMCG License 1.0** — `license: other`, `license_name: shapleymcg-license-1.0` on the [model card](https://huggingface.co/brandonmusic/GLM-5.3-Flash-tr3-4bpw); text in the repository's `LICENSE` file | **Read it. It is short and it is unusual.** See the section below. You only need this if your image predates the padded-load path (`cuda-exl3` `f3e3090` + `754421f`). |
 | `incoai/GLM-5.3-Flash-DFlash2` (speculative draft) | — | **CC BY-NC-ND 4.0** ([model card](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2)) | **Non-commercial, no derivatives, attribution required.** See the section below. |
-| `Zeuss5/cuda-exl3` (the EXL3 kernels and vLLM plugin) | `f4987cf` in production | **MIT** — the repository's `LICENSE` is the MIT text plus an attribution paragraph for derived files ([repository](https://github.com/Zeuss5/cuda-exl3)) | Free to use, including commercially. Note that GitHub's licence classifier reports `other`/NOASSERTION for the repository because of the added paragraph; the file body is MIT terms. |
+| `Zeuss5/cuda-exl3` (the EXL3 kernels and vLLM plugin) | `754421f` in production (carrying `f3e3090`); `f4987cf` and `62f53e6` in earlier configurations — see [CREDITS.md](CREDITS.md) | **MIT** — the repository's `LICENSE` is the MIT text plus an attribution paragraph for derived files ([repository](https://github.com/Zeuss5/cuda-exl3)) | Free to use, including commercially. Note that GitHub's licence classifier reports `other`/NOASSERTION for the repository because of the added paragraph; the file body is MIT terms. |
 | `turboderp-org/exllamav3` (the EXL3 format) | — | **MIT** ([repository](https://github.com/turboderp-org/exllamav3)) | Free to use. |
 | `vllm/vllm-openai` base image | tag `glm53-flash-arm64-cu130`, digest `sha256:905c0293…` | **Apache-2.0** for vLLM ([LICENSE](https://github.com/vllm-project/vllm/blob/main/LICENSE)); NVIDIA terms for the CUDA stack inside | Pull it and build on it. Do **not** redistribute the image or anything derived from it: the NVIDIA CUDA, cuDNN and NCCL libraries inside carry NVIDIA's restricted redistribution terms. Everyone builds their own. |
 | vLLM (the DFlash2 delta we merged) | upstream commits, see [CREDITS.md](CREDITS.md) | **Apache-2.0** | Use, modify, redistribute. Our patches against it are Apache-2.0 too, so the combination stays consistent. |
@@ -30,9 +37,14 @@ prebuilt image or mirrored weights.
 
 ---
 
-## The checkpoint: ShapleyMCG License 1.0
+## The fallback checkpoint: ShapleyMCG License 1.0
 
-The weights this recipe loads are not under MIT, Apache-2.0, or any licence you have met before.
+**This section is about `brandonmusic/GLM-5.3-Flash-tr3-4bpw` only.** The production checkpoint
+(`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw) is plain MIT and none of what follows applies to it. If
+you are following the current recipe you can skip this section; if your image predates the
+padded-load path, you cannot.
+
+The fallback weights are not under MIT, Apache-2.0, or any licence you have met before.
 There is a real `LICENSE` file in the checkpoint's repository and **you should read it yourself**.
 
 What it says, as we read it `[reported]`:
@@ -93,8 +105,8 @@ file. Single-stream decode falls from roughly 54 tok/s to roughly 20, and everyt
 - **The container image.** It contains NVIDIA CUDA, cuDNN and NCCL under restricted redistribution
   terms. You build it from the published base tag with the recipe in
   [docs/02](docs/02-image-build.md).
-- **The model weights.** The licence would permit it; they are 175.6 GB and the upstream copy is
-  authoritative. Download them at the pinned revision.
+- **The model weights.** Both licences would permit it; they are 165 GB (production) and 175.6 GB
+  (fallback) and the upstream copies are authoritative. Download them at the pinned revisions.
 - **The DFlash2 draft weights.** Non-commercial, no-derivatives, and our permission is
   project-specific and non-transferable.
 - **The NCCL mesh plugin binary.** MIT, so redistribution would be permitted; building it takes a

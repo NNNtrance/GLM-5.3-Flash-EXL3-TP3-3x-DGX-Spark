@@ -39,26 +39,46 @@ differs. This partly closes [CONTRIBUTING](CONTRIBUTING.md) item 10; §3.3 says 
 still open.
 
 **[docs/16 — Comparison with other published recipes](docs/16-comparison-with-published-recipes.md).**
-Other public GLM-5.3-Flash EXL3 DGX Spark recipes, quoted **exactly as they publish them** with the
-conditions they state and tiered `[reported]`, beside our figures at the matching node count. Nothing
-in their columns is re-derived, rescaled or corrected by us, and where conditions differ the
-difference is a column rather than a footnote. The two anchors are
-`MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks` (two nodes, commit `3021f24c`, 2026-09-05) and
-`FlyCockpit/GLM-5.3-Flash-EXL3-3x-DGX-Sparks` (three nodes, commit `9093765c`, 2026-08-29, one commit
-and unchanged since). **There is no three-node recipe from that two-node account** — we looked on
-GitHub and on Hugging Face; its only larger arrangement is an explicitly untested four-node script.
+Twelve other public GLM-5.3-Flash EXL3 DGX Spark recipes — nine at two nodes, two at three, one at
+four — quoted **exactly as they publish them** with the conditions they state and tiered `[reported]`,
+beside our figures at the matching node count. Nothing in their columns is re-derived, rescaled or
+corrected by us, and where conditions differ the difference is a column rather than a footnote.
+**There is no three-node recipe from `MiaAI-Lab`** — we looked on GitHub and on Hugging Face; its only
+larger arrangement is an explicitly untested four-node script, and the two three-node EXL3 recipes are
+`FlyCockpit/GLM-5.3-Flash-EXL3-3x-DGX-Sparks` (commit `9093765c`, 2026-08-29, one commit and unchanged
+since) and `jakejharris/jspark3` (`v1.0.0`, 2026-09-03).
 
-**Three things the comparison establishes, and one it refuses to do.** Their padding constants
+**The most valuable thing on the page is not a ranking — it is that two other people quantized this
+model's dense path independently, and both measured what we measured.** `Alexbob0/glm53-flash-dense-exl3-tp2`
+overlays the same 4.05 bpw pack's dense tensors onto a routed-experts-only checkpoint at **two** nodes
+and reports **+22 % structured / +26 % prose** against its own control, with a torch-profiler step
+anatomy whose top item and residual-BF16 story match ours `[reported]`; ours is +24.3 % per stream at
+TP=2 through a different loader and a different kernel project. `jakejharris/jspark3` does it at
+**three** nodes with an INT8 W8A16 Marlin overlay on 169 dense modules and reports +6.6–8.4 % against
+its own control, along with a disclosed −21.2 % at C3 and −3.4 % on long prefill. Three stacks, three
+routes, one direction. Their prose figure, 29.049 tok/s, also lands on our 29.1 — the only nearly
+like-for-like row on the page.
+
+**Three more things it establishes, and one it refuses to do.** The FlyCockpit padding constants
 (`lcm(64,3) = 192`, shared expert 2,112) and ours (384, 2,304) are **both correct**, for different
 checkpoints — the unit is 64 when those tensors are BF16 and 128 when they are EXL3, and our own
-configurations 1–8 used theirs. The two-node KV pool gap is **our** missing fix rather than their
-extra one: they solved the drafter's page problem with a padded slot-share onto the MLA tensors, we
-solved it with `HAREM_SW_BLOCK_SIZE=256`, and we never ran ours at two ranks. And both other recipes
-lead with a **synthetic** counting prompt where every figure of ours is realistic — a gap of roughly
-**1.7×** on this model family — so those rows are labelled and kept apart instead of being converted.
-**What we took**: from the three-node recipe, the arithmetic already credited in
-[CREDITS.md](CREDITS.md) and no files; from the two-node one, **nothing** — no code, no configuration,
-no number, no technique. It is named as the source of its own figures and for no other reason.
+configurations 1–8 used theirs. The two-node KV pool gap is **ours**: our 665,625 is the smallest
+two-node figure on the page because we never ran `HAREM_SW_BLOCK_SIZE=256` at two ranks, while the
+`MiaAI-Lab` lineage solved the same drafter-page problem with a padded slot-share onto the MLA
+tensors. And `punkjazz-labs/glm-5.3-flash-exl3-4x-dgx-spark` publishes a **soak hang** — three of
+three, a 96K chunked prefill sharing steps with speculative streams, and a 282K cold prefill that
+still stalled with the drafter off — which we have never looked for on three nodes `[not tested]` and
+which is now the outside item we would most like settled about our own stack. What the page refuses to
+do is convert a synthetic number into a realistic one: most of these recipes lead with a counting
+prompt, the gap is roughly **1.7×** on this model family, and those rows stay labelled and apart.
+
+**What we took**: from `FlyCockpit/GLM-5.3-Flash-EXL3-3x-DGX-Sparks`, the arithmetic already credited
+in [CREDITS.md](CREDITS.md) and no files; from `MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks`,
+**nothing** — no code, no configuration, no number, no technique; from everything else, nothing, and
+all of it was found after production 9 shipped. They are named as the sources of their own figures and
+for no other reason. Two search hits are excluded and deliberately not named: their documents are
+copies of other repositories' files and their READMEs advertise a Windows executable for a machine
+that cannot hold this model, so there is nothing of theirs to compare.
 
 **Cost:** documentation only. No cluster time, no configuration change, no number in this repository
 moved.

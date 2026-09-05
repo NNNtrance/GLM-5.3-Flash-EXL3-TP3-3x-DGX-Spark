@@ -354,6 +354,11 @@ padding machinery on top of it. **The production numbers are in §7.3.**
 question "what is the dense stage worth" is answered with no new padding machinery. TP=3 needs a
 padded-load path that does not exist yet (§7).
 
+> **If you are here to run at TP=2 rather than to read the rehearsal**, the two-node track is
+> [15](15-tp2-track.md): the exact file and flag changes, all four of our two-node arms with their
+> dates and settings, and the list of production features we never ran there. Read §6.1 below first —
+> at two ranks this checkpoint closes the long-prompt path, and that is not a TP=3 problem.
+
 **Settings, both arms identical unless the row says otherwise:** two DGX Spark nodes, TP=2, expert
 parallel **off**, image `exl3-zeus:62f53e6`, EXL3 weights, KV `fp8`, DFlash2 draft k=7,
 `gpu-memory-utilization 0.85`, `--block-size 256` requested, `--max-num-seqs 8`,

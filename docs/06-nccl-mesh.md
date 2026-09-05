@@ -35,6 +35,13 @@ with the first two discarded ([09](09-measurement-protocol.md)), one boot per ar
 2026. Plugin `autoscriptlabs/nccl-mesh-plugin` at commit `19924dcc`, NCCL 2.30.7+cuda13.3, `NCCL_NET=Mesh`,
 `NCCL_IB_DISABLE=1`, `NCCL_ALGO=Ring`, `NCCL_PROTO` unset.
 
+> **At TP=2 this page still applies, with one substitution.** The channel cap is a property of the
+> plugin's per-channel RNR behaviour, not of the peer count, so `NCCL_MAX_NCHANNELS=8` carries to a
+> two-node pair unchanged. §6's second cable is a property of a *pair*: with two cables between your
+> two nodes, `patches/kernel/0005` still applies; with one, set `NCCL_MESH_LINKS_PER_PEER=1` and 0005
+> becomes a no-op while `0006` is still worth measuring alone. Neither has been measured on a single
+> pair `[not tested]`. [15](15-tp2-track.md) §1.2 and §2.5.
+
 ## 1. The symptom
 
 Model-free: engine down, one process per node, the launcher's exact NCCL environment, the production plugin mounted

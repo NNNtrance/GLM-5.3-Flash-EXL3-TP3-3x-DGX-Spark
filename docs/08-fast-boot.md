@@ -17,6 +17,13 @@ the baseline arm and **0.80** in every other arm; that difference is called out 
 
 ---
 
+> **At TP=2 there is no sidecar and every boot on this stack has been a cold one** `[not tested]`. The
+> sidecar is per rank, so two ranks means two of them at about 1.5× the size; the mechanism is
+> rank-count-agnostic and should carry, but we never built one. It is most of why our two-node boots
+> take 355–471 s against production 10's 251 s. The manifest-identity rule in §4 matters *more* at
+> TP=2, not less: it was a TP=2 patch dropped into the TP=3 tree that refused a production boot.
+> [15](15-tp2-track.md) §2.3 and §3.3.
+
 ## 1. Measure first: the boot ledger
 
 Nothing was changed here before the boot was itemised, and you should not change anything either until you have your own ledger.

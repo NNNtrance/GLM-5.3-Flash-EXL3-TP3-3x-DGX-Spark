@@ -14,6 +14,12 @@ micro-benchmark using the real GLM-5.3-Flash shapes. Everything we got wrong, we
 two engine sweeps. That is the methodological point of the whole document
 ([09](09-measurement-protocol.md)).
 
+> **At TP=2, expert parallelism is optional.** 2,048/2 = 1,024 = 8 × 128, so the routed experts
+> tensor-slice cleanly and `preflight-tp3.py` accepts `--ep 0` at two ranks while refusing it at
+> three. Every TP=2 arm we ran had EP **off**; EP on at two ranks is `[not tested]`, and the launcher
+> hard-codes `--enable-expert-parallel` in three places that have to be edited first.
+> [15](15-tp2-track.md) §1.1 and §2.2.
+
 ---
 
 ## 1. The regression

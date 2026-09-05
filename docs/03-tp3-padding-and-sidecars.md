@@ -18,6 +18,12 @@ the older constants. Why the two are not one file is
 [`patches/tp3full/README.md`](../patches/tp3full/README.md) — it is about the fast-load manifest
 identity, not about the code.
 
+> **At TP=2, none of this page applies.** All five shapes divide by two *and* leave every rank a whole
+> number of 128-column Hadamard blocks, so there is no sidecar `config.json`, no padded-load path, no
+> `svh = 0` pad audit and no `check-padload-tp3.py` image gate. `patch-vllm-tp3.py` computes
+> `lcm(128, tp)` at run time and is a provable no-op at two ranks, so leave it in place rather than
+> editing it out. [15 — Running this recipe at TP=2](15-tp2-track.md) §1 and §2.3.
+
 ---
 
 ## 1. The five shapes, and what happens to each

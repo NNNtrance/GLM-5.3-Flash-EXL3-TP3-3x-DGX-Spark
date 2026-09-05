@@ -36,6 +36,13 @@ disable it in the same change. On our nodes `harem-motor.service` is now `disabl
 
 ## Install
 
+> **At TP=2, four edits.** `WorkingDirectory` and `ExecStart` point at your two-node tree instead of
+> `tp3full`; `FABRIC_PEERS` in the preflight becomes **one** address per node rather than two (the
+> ConnectX-7 check stays `4/4` — it counts ports, not peers); and the reboot rule becomes "reboot
+> **both** together, never one". `Conflicts=harem-motor.service` stays: that hazard is about two
+> engines on one node's memory, not about rank count. We have not run a two-node reboot test
+> `[not tested]`. [docs/15](../docs/15-tp2-track.md) §2.6.
+
 On **every** node, with `scripts/`, `patches/tp3full/` and the env file already in place per
 [docs/03](../docs/03-tp3-padding-and-sidecars.md) and the README quick start:
 

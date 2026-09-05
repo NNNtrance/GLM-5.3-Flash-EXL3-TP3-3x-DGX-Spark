@@ -172,6 +172,12 @@ caching `[measured-here]`.
 
 ---
 
+> **At TP=2 this fix has never been run** `[not tested]`. The 825,000-token figure in the opening
+> paragraph is the un-fixed two-node pool, and it fell there for exactly the mechanism §3 describes —
+> turning DFlash2 on at two ranks took the pool from 1,987,179 to 825,000, **−58 %**. Setting
+> `HAREM_SW_BLOCK_SIZE=256` at two ranks should recover most of it, but nobody has measured that and
+> the hybrid allocator can override the page entirely. [15](15-tp2-track.md) §3.1 and §3.3.
+
 ## 3. Root cause: the drafter's page is 16 tokens
 
 The drafter's group takes 385 blocks per request because:

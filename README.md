@@ -26,7 +26,10 @@ share a cluster, a fabric and a set of memory rules, but **this repository is se
 [docs/00](docs/00-hardware-and-os.md) is a complete environment record down to firmware, the hotplug
 fix, the PCIe ceiling and every OS-level setting we did and did not change, and
 [docs/14](docs/14-troubleshooting.md) indexes all 83 failures we hit by symptom with the exact log
-line. You do not need the sibling to follow this.
+line. You do not need the sibling to follow this. And if you own **two** Sparks rather than three,
+[docs/15](docs/15-tp2-track.md) is the TP=2 track: at two ranks nothing needs padding, so this becomes
+a *shorter* recipe rather than a cut-down one — it lists the exact files and flags that change, our
+own two-node measurements with their dates, and the production features we never ran there.
 
 > **About the name "HAREM".** HAREM is simply the name we gave our three-node setup. It is hardcoded
 > in several places in the stack — patch markers (`HAREM-TP3`, `HAREM-GB10-TOPK`), environment
@@ -249,10 +252,12 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 13. [12 — The MLA tuner cache](docs/12-tuner-cache.md) — the measurement tax a process-local cache was charging, and the shorter protocol that removes it.
 14. [13 — The full-scope checkpoint](docs/13-full-scope-checkpoint.md) — the three independent reasons a fully quantized checkpoint would not load, none of them about quantization; the loader patch; the TP=3 padded-load port; and what the dense stage is worth, measured twice. **This is the production recipe.**
 15. [14 — Troubleshooting](docs/14-troubleshooting.md) — **all 83 failures we hit, indexed by symptom, with the exact log line.** A triage order at the top, and a ranked index of the twenty that produced no error message at all. If something is wrong right now, start here.
-16. [audit/](audit/README.md) — a post-install self-check with our own numbers beside each step, the provenance table for every headline figure, and the retraction index. Run `audit/run-audit.sh` before you conclude anything about your install.
-17. [charts/](charts/) — four figures generated from the CSVs in [`results/`](results/README.md) by [`charts/make-charts.py`](charts/make-charts.py), standard library only, so you can regenerate them and check the bars against the rows.
-18. [systemd](systemd/README.md) — **the autostart unit and its preflight**, both real, installed and reboot-tested, plus the hazard that comes first: if you also run the NVFP4 sibling, its unit wins a reboot until you disable it. Read this before a reboot.
-19. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
+16. [15 — Running this recipe at TP=2](docs/15-tp2-track.md) — **the two-node track.** Why two ranks need no padding at all, the exact nine changes to the env file, the launcher, the patch tree and the autostart unit, all four of our two-node arms with their dates and settings, the list of production features we never ran there, and a trade-off that is not the one people expect.
+17. [16 — Comparison with other published recipes](docs/16-comparison-with-published-recipes.md) — what other public GLM-5.3-Flash EXL3 DGX Spark recipes report, quoted as they publish it with their own conditions, beside our numbers at the matching node count. Read the conditions column before you read the numbers.
+18. [audit/](audit/README.md) — a post-install self-check with our own numbers beside each step, the provenance table for every headline figure, and the retraction index. Run `audit/run-audit.sh` before you conclude anything about your install.
+19. [charts/](charts/) — four figures generated from the CSVs in [`results/`](results/README.md) by [`charts/make-charts.py`](charts/make-charts.py), standard library only, so you can regenerate them and check the bars against the rows.
+20. [systemd](systemd/README.md) — **the autostart unit and its preflight**, both real, installed and reboot-tested, plus the hazard that comes first: if you also run the NVFP4 sibling, its unit wins a reboot until you disable it. Read this before a reboot.
+21. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
 
 ## The four figures
 

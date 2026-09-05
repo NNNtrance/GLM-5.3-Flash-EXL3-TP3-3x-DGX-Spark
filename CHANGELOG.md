@@ -11,6 +11,60 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-05 (after the release pass) — two documents: the TP=2 track, and what other published recipes report
+
+**[docs/15 — Running this recipe at TP=2](docs/15-tp2-track.md).** This is a three-node recipe and
+every default in it is a TP=3 default, but it runs on two nodes and at two ranks it is a *shorter*
+recipe rather than a cut-down one: all five shapes that do not divide by three divide by two **and**
+leave every rank a whole number of 128-column Hadamard blocks, so the whole of
+[docs/03](docs/03-tp3-padding-and-sidecars.md) and the padded-load path in
+[docs/13](docs/13-full-scope-checkpoint.md) §7 fall away. Expert parallelism becomes **optional** —
+2,048/2 = 8 × 128 — and `preflight-tp3.py` already accepts `--ep 0` at two ranks while refusing it at
+three. The page lists the exact nine changes (three env lines, three launcher edits, the
+`patches/tp2/` tree, the image, the autostart unit), the four two-node arms we ran with their dates
+and settings, and the eleven-row table of production features we have **never** run at two ranks:
+`HAREM_SW_BLOCK_SIZE=256`, the fp8 draft cache, the fast-load sidecar, the memory ladder, expert
+parallelism on, a two-node reboot test and a second boot among them `[not tested]`.
+
+**The trade-off is not the one people expect, and the page says so in its second paragraph.** Like for
+like on the same day, same image and same harness, two nodes reach **85–91 %** of three nodes' C1 per
+stream, **75 %** of C8, **75 %** of prefill and **14 %** of the KV pool `[measured-here]`. TP=2 does
+**not** win single-stream latency here: a decode step is weight-bandwidth bound, a third rank cuts each
+rank's weight traffic by a third, and that beats the collective it costs. What two ranks buy is a node
+and a shorter recipe. Boxed "At TP=2" notes now sit in
+[03](docs/03-tp3-padding-and-sidecars.md), [05](docs/05-expert-parallel-and-cuda-exl3-fixes.md),
+[06](docs/06-nccl-mesh.md), [07](docs/07-kv-and-draft-page.md), [08](docs/08-fast-boot.md),
+[13](docs/13-full-scope-checkpoint.md) and [systemd](systemd/README.md), each pointing at the step that
+differs. This partly closes [CONTRIBUTING](CONTRIBUTING.md) item 10; §3.3 says exactly which part is
+still open.
+
+**[docs/16 — Comparison with other published recipes](docs/16-comparison-with-published-recipes.md).**
+Other public GLM-5.3-Flash EXL3 DGX Spark recipes, quoted **exactly as they publish them** with the
+conditions they state and tiered `[reported]`, beside our figures at the matching node count. Nothing
+in their columns is re-derived, rescaled or corrected by us, and where conditions differ the
+difference is a column rather than a footnote. The two anchors are
+`MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks` (two nodes, commit `3021f24c`, 2026-09-05) and
+`FlyCockpit/GLM-5.3-Flash-EXL3-3x-DGX-Sparks` (three nodes, commit `9093765c`, 2026-08-29, one commit
+and unchanged since). **There is no three-node recipe from that two-node account** — we looked on
+GitHub and on Hugging Face; its only larger arrangement is an explicitly untested four-node script.
+
+**Three things the comparison establishes, and one it refuses to do.** Their padding constants
+(`lcm(64,3) = 192`, shared expert 2,112) and ours (384, 2,304) are **both correct**, for different
+checkpoints — the unit is 64 when those tensors are BF16 and 128 when they are EXL3, and our own
+configurations 1–8 used theirs. The two-node KV pool gap is **our** missing fix rather than their
+extra one: they solved the drafter's page problem with a padded slot-share onto the MLA tensors, we
+solved it with `HAREM_SW_BLOCK_SIZE=256`, and we never ran ours at two ranks. And both other recipes
+lead with a **synthetic** counting prompt where every figure of ours is realistic — a gap of roughly
+**1.7×** on this model family — so those rows are labelled and kept apart instead of being converted.
+**What we took**: from the three-node recipe, the arithmetic already credited in
+[CREDITS.md](CREDITS.md) and no files; from the two-node one, **nothing** — no code, no configuration,
+no number, no technique. It is named as the source of its own figures and for no other reason.
+
+**Cost:** documentation only. No cluster time, no configuration change, no number in this repository
+moved.
+
+---
+
 ## 2026-09-05 (after the release pass) — the quantization gate bench, re-measured on the target GPU: the closure stands, the reason we gave for it does not
 
 **`[retracted]`: "on the KDA shapes EXL3 is 1.58–1.76× slower than BF16 at M=8".** That sentence

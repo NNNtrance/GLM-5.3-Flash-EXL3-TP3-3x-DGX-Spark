@@ -1,8 +1,10 @@
 # GLM-5.3-Flash (EXL3 4bpw) on 3× NVIDIA DGX Spark — vLLM, cuda-exl3, TP=3 + EP, DFlash2
 
-> **Status: release candidate.** Numbers, flags and patches are current as of **5 September 2026**
-> and describe **production configuration 9** (and configuration 10, which is the same thing with one
-> line changed). The stack is still moving and this file is overwritten in place when it does.
+> **Status: release.** Numbers, flags and patches are current as of **5 September 2026** and describe
+> **production configuration 10** — configuration 9 with `gpu-memory-utilization` at 0.83 — which is
+> what our three nodes serve, start at boot and were rebooted into as a whole cluster with the gates
+> read afterwards. Every analysis section is configuration 9's and applies unchanged, because the two
+> differ by one line. The stack is still moving and this file is overwritten in place when it does.
 > Sections marked *open* in [docs/11-open-issues.md](docs/11-open-issues.md) are the honest edge of
 > what we know; [docs/11 §1](docs/11-open-issues.md) is what we published and then had to withdraw,
 > and [audit/](audit/README.md) §6 indexes it. **Read the retractions before you quote a number.**
@@ -36,6 +38,25 @@ line. You do not need the sibling to follow this.
 
 ## Headline results
 
+**Production configuration 10, at a glance** — three DGX Spark nodes, one 4-bit EXL3 checkpoint,
+realistic prompts, temperature 0, reasoning effort `low`, 5 September 2026 `[measured-here]`:
+
+| | |
+|---|---|
+| Single-stream decode (C1) | **70.5** tok/s aggregate (**76.9** per stream) |
+| Aggregate at 8 concurrent streams (C8) | **194.0** tok/s (197.2 on production 9's promotion boot; C8's boot-median spread is 2.5 %) |
+| Prefill, fresh unseen ~8K prompts | **1,769** tok/s (median of three; the five-round arm read 1,747) |
+| KV pool at `max_model_len` 1,000,000 | **5,619,834** tokens at `gpu-memory-utilization 0.83` — about 5.6 concurrent 1M-token requests |
+| Quality | correctness probe **10/10**, code exam **12/12** cold and warm; MMLU sample (1,995 q) **86.47 ±0.74** |
+| Cold boot, `docker run` → API ready | **251 s** |
+| **Boot from power-on**, all three nodes rebooted together, autostart unit enabled | `/health` 200 at **242 s** by the harness's own counter — **315 s** by the wall clock in the same log, and that is the figure to plan with. Both are printed because they disagree ([systemd](systemd/README.md), [09](docs/09-measurement-protocol.md) §11.4) |
+
+Production 10 is production 9 with `gpu-memory-utilization` 0.80 → **0.83**: **+8.7 % of KV pool**, no
+speed number outside its band, gates full, swap flat under load. Everything below and every analysis
+page is production 9's and applies unchanged. **Before you read a few-percent difference anywhere in
+this repository as a result, read [docs/10 §1.1](docs/10-results-and-roofline.md)**: on this stack C1
+boot medians span 1.1 %, C8 2.5 % and **C4 7.4 %**.
+
 Settings for every row: image `exl3-zeus:754421f`, TP=3 + expert parallel, **full-scope** EXL3
 weights (`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw), `kv-cache-dtype fp8` **and an fp8 draft cache**
 (`HAREM_DRAFT_KV_DTYPE=fp8`), DFlash2 draft at k=7, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`,
@@ -62,6 +83,16 @@ same script, because that arm's documented run-to-run spread is about 7 %.
 | Free host RAM at rest / swap | 12.1 / 13.5 / 13.4 GiB · ~0.1 GiB | 12.3 / 13.5 / 13.5 · ~0.1 | rule: never below 4 GiB free `[measured-here]` |
 | Speed by category, C1 | code **61.7** · math **79.6** · JSON **72.8** · prose **29.1** tok/s | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 | acceptance 46 / 58 / 54 / **13 %** — every category +30–35 %, and prose is still where a k=7 draft is wasted `[measured-here]` |
 | KV pool at the 0.83 rung (**production 10**) | **5,619,834 tokens** | — | +8.7 % again, one line changed, no speed number outside its band; swap flat `[measured-here]` |
+| Host memory at 0.83 under load | `MemAvailable` **8–10 GB** per node · `MemFree` **0.9–1.2 GiB** · swap ~0.1 GB, flat | 12–13 GB `MemAvailable` at 0.80 | the rule and why it still passes: see below `[measured-here]` |
+
+**The memory rule, said plainly, because production 10 sits against it.** On a GB10 the GPU shares
+host memory, so free host RAM *is* the safety margin, and this page has used **2 GiB of `MemFree`** as
+a floor. At 0.83, `MemFree` is **below it** — 0.9–1.2 GiB, all of it reclaimable page cache. We took
+the rung anyway, and the number that justifies it is the one 0.85 was actually rejected on: **swap**.
+0.85 produced 1.6 GB of swap growth under load on the head node; 0.83 produces **none** — swap sits at
+~0.1 GB and stays flat through every round, and `MemAvailable`, which is the honest headroom figure,
+is 8–10 GB. **0.85 will not be attempted on this stack**, and the rung after 0.83 is a soak rather
+than another rung ([docs/11 §2.4](docs/11-open-issues.md), [docs/00 §11](docs/00-hardware-and-os.md)).
 
 **Production configuration 9 is a different checkpoint, and it is the largest single move this stack
 has made.** Every configuration from 1 to 8 served `scope: glm53_routed_experts_only` weights:
@@ -168,12 +199,16 @@ the dense stage in *prefill* slower, not faster** — 184.73 ms against producti
 **+10.4 %** — while wall-clock prefill stayed inside the ±3 % equality band. The gain is a decode
 gain, and it is confined to decode.
 
-Behind it, two `NCCL_ALGO` arms and one memory rung. `Tree` is measured and rejected on this fabric —
-4–6× slower on the sizes that matter — while `Ring,Tree` came back *inside the sweep's own repeat
-spread* and is deferred to a five-round engine arm; `Ring` stays ([06](docs/06-nccl-mesh.md) §12.2).
-The `gpu-memory-utilization 0.83` rung is designed and costed at about **+11 % of pool** for ~3.9 GB
-of host headroom, and it waits on the stack owner's approval rather than on a measurement
-([11](docs/11-open-issues.md) §2.4). Upstream, the `cuda-exl3` MoE stage is **closed**: `62f53e6`
+**Behind it, two `NCCL_ALGO` arms and one memory rung, and all three are now closed by measurement.**
+`Tree` is rejected on this fabric — 4–6× slower on the sizes that matter. `Ring,Tree` came back inside
+the model-free sweep's own repeat spread, so it got the five-round engine arm it needed: **every
+concurrency level inside ±1 % of `Ring`**, identical TTFT, acceptance inside its own spread, full
+gates. It leaves 1.5 %
+more KV pool through NCCL's per-algorithm buffer sizing and that is its only real difference;
+**`Ring` stays** ([06](docs/06-nccl-mesh.md) §12.3). The `gpu-memory-utilization 0.83` rung was
+predicted at +11 % of pool from production 7's geometry and **measured at +8.7 %** on production 9's —
+the method held, the base did not — and it is production 10 ([11](docs/11-open-issues.md) §2.4).
+Upstream, the `cuda-exl3` MoE stage is **closed**: `62f53e6`
 bounded what was left of `exl3_moe_had_in` at half-ALU work worth ≤2 % of prefill and unreachable in
 practice, and the author's own bench closed MLA prefill at 86–89 % of achievable — so every remaining
 prefill lever on this stack belongs to vLLM, to the fabric, or to us.
@@ -216,7 +251,7 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 15. [14 — Troubleshooting](docs/14-troubleshooting.md) — **all 83 failures we hit, indexed by symptom, with the exact log line.** A triage order at the top, and a ranked index of the twenty that produced no error message at all. If something is wrong right now, start here.
 16. [audit/](audit/README.md) — a post-install self-check with our own numbers beside each step, the provenance table for every headline figure, and the retraction index. Run `audit/run-audit.sh` before you conclude anything about your install.
 17. [charts/](charts/) — four figures generated from the CSVs in [`results/`](results/README.md) by [`charts/make-charts.py`](charts/make-charts.py), standard library only, so you can regenerate them and check the bars against the rows.
-18. [systemd](systemd/README.md) — a unit **template**, not installed anywhere, with the three things wrong with it named. This stack starts by hand; read this before a reboot.
+18. [systemd](systemd/README.md) — **the autostart unit and its preflight**, both real, installed and reboot-tested, plus the hazard that comes first: if you also run the NVFP4 sibling, its unit wins a reboot until you disable it. Read this before a reboot.
 19. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
 
 ## The four figures
@@ -228,7 +263,7 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 | [Where a step actually goes](charts/step-breakdown-prod9.svg) | production 9, profiled on the live server, prefill and both decode regimes |
 | [The one number production 9 was built to move](charts/dense-stage-prod7-vs-prod9.svg) | the dense stage, 45.3 % → 25.9 % of a single-stream step |
 
-## Quick start — ten steps, for a person or their AI coding agent
+## Quick start — eleven steps, for a person or their AI coding agent
 
 Each step ends in a **check**. Do not go on until it passes: on this stack the expensive failures are
 the silent ones, and every check below exists because something got past us once.
@@ -303,6 +338,19 @@ the silent ones, and every check below exists because something got past us once
     and switch to load, which cuts every later boot to 251 s (docs/08).
     CHECK: the audit's numbers land in the bands in audit/README.md. Where they do not,
            docs/14-troubleshooting.md indexes every failure we hit by symptom.
+
+11. AUTOSTART, ONLY ONCE STEPS 1-10 PASS.  Install systemd/harem-exl3.service and
+    systemd/motor-onkosul-exl3.sh on every node (systemd/README.md has the four commands).
+    Edit the FABRIC_PEERS case in the preflight to YOUR addresses first. If you also run the
+    NVFP4 sibling recipe, `systemctl disable --now harem-motor.service` in the SAME change --
+    its unit wins a reboot and brings up the other engine on the same memory, healthily and
+    silently (docs/14 section 10.1). Then reboot ALL THREE TOGETHER, never one (docs/00
+    section 3.4): the preflight checks only its own node's fabric, so a single-node reboot
+    passes it and starts a rank into a cluster whose peers are gone.
+    CHECK: `/health` returns 200 within about 5 minutes of power-on, the unit logs Finished
+           at roughly +100 s (less means the preflight did not run), and the quality gates
+           pass again afterwards. Ours: gates 10/10 and 12/12, KV pool within 0.6 % of the
+           same configuration started by hand.
 ```
 
 **If a step fails, go to [docs/14](docs/14-troubleshooting.md) before you go to an issue tracker.**

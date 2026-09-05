@@ -37,8 +37,14 @@ because a fresh caching allocator hands out zeroed pages. See
 | production 8 (image `62f53e6`) | 10/10 | 12/12 | 10/10 | 12/12 |
 | **production 9 (full-scope checkpoint, `754421f`)** | **10/10** | **12/12** | **10/10** | **12/12** |
 | **production 10 (production 9 at `gpu-memory-utilization` 0.83)** | **10/10** | **12/12** | **10/10** | **12/12** |
+| production 10 + `NCCL_ALGO=Ring,Tree` (A/B arm, rejected) | 10/10 | 12/12 | 10/10 | 12/12 |
+| **production 10 after a whole-cluster reboot** (autostart unit) | — | — | **10/10** | **12/12** |
 
-Full marks everywhere, in every arm, in both states `[measured-here]`.
+Full marks everywhere, in every arm, in both states `[measured-here]`. The reboot row has no cold
+column because the engine had already answered the health check by the time the gates ran; what it
+proves is narrower and worth having anyway — that a cluster which started itself from power-on,
+with no human in the loop, answers correctly ([`../boot/boot-ledger.md`](../boot/boot-ledger.md),
+[systemd](../../systemd/README.md)).
 
 Two counts are reported by the probe on purpose: `content` is what a plain client sees, `both` is
 what the model actually knows. With thinking on, this model sometimes puts the whole answer in the
@@ -58,11 +64,15 @@ CODE EXAM: 12/12  (100.0%)
 
 | Test | Result | Where |
 |---|---|---|
-| MMLU sample, 35 questions per subject (1,995 questions) | **86.4 ±0.7** | measured at TP=2 on this checkpoint, 22 minutes `[measured-here]` |
+| MMLU sample, 35 questions per subject (1,995 questions) | **86.47 ±0.74** | **production 9, TP=3, on the production full-scope checkpoint** `[measured-here]` |
+| MMLU sample, same protocol | 86.4 ±0.7 | the earlier figure, measured at **TP=2** on the experts-only checkpoint, 22 minutes `[measured-here]` |
 | Long-form generation | 190 words, 62 % lexical variety, no repetition lock | TP=3 + EP `[measured-here]` |
 
-MMLU was **not** re-run at TP=3 `[not tested]`. The gates are identical between the two arrangements
-and acceptance and tokens-per-step match to three significant figures, so there is no signal that
-would justify hours of cluster time — but it is an absence, and it is recorded as one.
+The two MMLU figures are **0.07 points apart, a tenth of either bar** — but they are not a like-for-
+like pair, and the difference is worth naming rather than averaging: different checkpoint, different
+TP. Only production 9's was measured at TP=3 on what production serves; the 86.4 ±0.7 that
+configurations 7 and 8 carry is the TP=2 number **carried forward**, not re-measured on those arms
+`[not tested]`. Production 10 was not re-measured either, because it differs from production 9 by a
+memory fraction.
 
 Nothing on this page was measured at max reasoning effort.

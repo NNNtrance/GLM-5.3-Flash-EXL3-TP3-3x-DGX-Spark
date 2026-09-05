@@ -34,6 +34,15 @@ read-bandwidth ruler drifted 6.5 % between three runs on the same idle machine t
 `patches/tp3full/` tree. It is the first entry on this page in which the model itself is different,
 and it is the largest single move the stack has made ([13](13-full-scope-checkpoint.md)).
 
+**Production configuration 10 is what actually ships**, and it is production 9 with one line changed:
+`gpu-memory-utilization` 0.80 → **0.83**. It buys **+8.7 % of KV pool** (5,168,044 → **5,619,834**)
+and moves no speed number outside the spread in §1.1 — C1 70.5, C4 144.6, C8 194.0, gates full cold
+and warm, swap flat through the rounds `[measured-here]`. It is also the configuration the
+autostart unit and the reboot test were measured on ([systemd](../systemd/README.md)). Because it
+changes nothing but a memory fraction, **the whole of this page's analysis is production 9's and
+applies unchanged**; the rung, its cost and why 0.85 stays refused are in
+[11](11-open-issues.md) §2.4.
+
 **One caption note.** The settings block at the top of this page describes production 8 and still
 governs every section from §4 onwards, which was measured on it. For §1 and §2.3, substitute the
 full-scope checkpoint, image `754421f` and `TP3_DIR=.../tp3full`; everything else — TP=3 + EP, fp8 KV
@@ -63,11 +72,20 @@ and none of it is drafter behaviour. The same lever measured 20.7 ms at TP=2 on 
 makes this the first result on this page confirmed on two independent topologies
 ([13](13-full-scope-checkpoint.md) §7.3).
 
-**What it cost, and the line is not empty:** draft acceptance **−2.4 points** (64.4 → 61.9 %, gate
-≥60 %), accepted tokens per step **−3.0 %**, a second patch tree to keep in step with the first, and
-a second 53 GB fast-load sidecar per node. Quality was looked for and not found: 86.47 ±0.74 against
-86.4 ±0.7 is 0.07 points, a tenth of either bar, with both gates full cold and warm on the same
-engine instance in one session ([13](13-full-scope-checkpoint.md) §7.4).
+**What it cost, and the line is not empty:** a second patch tree to keep in step with the first, a
+second 53 GB fast-load sidecar per node, and a **prefill** regression on the dense path (+17.3 ms,
++10.4 % at M=1,792, hidden inside an equality-band wall — §5). Quality was looked for and not found:
+86.47 ±0.74 against 86.4 ±0.7 is 0.07 points, a tenth of either bar, with both gates full cold and
+warm on the same engine instance in one session ([13](13-full-scope-checkpoint.md) §7.4).
+
+**The draft-acceptance entry that used to head this list is withdrawn** `[retracted]`. We published
+−2.4 points of acceptance and −3.0 % of accepted tokens per step as the price. Pooled by draft token
+across five concurrency levels and three boots it is **+0.18 points**: the C1 median was an artefact of
+`bench-sweep.py` cycling `prompts[i % 12]`, so C1 and C2 saw eight of twelve prompts and C4–C8 all
+twelve. And `accept_len = 1 + k × acceptance` holds on all 90 rows, so the two entries were the same
+number written twice. Net effect on throughput **+0.24 %**
+([11](11-open-issues.md) §2.26, [13](13-full-scope-checkpoint.md) §7.4). The row in the table above is
+kept because it is what the sweep measured; it is not a cost.
 
 **Production 8's entry was that nothing moved, and it still reads that way.** The `had_in` commit was
 priced at ~0.2–0.3 % of prefill wall before it was built ([11](11-open-issues.md) §2.19) — below the
@@ -99,6 +117,47 @@ arm: code **47.9**, math **59.0**, JSON **57.7**, prose **22.4** tok/s at a sing
 acceptance 46 / 56 / 55 / **13 %**; mixed load 7.0 tok/s with a 4.9 s TTFT for the long prompt
 `[measured-here]`. Prose is where a k=7 draft is wasted ([04](04-dflash2-port.md) §6). Whether the
 mesh work, the draft cache or the new image moved any of it is `[not tested]`.
+
+### 1.1 The spread these numbers sit inside, and which reading the headline uses
+
+Every headline figure on this page is **the median of that boot's sweep rounds** — three rounds with a
+warm tuner cache, five with a cold one ([09](09-measurement-protocol.md) §1,
+[12](12-tuner-cache.md)). That rule matters more than it looks, so here is the whole production 9 and
+10 series, every round of every boot, aggregate tok/s `[measured-here]`:
+
+| Boot | Configuration | C1 rounds | C1 median | C4 median | C8 median |
+|---|---|---|---|---|---|
+| `tp3full` | production 9, the promotion boot | 69.6 / 69.9 / 70.3 | **69.9** | 140.7 | 197.2 |
+| `prod9r` | production 9, clean re-boot from `.env.tp3` | 69.8 / 70.4 / 68.6 | **69.8** | 134.6 | 192.4 |
+| `L083` | production 10 (0.83) | 71.7 / 70.2 / 70.5 | **70.5** | 144.6 | 194.0 |
+| `ALG5` | production 10 + `NCCL_ALGO=Ring,Tree`, five rounds | 70.9 / 68.8 / 71.5 / 70.6 / 67.7 | **70.6** | 142.6 | 195.7 |
+
+Read down the columns rather than across the rows, because the two axes behave differently:
+
+- **Round to round inside one boot**, C1 spans **1.0–5.7 %** peak to peak; the 5.7 % is the five-round
+  arm, which is simply the arm with the most chances to show its tails. C4 spans **5.1–9.8 %** and C8
+  **1.6–5.0 %**.
+- **Boot to boot, comparing medians**, C1 is remarkably tight: **69.8 … 70.6, a 1.1 % span** across
+  four boots and two memory settings. C8 spans **2.5 %** (192.4 … 197.2). **C4 spans 7.4 %**
+  (134.6 … 144.6) and is the noisiest metric on this stack.
+
+**Which means one number in this repository must not be read as a gain.** Production 10's C4 is
+144.6 against production 9's 134.6, **+7.4 %** — and 7.4 % is exactly the boot-median span of C4 on
+this configuration. A memory fraction does not buy 7 % of four-way throughput; the two arms are equal
+at C4 and the table says so in its own footnote. The same guard applies in the other direction to
+`prod9r`'s C4 of 134.6, which is the low end of the same spread rather than a regression from the
+promotion boot.
+
+**Anything under about 3 % at C1 or C8, or 8 % at C4, is not a result on one boot each.** That is why
+the five-round rule exists and why single-boot A/B arms in this repository are reported as "inside the
+band" rather than as small wins ([09](09-measurement-protocol.md) §1.2).
+
+**One correction to our own working notes.** A "C1 spread of 59.9 … 70.6 across boots" appeared in the
+field log for this configuration and it is wrong `[retracted]`: **59.9 is the TP=2 full-scope arm's C1
+aggregate** ([13](13-full-scope-checkpoint.md) §4.1), not a TP=3 boot, and the other low reading
+beside it was a production **8** restore. No production 9 or 10 boot has read below **67.7** even at
+the level of a single round. Mixing a two-node arm into a three-node series would have doubled the
+apparent noise floor and buried every real few-percent effect on this page underneath it.
 
 ---
 
@@ -448,7 +507,8 @@ in [`../results/profile/step-breakdown.csv`](../results/profile/step-breakdown.c
 
 **What moved, and it is one row.** The dense stage went from **45.3 % / 42.90 ms** of a C1 step to
 **25.9 % / 21.90 ms** — the 21 ms that is the whole of production 9's +22 %, since draft acceptance
-moved the *wrong* way by 2.4 points. **What did not move:** the NCCL class is still 100 % exposed
+did not move at all once it was pooled properly (+0.18 points, §1). **What did not move:** the NCCL
+class is still 100 % exposed
 (measured comm/compute overlap 0.00 ms per prefill step), the MoE trellis GEMM is still the largest
 compute class in every window, and both of the targets we retracted in §5.8 are still absent.
 

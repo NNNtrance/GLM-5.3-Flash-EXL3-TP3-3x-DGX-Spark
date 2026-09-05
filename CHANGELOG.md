@@ -11,6 +11,98 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-05 (late) — release: autostart, three open items closed by measurement, and a spread we had mis-attributed
+
+**Status moves from release candidate to release**, on production configuration 10.
+
+**Autostart, and it has been through a reboot** `[measured-here]`. The `systemd/` directory stops
+being a template with three things wrong with it: `systemd/harem-exl3.service` and
+`systemd/motor-onkosul-exl3.sh` are the real unit and the real preflight, installed and `enabled` on
+all three nodes. The preflight runs seven checks — docker answering, `ibv_devinfo` 4/4, a ping to each
+fabric neighbour, `drop_caches`, then the env file, the image and this rank's fast-load sidecar
+manifest, the last three each having cost us a silent boot. `ExecStop` names `exl3-tp3` rather than
+the NVFP4 container the template named, `TimeoutStartSec` is **1200** so a 620 s dump boot cannot time
+out mid-load, and the unit carries `Conflicts=harem-motor.service` while the sibling unit is now
+`disabled` on all three nodes.
+
+**The reboot test**, whole cluster, one trial: ssh and 4/4 at **+29 / +30 / +31 s**; units log
+`Finished` at **+98 / +98 / +103 s** — that is the preflight, the fabric wait and the settle gate
+together; `/health` 200 at 22:28:21, **212 s after the last unit finished**. KV pool **5,652,892**
+against 5,619,834 from a settled `docker run` on the same configuration, **+0.6 %** — the cleanest
+baseline a pool number can have, and the strongest check on the settle gate we have run. Gates 10/10
+and 12/12 afterwards. **The elapsed figure is published twice because the log contradicts itself:**
+the harness printed `+242 s`, the wall-clock stamps in the same file give **315 s**, 242 s before the
+health check matches no recorded event, and the larger is the figure to plan with. What the unit does
+**not** solve is stated with it: `--restart no` is unchanged and deliberate, systemd still does not
+enforce the worker-2 → worker-1 → head order (the rendezvous retrying is margin, not a guarantee), and
+the watchdog is still not written. **Reboot all three together or none** — the preflight checks only
+its own node's fabric, so a single-node reboot passes it and starts a rank into a cluster whose peers
+are gone. [`systemd/`](systemd/README.md), [docs/00](docs/00-hardware-and-os.md) §13a,
+[docs/09](docs/09-measurement-protocol.md) §11.4, [docs/11](docs/11-open-issues.md) §2.20,
+[docs/14](docs/14-troubleshooting.md) §10.1–§10.1a, README quick-start step 11.
+
+**`NCCL_ALGO=Ring,Tree` — closed, equal, `Ring` stays** `[measured-here]`. The five-round engine arm
+the model-free sweep could not substitute for: C1 70.6 / C2 99.9 / C4 143.4 / C6 175.2 / C8 195.6
+against `Ring`'s 70.5 / 99.0 / 144.6 / 175.4 / 194.0 — **every level inside ±1 %**, TTFT identical,
+acceptance inside its own spread, gates full. The proxy's −3.6 % did not survive a real step, which is
+what should happen when a proxy times 90 collectives in isolation and the step overlaps none of them.
+The one structural difference is **+1.5 % of KV pool** (5,702,479 against 5,619,834) from NCCL's
+per-algorithm buffer sizing — real, and not worth pinning production to an algorithm list for.
+[docs/06](docs/06-nccl-mesh.md) §12.3, [`results/mesh/algo-sweep.md`](results/mesh/algo-sweep.md).
+
+**Quantizing the remaining BF16 KDA/MLA modules ourselves — closed, and it would be slower**
+`[measured-here]`. The 113 linears per rank that production 9 leaves in BF16 were the obvious next
+arm: the FP16 weights are already in the checkpoint, so it is a surgical pass rather than a
+requantization. A model-free bench on a workstation GPU, `cuda-exl3` at the production commit, at the
+TP=3 per-rank shapes, closed it before any of that was spent. **The checkpoint author left them BF16
+by design** — `qmap = None` in `exllamav3` with the reason in the comment, and `kv_b_proj` is not a
+`Linear` at all — and he applied that judgement discriminatingly, quantizing KDA `qkv_proj` and
+`o_proj` to 6 bit from the same exclusion list. **On the KDA shapes EXL3 is 1.6–1.8× slower than BF16
+at M=8**: those arms are 0.72 MB and were never bandwidth-bound, so four-bit weights buy bytes that
+were not the cost while paying the Hadamard and trellis-decode fixed cost. The arithmetic cannot be
+rescued even at zero cost — the whole family is **0.851 ms of a 72.5 ms step**, +1.2 % of C1 if it
+were free. The one family that would genuinely gain, `kv_b_proj` at 0.391× and +1.13 ms/step, **needs
+a batched EXL3 kernel that does not exist** (verified by source scan, along with the absence of any
+M-threshold reconstruct path). **One lever survived and it is not a quantization lever:** the MLA
+strided-batched family runs in fp32, and bf16 measures 0.684× — **+0.24 ms/step, about +0.3 % of C1**,
+no checkpoint change and no new kernel, filed as future and minor and gated on `needle` at 1M rather
+than on speed. Three instrument lessons came with it, including a ruler check that read **210 % of the
+machine's own peak** before a weight bank was added. [docs/13](docs/13-full-scope-checkpoint.md) §4.4,
+[docs/11](docs/11-open-issues.md) §2.25,
+[`results/kernels/kda-gate-bench.md`](results/kernels/kda-gate-bench.md), and both scripts ship
+(`bench/ruler_check.py`, `bench/kda_gate_bench.py`).
+
+**A spread we had mis-attributed, corrected against the raw sweeps** `[retracted]`. Our field log
+recorded a "C1 run-to-run spread of 59.9 … 70.6 across boots" for production 9 and 10. It is wrong:
+**59.9 is the TP=2 full-scope arm's C1 aggregate** and the other low reading beside it was a
+production **8** restore. No production 9 or 10 boot has read below **67.7** even at the level of a
+single round. Every round of all four boots is now printed in
+[docs/10](docs/10-results-and-roofline.md) §1.1, and the real picture is that the two axes behave
+differently: within a boot, C1 spans 1.0–5.7 % peak to peak and C4 5.1–9.8 %; across boot **medians**,
+C1 spans **1.1 %**, C8 **2.5 %** and C4 **7.4 %**. **Which makes one published number a trap:**
+production 10's C4 of 144.6 against production 9's 134.6 is **+7.4 %**, exactly C4's boot-median span
+— a memory fraction does not buy 7 % of four-way throughput, and the arms are equal at C4. Every
+headline figure is the median of one boot's rounds; the rule and the guard are now stated where the
+numbers are.
+
+**Stale claims the previous pass's retractions left behind, corrected.** `docs/10` §1 and `docs/13`
+still billed production 9 for **−2.4 points of draft acceptance and −3.0 % of accepted tokens per
+step** after the front page had withdrawn both; the four costs that remain there are now the four that
+were never about the drafter. `results/gates/quality-gates.md` still said MMLU had not been run at
+TP=3; it has, at 86.47 ±0.74 on the production checkpoint, and the page now separates that from the
+86.4 ±0.7 TP=2 figure that configurations 7 and 8 carry forward. `docs/11` §3 still listed a
+production-9 re-profile as never run.
+
+**Also in this pass.** `results/speed/concurrency-sweeps.csv` gains the production 9, production 10
+and `Ring,Tree` arms, so the provenance table's rows point at data that is actually in the file;
+`results/configs/*.csv` gain the measured 0.83 rung in place of the "designed, not run" row, plus the
+`Ring,Tree` and power-on boots; `audit/README.md` §5 gains five provenance rows and two more facts a
+reviewer should not have to dig for, and its memory section now states the rule production 10 sits
+against — **watch swap, not `MemFree`**, because `MemFree` is 0.9–1.2 GiB at 0.83 and swap is what
+0.85 was actually rejected on. 0.85 will not be attempted; the rung after 0.83 is a soak.
+
+---
+
 ## 2026-09-05 (night) — release pass: production configuration 10, two retractions, and the environment record
 
 **Production configuration 10 = production 9 with one line changed**, `GPU_MEMORY_UTILIZATION`

@@ -258,10 +258,25 @@ At `gpu-memory-utilization 0.80`, engine idle:
 | Free | **12.1 GiB** | **13.5 GiB** | **13.4 GiB** |
 | Swap used | ~0.1 GiB | ~0.1 GiB | ~0.1 GiB |
 
-**The rule: never below 4 GiB free on any node.** On a GB10 the GPU shares host memory, so this
-figure *is* your safety margin. If yours is lower than ours, or swap is in the gigabytes, step
-`gpu-memory-utilization` down and re-audit. Consumed memory per node (weights plus non-torch) should
-be **58.3–59.1 GiB**.
+At `gpu-memory-utilization 0.83` (**production 10**), after a full benchmark:
+
+| | head | worker-1 | worker-2 |
+|---|---|---|---|
+| `MemAvailable` | **8.8 GB** | **10.0 GB** | **10.1 GB** |
+| `MemFree` | 0.9–1.2 GiB, reclaimable page cache | | |
+| Swap used | ~0.11 GiB | ~0.09 GiB | ~0.08 GiB, **flat through the rounds** |
+
+**The rule, and how to apply it at 0.83.** On a GB10 the GPU shares host memory, so free host RAM
+*is* your safety margin, and this repository has used **4 GiB free** as the audit floor and 2 GiB as
+the hard one. At 0.83 `MemFree` is below both — and we took the rung anyway, because the number that
+actually decides it is **swap growth**, and it did not move. 0.85 was rejected on 1.6 GB of swap
+appearing under load on the head node; 0.83 stays at ~0.1 GB and flat, with `MemAvailable` at
+8–10 GB. **So: watch swap, not `MemFree`.** If your swap grows during the rounds, step
+`gpu-memory-utilization` down and re-audit; if `MemFree` is low but swap is flat and `MemAvailable` is
+in the gigabytes, you are where we are. **0.85 will not be attempted on this stack**
+([docs/11](../docs/11-open-issues.md) §2.4).
+
+Consumed memory per node (weights plus non-torch) should be **58.3–59.1 GiB**.
 
 `vm.swappiness` should read **60**. Do not set it to 0 — see
 [docs/00](../docs/00-hardware-and-os.md) §9.1 for the incident that cost three power cycles.
@@ -324,7 +339,11 @@ Named so you do not mistake silence for a pass:
 | Cold boot | 251 s (weights 58 s) | prod 9, fast-load | 5 Sep 2026 | `results/boot/boot-ledger.md` |
 | Step breakdown, prefill / C1 / C8 | see `charts/step-breakdown-prod9.svg` | **prod 9** | 5 Sep 2026 | `results/profile/step-breakdown.csv` |
 | Step breakdown, the production-7 control | see `docs/10` §5 | prod 7 | 5 Sep 2026 | `results/profile/measured-prod7.md` |
-| Production 10 (0.83 rung) | KV 5,619,834; C1 70.5 / C4 144.6 / C8 194.0 | prod 10 | 5 Sep 2026 | `results/configs/kv-pool-progression.csv` |
+| Production 10 (0.83 rung), boot `L083` | KV 5,619,834; C1 70.5 / C4 144.6 / C8 194.0; prefill fresh 1,769; TTFT 0.282 / 0.811 s | prod 10 | 5 Sep 2026 | `results/configs/kv-pool-progression.csv`, `results/speed/concurrency-sweeps.csv` |
+| Production 10, host memory under load | `MemAvailable` 8.8 / 10.0 / 10.1 GB; swap ~0.1 GB flat | prod 10 | 5 Sep 2026 | `results/configs/kv-pool-progression.csv` |
+| `NCCL_ALGO=Ring,Tree`, five-round engine arm, boot `ALG5` | C1 70.6 / C4 143.4 / C8 195.6, all within ±1 % of `Ring`; KV 5,702,479 (+1.5 %) | prod 10 | 5 Sep 2026 | `results/mesh/algo-sweep.md`, `docs/06` §12.3 |
+| Boot from power-on, all three rebooted, autostart enabled | units finished +98/+98/+103 s; `/health` 200 at +242 s by the harness, **+315 s** by the log's wall clock; KV 5,652,892; gates 10/10 · 12/12 | prod 10 | 5 Sep 2026 | `results/boot/boot-ledger.md`, `systemd/README.md` |
+| KDA/MLA quantization gate bench | KDA arms EXL3/bf16 **1.58–1.76×** at M=8; whole family 0.851 ms of a 72.5 ms step; `kv_b_proj` 0.391× but no batched kernel exists | model-free, **workstation GPU** | 5 Sep 2026 | `results/kernels/kda-gate-bench.md`, `bench/kda_gate_bench.py` |
 | Device read bandwidth ruler | 225.2 GB/s | model-free | 5 Sep 2026 | `bench/bw.py`, `results/profile/step-breakdown.md` |
 | BF16 GEMM ruler | 97.3 TFLOP/s | model-free | 5 Sep 2026 | `bench/gemmpeak.py`, `results/profile/step-breakdown.md` |
 | Mesh all-reduce, channel sweep | see `results/mesh/` | model-free | 4–5 Sep 2026 | `results/mesh/all-reduce-sweep.md` |
@@ -332,7 +351,7 @@ Named so you do not mistake silence for a pass:
 | Fabric raw, `ib_write_bw` | 98.0 Gb/s per link | model-free | 29 Aug 2026 | `docs/00` §4.4 |
 | PCIe link state | `32GT/s, Width x4`, 12/12 | — | 5 Sep 2026 | `docs/00` §4.3 |
 
-**Three provenance facts a reviewer should not have to dig for:**
+**Five provenance facts a reviewer should not have to dig for:**
 
 1. **Production 9 was profiled**, on the live server, all three ranks, no restart. Two of its rows —
    NCCL and CPU gap at C1 — are **inflated by the profiler itself**, because that arm launches 2,738
@@ -345,6 +364,17 @@ Named so you do not mistake silence for a pass:
    arrangements, which is exactly why someone should check.
 3. **The production 8 headline is a pool of two same-day runs** (56.9 / 175.4), because that arm's
    documented boot-to-boot spread is about 7 %. The single p8 boot alone read 56.8 / 172.8.
+4. **Every headline speed figure is the median of one boot's rounds, and the spreads are not equal
+   across metrics.** On the four production 9 and 10 boots, C1 boot medians span **1.1 %**, C8
+   **2.5 %** and C4 **7.4 %**; within a single boot, round-to-round peak-to-peak reaches 5.7 % at C1
+   and 9.8 % at C4. **Production 10's C4 of 144.6 against production 9's 134.6 is that spread, not a
+   gain** — a memory fraction does not buy 7 % of four-way throughput. Every round of every boot is
+   printed in `docs/10` §1.1 so this can be checked rather than taken on trust.
+5. **The boot-from-power-on figure is published twice because its own log disagrees with itself.**
+   The harness printed `+242 s`; the wall-clock stamps in the same file give **315 s**, and 242 s
+   before the health check matches no event recorded. We could not reconstruct the counter's origin,
+   so both are printed and the larger is the planning figure. The decomposition is not in doubt:
+   units finished at +98 to +103 s, container to served token 212 s. `results/boot/boot-ledger.md`.
 
 ---
 

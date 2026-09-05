@@ -102,3 +102,41 @@ Medians of sweep rounds 3–5, aggregate tok/s `[measured-here]`:
 Every difference is inside the arms' own within-round spread, and acceptance stayed in the 61–64 %
 band. This is the intended result: the fast-boot work is supposed to change boot time and nothing
 else.
+
+## Boot from power-on: the autostart unit, measured once
+
+A different boot from every arm above: not `docker run` on a warm host, but a **simultaneous reboot of
+all three nodes** with `harem-exl3.service` enabled, on production configuration 10 (full scope,
+TP=3 + EP, `754421f`, `tp3full`, `gpu-memory-utilization 0.83`), 5 September 2026 `[measured-here]`.
+One trial. The raw capture is not included here, for the reason the rest of this directory gives:
+it is a transcript of `ssh` to three named hosts. Every number below is transcribed from it, and the
+two that disagree are both printed.
+
+| Event | Wall clock | From T |
+|---|---|---:|
+| `reboot` issued to all three | 22:23:06 | T |
+| head / worker-1 / worker-2 answering ssh, `ibv_devinfo` 4/4 | — | +29 / +30 / +31 s |
+| `harem-exl3.service` state at that moment | `activating` / `active` / `active` | +29 … +31 s |
+| `systemd`: `Finished harem-exl3.service` | 22:24:49 / 22:24:44 / 22:24:44 | **+103 / +98 / +98 s** |
+| `/health` returns 200 | 22:28:21 | see below |
+| GPU KV cache size on that boot | **5,652,892** | |
+| gates after it (probe / code exam) | **10/10 · 12/12** | |
+
+**The elapsed figure is printed twice because the log contradicts itself.** The harness wrote
+`health 200 +242s`; the wall-clock stamps in the same file give **315 s** between the reboot and the
+health check. The instant the harness started its counter cannot be recovered — 242 s before 22:28:21
+is 22:24:19, which matches no event in the log — so both are recorded and **315 s is the figure to
+plan with**. Neither number changes the decomposition, which is what the test was for: the unit's
+`ExecStartPre` plus `ExecStart` occupy **98–103 s** (docker coming up, ConnectX-7 reaching 4/4, the
+fabric pings, `drop_caches`, the settle gate), and the container needs **212 s** from the last unit
+finishing to a served token, against **251 s** for a fast-load boot on a warm host. Autostart costs
+about a minute and a half of fabric wait on top of a boot that is still the weight load.
+
+The pool is the cross-check. **5,652,892 against the 5,619,834** measured on the same configuration
+from a settled `docker run`, **+0.6 %** — a reboot is the cleanest baseline a pool number can have, and
+it lands well inside the 6 % this figure used to swing by before the settle gate
+([docs/07](../../docs/07-kv-and-draft-page.md) §1.1). It is the strongest evidence we have that the
+gate measures what it claims to.
+
+Unit, preflight and the install order (including `Conflicts=` and disabling the sibling unit):
+[`systemd/`](../../systemd/README.md).

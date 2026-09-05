@@ -1,0 +1,21 @@
+[Unit]
+Description=GLM-5.3-Flash EXL3 engine (production 10: full scope, TP=3 + EP, tp3full tree)
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+Conflicts=harem-motor.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=@USER@
+Environment=ENV_FILE=@HOME@/exl3-zeus/.env.tp3
+Environment=HOME=@HOME@
+WorkingDirectory=@HOME@/exl3-zeus/tp3full
+ExecStartPre=/bin/bash @HOME@/exl3-zeus/motor-onkosul-exl3.sh
+ExecStart=/bin/bash @HOME@/exl3-zeus/tp3full/start-tp3.sh
+ExecStop=/usr/bin/docker stop -t 60 exl3-tp3
+TimeoutStartSec=1200
+
+[Install]
+WantedBy=multi-user.target

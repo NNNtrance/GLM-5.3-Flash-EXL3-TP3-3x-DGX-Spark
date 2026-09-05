@@ -763,9 +763,11 @@ is +13 % at C8. **Leave `NCCL_PROTO` unset** — `Simple` is 2.8× worse at the 
 magnitude higher; 23–96 % worse on the decode-step proxy. A tree wants a bandwidth-shaped topology to
 pay for its lower step count, and this is three nodes each holding a pair of PCIe Gen5 x4 cards.
 
-**`Ring` stays.** `Ring,Tree` is **unresolved** — 3.6 % better on the step proxy, worse on `sendrecv`
-at 64 MB, and the sweep's own repeat spread reaches **1.7× at 1 MB**, larger than the effect.
-Model-free cannot answer it.
+**`Ring` stays.** `Ring,Tree` looked 3.6 % better on the step proxy and worse on `sendrecv` at 64 MB,
+inside a sweep whose own repeat spread reaches **1.7× at 1 MB** — model-free could not answer it. The
+five-round engine arm did: **every concurrency level inside ±1 % of `Ring`**, identical TTFT,
+acceptance inside its own spread, full gates. It leaves 1.5 % more KV pool through NCCL's buffer sizing and that is the only
+real difference ([06](06-nccl-mesh.md) §12.3). Do not chase it.
 
 ### 6.6 The one-sided `RDMA_WRITE` transport works perfectly and buys nothing
 
@@ -1243,26 +1245,56 @@ against a named source. **Open** — the only provenance claim in the retraction
 
 ## 10. Operations
 
-### 10.1 There is no autostart, and the sibling NVFP4 unit will win a reboot **[SILENT]**
+### 10.1 A reboot brings up the sibling NVFP4 engine, not this one **[SILENT]**
 
-An unattended reboot does not leave the cluster down — **it brings up the other engine**, on the same
-GPUs and the same memory, which is worse than nothing if you were expecting this one.
+The failure that made this entry: an unattended reboot did **not** leave the cluster down — it brought
+up the **other engine**, on the same GPUs and the same unified memory, which is worse than nothing if
+you were expecting this one. No error anywhere; `/health` on port 8001 simply never answers while a
+different, healthy engine holds the machine.
 
-The EXL3 container runs `--restart no` deliberately (a half-started rank quietly retrying is exactly
-the fluent-and-wrong failure class this stack refuses), and nothing supervises it, while the NVFP4
-stack's systemd unit is enabled.
+**Fix, and it is now done on our nodes.** `harem-motor.service` is `disabled` on all three, and
+[`systemd/harem-exl3.service`](../systemd/harem-exl3.service) carries `Conflicts=harem-motor.service`
+besides. Whichever unit you install, disable the other **in the same change** — installing one without
+disabling the other is not a partial fix, it is a worse state than having no unit at all.
 
-**Fix, cheap and still not written:** disable the sibling's unit on all three nodes. Whichever unit is
-installed needs `Conflicts=` against the other.
+The rest of the old entry is closed: the preflight
+[`systemd/motor-onkosul-exl3.sh`](../systemd/motor-onkosul-exl3.sh) exists, `ExecStop` names
+`exl3-tp3` rather than the NVFP4 container, and `TimeoutStartSec` is **1200** — enough for a 620 s dump
+boot with the preflight and the settle gate in front of it. See §10.1a for what is still not solved.
 
-**The unit template in [`systemd/`](../systemd/README.md) is not installed and is not recommended as
-it stands:** the preflight script it calls does not exist, systemd will not honour the worker-2 →
-worker-1 → head start order on its own, and its `ExecStop` **names the wrong container**.
-`TimeoutStartSec` needs to be 1800 for a dump boot.
+### 10.1a Rebooting one node kills the fabric, and the unit will happily start into half of it
 
-**Cost of having nothing: one outage during this work ran an hour purely because nothing was
-watching.** The cheaper half of the fix is a 60-second `docker ps` + `/health` watchdog that records
-`docker logs --tail 40` when the container exits. Not written.
+**Reboot all three nodes together, or none.** This is the oldest rule in this stack and the autostart
+unit does not change it: bringing one node back takes down the far end of that node's links and the
+pair does not heal (§4.1, [00](../docs/00-hardware-and-os.md) §3). Before the hotplug fix
+(`/etc/nvidia/cx7-hotplug-enabled` removed on all three) the symptom was a pair going dead on the two
+nodes that had **not** rebooted; with the fix in place the rule still stands, because the fix removes
+the mechanism we identified and does not prove there is no second one.
+
+What the unit adds to that rule is a way to get it wrong faster. The preflight waits for `ibv_devinfo`
+4/4 **on its own node** and pings its two neighbours, so a single-node reboot into a healthy pair will
+pass the preflight and start a rank into a cluster whose other two ranks are already gone — the
+rendezvous then hangs until `TimeoutStartSec`, which is 1200 s. If you must bring one node back on its
+own, **check the fabric on the other two before you let the engine start**, not just on the one you
+rebooted.
+
+Two more things the unit does not do, both stated in [`systemd/`](../systemd/README.md) and both
+`[not tested]`:
+
+- **It does not enforce the worker-2 → worker-1 → head start order.** systemd starts the three units
+  independently. The all-three reboot test passed on the workers' rendezvous retrying until rank 0
+  appears, plus a `TimeoutStartSec` about five times a normal boot — margin, not a guarantee, and one
+  trial. If the rendezvous ever times out on a cold cluster, this is why.
+- **Nothing watches the container once it is up.** `--restart no` is deliberate and unchanged. One
+  outage during this work ran an hour purely because the only thing being watched was a benchmark
+  log; a 60-second `docker ps` plus `/health` poll that dumps `docker logs --tail 40` when the
+  container is gone is a few lines and is still not written.
+
+**What a healthy boot from power-on looks like**, for comparison against yours `[measured-here]`: ssh
+and `ibv_devinfo` 4/4 at about **+30 s**; the unit logs `Finished` at **+98 to +103 s**, which is the
+whole preflight plus the settle gate; `/health` 200 roughly **three and a half minutes** after that.
+If the unit finishes in seconds, the preflight did not run. If it sits in `activating` past ten
+minutes, the preflight is waiting on the fabric and its own message will say which check.
 
 ### 10.2 Environment files must never be copied between nodes
 
@@ -1317,7 +1349,7 @@ one.**
 | 17 | Prefill on a repeated prompt | 1,596 tok/s where the honest number is 1,025 | 8.3 |
 | 18 | `git archive` dropping the untracked Dockerfile | the build fails later, on a missing file | 2.19 |
 | 19 | The AOT compile check | 18/18 "pass", 6/18 die at launch | 7.3 |
-| 20 | The sibling's systemd unit | a reboot brings up the wrong engine on the same GPUs | 10.1 |
+| 20 | The sibling's systemd unit | a reboot brings up the wrong engine on the same GPUs, healthily | 10.1 |
 
 ---
 

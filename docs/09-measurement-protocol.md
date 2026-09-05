@@ -554,6 +554,39 @@ moments is only as good as your control over both moments.** Verify the ruler, n
 the same lesson the bandwidth ruler taught in [10](10-results-and-roofline.md) §4.1, arriving by a
 completely different route.
 
+### 11.4 "Boot time" is three different measurements, and autostart is the third
+
+This repository publishes 251 s, 620 s and 315 s and they are not versions of one number:
+
+| What it measures | Starts at | Ours |
+|---|---|---|
+| **Fast-load boot** | `docker run` on a warm, settled host | **251 s** (weights 58 s) |
+| **Dump boot** | the same, on a boot that also writes the 53 GB sidecar | **620 s** |
+| **Boot from power-on** | `reboot`, with the autostart unit enabled | **315 s** (see below) |
+
+The third exists because it is the only one that includes the layer the other two assume: the fabric.
+Measured once, on production configuration 10, all three nodes rebooted together `[measured-here]`:
+ssh and `ibv_devinfo` 4/4 at **+29 / +30 / +31 s**; the units log `Finished` at **+98 / +98 / +103 s**,
+which is the whole of `ExecStartPre` (docker, ConnectX-7 4/4, fabric pings, `drop_caches`) plus the
+settle gate; `/health` returns 200 at 22:28:21, **212 s after the last unit finished**. The pool read
+5,652,892 and the gates read 10/10 and 12/12 afterwards
+([`results/boot/boot-ledger.md`](../results/boot/boot-ledger.md),
+[systemd](../systemd/README.md)).
+
+**And it comes with its own instrument lesson, which is why it is on this page.** The harness printed
+`health 200 +242s`; the wall-clock stamps in the same log give **315 s**, and 242 s before the health
+check lands on no event the log records. We cannot reconstruct which instant the counter started
+from, so **both are published and the larger is the one to plan with**. The rule this repeats, from
+§11.1 and from [10](10-results-and-roofline.md) §4.1: a number that is a difference between two
+moments is only as good as your control over both, and a harness that prints an elapsed time is
+itself an instrument that has to agree with a clock before it is quoted.
+
+Two protocol notes for anyone repeating it. **One trial is one trial** — systemd starts the three
+units with no ordering between them, and what carried this boot is the workers' rendezvous retrying
+until rank 0 appears, not a guarantee. And **a reboot is the cleanest baseline a pool number can
+have**, which is what makes the +0.6 % agreement with a settled `docker run` the strongest check on
+the settle gate we have run.
+
 ---
 
 ## 12. What is next

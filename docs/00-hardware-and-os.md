@@ -785,6 +785,50 @@ long-term home either; if you are starting fresh, choose a path you control and 
 
 ---
 
+## 13a. Autostart: the unit, the preflight, and the reboot it was measured against
+
+**The engine starts at boot.** `harem-exl3.service` is installed and `enabled` on all three nodes,
+and it calls a preflight that refuses to start the container until this layer — the one this whole
+page is about — is actually ready. Both files are in [`systemd/`](../systemd/README.md); this section
+is the part that belongs to the hardware and OS.
+
+**Read §3.4 first, because the unit does not change it.** Reboot **all three nodes together, or
+none**. A single-node reboot takes down the far end of that node's links and the pair does not heal
+(§3.1–§3.3). Autostart makes an all-three reboot survivable; it does nothing for a one-node reboot
+except start an engine into half a fabric.
+
+**Why a preflight and not just `After=network-online.target`.** At boot the engine starts long before
+the fabric is ready, and every one of the fabric's failure modes is quiet: `PORT_ACTIVE` arrives late,
+the NCCL rendezvous hangs with no useful error, and the unit sits in `activating` until
+`TimeoutStartSec` expires. The preflight waits — up to ten minutes — for `docker` to answer,
+`ibv_devinfo` to read **4/4** (§4.6), and each fabric neighbour to answer a ping, then does `sync` and
+`drop_caches` because the loader is sensitive to page-cache pressure ([08](08-fast-boot.md) §5). It
+then checks three things that are not about hardware at all and have each cost us a silent boot: the
+env file exists, the image it names is present locally, and this rank's fast-load sidecar has its
+`MANIFEST.json`.
+
+What the preflight **cannot** do: prove the fabric carries traffic. It pings one address per
+neighbour, and `PORT_ACTIVE` on the other two ports is link state, not delivery — the check that
+found half our fabric idle is `port_xmit_data` read as a **delta after** traffic has run
+([06](06-nccl-mesh.md) §6), and at preflight time nothing has sent a packet yet. Run the checklist in
+§14 after your first benchmark, not instead of it.
+
+**Measured, once, on production configuration 10** `[measured-here]`: `reboot` to all three at
+22:23:06; ssh and `ibv_devinfo` 4/4 on all three at **+29 / +30 / +31 s**; the units log `Finished` at
+**+98 / +98 / +103 s**, which is the whole of the preflight, the fabric wait and the settle gate;
+`/health` returns 200 at 22:28:21. The harness printed that last step as `+242 s` and the wall-clock
+stamps in the same log make it **315 s**; both are recorded and the larger is the one to plan with
+([`results/boot/boot-ledger.md`](../results/boot/boot-ledger.md)). The KV pool came back at
+**5,652,892** against 5,619,834 from a settled `docker run` on the same configuration, **+0.6 %**, and
+the quality gates read 10/10 and 12/12 afterwards.
+
+**One OS-level dependency.** `drop_caches` needs root. Either run the unit as root or give the
+service user a `NOPASSWD` sudoers line for `/usr/bin/tee /proc/sys/vm/drop_caches`; if it is not
+permitted the preflight does not fail, it skips the drop and the weight load starts against a dirtier
+page cache. That is the one thing on this page the unit will do quietly if you let it.
+
+---
+
 ## 14. Preflight checklist
 
 Before you build anything:
@@ -803,6 +847,8 @@ Before you build anything:
 - [ ] NCCL mesh plugin built at `19924dcc` with patches `0004`, `0005`, `0006`; `make test-unit` passes
 - [ ] At least 300 GB free per node
 - [ ] `lspci -vv` reports `Speed 32GT/s, Width x4` for each ConnectX endpoint — so you know your ceiling
+- [ ] If you install the autostart unit: the sibling NVFP4 unit `harem-motor.service` is **disabled**
+      on all three, and the fabric addresses in the preflight are **yours** (§13a)
 
 ---
 

@@ -94,6 +94,40 @@ Rejected on the way, each with its own boot and gates:
 | A 2,304-padded tensor-sliced arrangement instead of expert parallelism | On the fixed kernel it loses everywhere except M=1 and costs +12.5 % expert bytes out of the KV pool `[measured-here]`. |
 | A one-sided RDMA_WRITE mesh transport (`patches/kernel/0007`) | Removes RNR retries to exactly zero and moves throughput by nothing: engine C1 56.4, C8 171.1, prefill-fresh 1,763 against production's 56.9 / 168.9 / 1,792 — differences in both directions, inside boot spread. The ceiling is the cards' PCIe slots, not the flow control ([06](06-nccl-mesh.md) §9–§10) `[measured-here]`. |
 
+### 2.1 Measured since, not yet production: the draft cache at fp8
+
+The DFlash2 drafter's own KV cache is `bf16` while the main cache is `fp8`. Moving it to fp8 shrinks
+the drafter's page and should grow the pool by about 4.7 % ([07](07-kv-and-draft-page.md) §7). The
+open question was never the arithmetic — it was whether the draft's sliding-window backend accepts an
+fp8 cache at all, and whether a drafter attending over fp8 still proposes as well.
+
+Both are now answered. The arm ran on a **dump boot** (it added three prelude patches, which
+invalidates the fast-load sidecar — [09](09-measurement-protocol.md) §11), so its speed and quality
+lines are valid and **its KV pool line is not** `[measured-here]`:
+
+| | production 6 | draft KV fp8 (dump boot) | |
+|---|---|---|---|
+| C1 / C2 / C4 / C6 / C8 aggregate | 56.9 / 84.2 / 118.5 / 142.9 / 168.9 | 56.0 / 82.3 / 121.7 / 143.6 / **175.5** | medians of 3 rounds |
+| TTFT, C1 / C8 | 0.41 / 1.01 s | **0.40 / 0.91 s** | |
+| draft acceptance | 61–65 % | **60.1–64.0 %** (one C1 round at 57.3 %) | the gate was "stay in 60–65" |
+| accepted tokens per step | 5.3–5.5 | 5.2–5.5 | |
+| prefill-fresh (median of 3) | 1,792 | 1,790 | |
+| prefill 7K, warm repeat | 1,506 | 1,532 | |
+| gates, cold and warm | 10/10 · 12/12 | **10/10 · 12/12** | |
+| free RAM / swap | 11.3 / 12.6 / 12.5 GiB · ~0.1 | 14.5 / 15.8 / 15.8 GiB · ~0.1 | a dump boot's ledger, not production's |
+| KV pool | 4,449,035 | 4,382,920 — **not usable** | a dump boot writes 56 GiB per node through the page cache |
+
+**The claim this supports is "it costs nothing", not "it is faster".** C8 reads +3.9 %, which does
+clear that metric's ±3 % band ([09](09-measurement-protocol.md) §1.2), but this is one boot, in a
+different memory state from production, and it has not been repeated — §2 of the protocol page says a
+single pair decides nothing. The one number that would promote it is the pool, and that needs a load
+boot. Open item: [11](11-open-issues.md) §2.18.
+
+The mechanism is confirmed in the engine's own log rather than inferred: the drafter's page goes
+393,216 → **196,608 bytes**, per-block cost 21,917,440 → **20,934,400 bytes** (−4.5 %), and the
+blocks-per-request divisor stays at 363 — which is the whole point, since that divisor is what
+collapsed the pool before ([07](07-kv-and-draft-page.md) §1).
+
 ---
 
 ## 3. Against the NVFP4 sibling stack
@@ -382,6 +416,87 @@ needs a new large-M kernel that tiles over `block_m`, and it is vLLM/TileLang wo
 An earlier estimate of ours put this at −3.6 %; measured, the ceiling is −2.7 %, so **that estimate
 was 30 % optimistic** `[retracted]`.
 
+### 5.5.1 That kernel was then written, and it reached 40 % of its own ceiling
+
+A Triton kernel that grids over token tiles rather than over tokens — so the `(24, 16384)` projection
+is shared across a tile and the post mapping is reduced against `fn` **while the row is still in
+registers**, never landing in HBM for the second kernel to read back — was written, compiled and
+measured model-free `[measured-here]`. Throwaway container, engine idle and untouched, disjoint
+cpuset, both rulers measured inside each run ([09](09-measurement-protocol.md) §10), two independent
+runs, median of 21 repetitions, CUDA graphs on, 90 calls = 45 layers × 2.
+
+Winning configuration in both runs: `BLOCK_M=16, BLOCK_H=64, SPLIT_H=2, warps=4, stages=2`.
+
+| M = 2048 | run 1 µs/call | GB/s | run 2 µs/call | GB/s |
+|---|---|---|---|---|
+| k1 `mhc_post` | 670.7 | 225.4 | 674.3 | 224.2 |
+| k2 `hc_prenorm` | 311.6 | 221.1 | 313.9 | 219.4 |
+| k3 `pre_big_fuse` | 431.3 | 195.4 | 434.7 | 193.8 |
+| **kF, k1+k2 fused** | **815.7** | **187.7** | **815.2** | **187.9** |
+
+| route, 90 calls | traffic | run 1 | run 2 | time |
+|---|---|---|---|---|
+| k1 + k2 (today) | 220.05 MB | 86.293 ms | 86.783 ms | — |
+| **kF (fused)** | 153.14 MB (**−30.4 %**) | **73.416 ms** | **73.365 ms** | **−14.9 / −15.5 %** |
+| R3 (production, 3 kernels) | 304.31 MB | 123.914 ms | 124.960 ms | — |
+| **RF (fused, 2 kernels)** | 237.61 MB (−21.9 %) | **112.729 ms** | **112.649 ms** | **−9.0 / −9.9 %** |
+
+**On the prefill wall that is 11.2–12.3 ms of a 1,109 ms chunk: −1.01 to −1.11 %.** A second,
+independent route to the same figure agrees: this class is 11.7 % of a chunk (§5.2) and the route
+gets 9.4 % cheaper, which is −1.10 %. **The target was −2.1 to −2.8 %; the kernel delivered a little
+under half of it.**
+
+**Why it stopped there, and it is not the tiling.** The fused kernel runs at 187.7 GB/s where the
+k1+k2 route it replaces runs at 229.5 (220.05 MB in 958.8 µs). Traffic ratio 0.696 ÷ bandwidth ratio
+0.818 = 0.851, which is the measured −14.9 % exactly, so the traffic model is right and the loss is
+entirely bytes-per-second. Had the fused kernel reached k1's own band it would be −29.1 % on the pair
+and −19.3 % on the route — **−2.2 % of prefill**, the bottom of the original estimate. A 33-configuration
+sweep across two M values could not improve the winner, so this is not occupancy or tile shape. The
+one concrete untried arm is the `tl.dot` operand path: `fn` is transposed inside the kernel
+(`tl.trans` on a 32×64 fp32 block, staged through shared memory), and pre-transposing it once on the
+host would remove that. Half an hour of work, **not measured, not claimed** `[not tested]`.
+
+**Fusing loses below M ≈ 1024, and the reason is the L2.** `residual_cur` at M=512 is 16.8 MB and
+fits the 24 MiB L2, so k2's "re-read" was never going to DRAM and there is nothing to delete — the
+fusion pays its own cost for no saving `[measured-here]`:
+
+| M | k1+k2, 90 calls | kF | |
+|---|---|---|---|
+| 8 | 0.633 ms | 3.541 ms | +459 % |
+| 64 | 0.803 ms | 4.458 ms | +455 % |
+| 512 | 13.859 ms | 19.090 ms | **+37.7 %** |
+| 2048 | 86.293 ms | 73.416 ms | **−14.9 %** |
+| 4096 | 175.900 ms | 142.051 ms | **−19.2 %** |
+
+That is the measured justification for a size threshold, and it puts it at **M ≥ 1024**, not the 256
+the module shipped with. The M=4096 row also says the gain grows with the chunk: under
+`--max-num-batched-tokens 4096` the route figure is −13.2 %, which extrapolates to about −1.5 % of
+prefill — an `[estimate]`, since a 4,096-token chunk's own profile was never taken.
+
+**Correctness.** `residual_cur` is **bit-identical** at M = 8, 512, 2048 and 4096 (0 differing
+elements out of 33.5M and 67.1M); at M=64, 7 elements of 1,048,576 differ by one bf16 ulp (1.9e-6),
+which is fp32 FMA contraction near zero. `layer_input` differs by **at most one bf16 ulp** on 5.1 %
+of elements (max absolute difference exactly 3.125e-2 = 2⁻⁵, one ulp in the [4, 8) binade);
+`post_mix` and `comb_mix` by 0.21 % and 0.35 % relative. Inside bf16 rounding, and **not zero**.
+
+**What it cost, and why it is not in production on its own.** Adopting it puts **Triton JIT into the
+serving process** — a `/root/.triton` mount and an explicit warm-up before graph capture, or the first
+large-M call compiles inside the capture — which is a new failure surface for −1 %. The config surface
+is a cliff, not a slope: the winner reads 187.8 GB/s and its neighbours 79.4 and 44.5, and **the
+default the module shipped with was one of the bad ones** (79.4 GB/s), so every hardware or shape
+change needs the sweep run again. Set against the levers beside it — the collective at 16.5 % and the
+MoE GEMM at 26.4 % — a −1 % change does not earn its own boot and its own A/B cycle. **Written,
+measured, not adopted standalone; it rides the next image bundle together with `had_in`**, where one
+boot measures both ([11](11-open-issues.md) §2.16, §2.19).
+
+**One lesson is worth more than the kernel.** A GPU-free ahead-of-time compile check reported 18 of 18
+configurations compiling and every one of them under the 99 KB shared-memory limit. At real launch
+**6 of the 18 failed with `OutOfResources`**, because `metadata.shared` from the AOT path
+under-reports what a launch actually needs — 36,864 bytes reported against 106,496 required, in one
+case 40,960 against 147,456 `[measured-here]`. **A compile check answers "does it build", never "does
+it run".** No harm was done, because the bench caught them and carried on, but the static test had
+been written up as a pass.
+
 ### 5.6 KV block zeroing: at the memset roof, and the gain is not available
 
 `_zero_kv_blocks_kernel` costs **14.7 ms in a single call per prefill chunk**, 1.3 %. vLLM zeroes
@@ -415,7 +530,7 @@ Per 2,048-token prefill chunk (1,109 ms measured end to end), against the **meas
 |---|---|---|---|---|---|---|
 | 1 | NCCL all-reduce over the fabric | 182 | 16.5 % | ~20 GB/s bus against a ~30 GB/s per-node PCIe ceiling | ≤ **−2…4 %** prefill ([06](06-nccl-mesh.md) §9) | plugin / NCCL |
 | 2 | Dense BF16 GEMM, Ampere-class `cutlass_80_*` on sm_121 | 179 | 16.2 % | 63.6 against 80.4 TFLOP/s at the same shape = **79 %** | −3.1 % if it reached 95 % | vLLM / cuBLAS |
-| 3 | Hyper-connection mixing, 3 passes over a 4× residual | 129 | 11.7 % | 86–91 % of the ruler | **−2.5…2.7 %**, needs a new large-M kernel (§5.5) | vLLM / TileLang |
+| 3 | Hyper-connection mixing, 3 passes over a 4× residual | 129 | 11.7 % | 86–91 % of the ruler | ceiling −2.5…2.7 %; the kernel now exists and delivers **−1.0…1.1 %** (§5.5.1) | vLLM / TileLang |
 | 4 | MLA prefill (`mla_decode_partial` runs at prefill too) | 90 | 8.2 % | **not measured** — the trace does not carry the selected-key count | ? | cuda-exl3 |
 | 5 | KDA linear attention (triton) | 83 | 7.5 % | **not measured** | ? | vLLM |
 | 6 | MoE trellis GEMM, large M | 291 | 26.4 % | 81–96 % — and the duplicate-read lever is **closed** (§5.4) | ~0 | cuda-exl3 |

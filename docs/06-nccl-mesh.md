@@ -710,6 +710,15 @@ for very large messages: at 2 and 4 channels the 64 MB column suffers, at 8 it d
    should before the two larger levers ([11](11-open-issues.md) §2.12, §2.1) are spent. If you want to try: the
    remaining candidates are channel count over two cables (item 1), and getting NCCL to keep both cards busy on the
    *same* collective rather than alternating channels between them, which nobody here has looked at.
+8. **`NCCL_ALGO=Ring,Tree` has never been run here, and it is the cheapest thing left** `[not tested]`. The launcher
+   **forces** `NCCL_ALGO=Ring` (see the `NCCL_ENV` block in `scripts/start-tp3.sh`), which was never a measured
+   choice. At `world_size = 3` a ring all-reduce is `2(w−1) = 4` sequential steps and a tree is about `2·log₂3 ≈ 3.2`;
+   decode spends its collective time on a **fixed count** of 102 small messages per step
+   ([10](10-results-and-roofline.md) §5.3), so step count converts directly into latency. Expected **−1…3 % of a
+   decode step** and ~0 at prefill, where Ring is already right at 16.78 MB. The mesh plugin is algorithm-agnostic —
+   same peer pairs, three nodes fully connected — so nothing about it blocks Tree; it has simply never been asked
+   for. Give the tuner the list rather than pinning Tree, and run it model-free with the engine down before spending
+   an arm on it.
 
 ## 15. The same fix applies to the NVFP4 sibling
 

@@ -14,7 +14,7 @@ prebuilt image or mirrored weights.
 
 | Component | Revision we ran | Licence (confirmed at) | What that means for you |
 |---|---|---|---|
-| This recipe: `docs/`, `patches/`, `scripts/`, `bench/`, `envs/`, `results/` | this repository | **Apache-2.0** ([LICENSE](LICENSE)) | Use, modify, redistribute, commercially. Keep the notice. A credit or link back is appreciated, not required. |
+| This recipe: `docs/`, `patches/`, `scripts/`, `bench/`, `envs/`, `systemd/`, `results/` | this repository | **Apache-2.0** ([LICENSE](LICENSE)) | Use, modify, redistribute, commercially. Keep the notice. A credit or link back is appreciated, not required. |
 | `zai-org/GLM-5.3-Flash` (base model) | — | **MIT** ([model card](https://huggingface.co/zai-org/GLM-5.3-Flash)) | Free to use, including commercially. Keep the copyright notice. |
 | **`brandonmusic/GLM-5.3-Flash-tr3-4bpw`** (the weights we load) | HF `b20c49ba` | **ShapleyMCG License 1.0** — `license: other`, `license_name: shapleymcg-license-1.0` on the [model card](https://huggingface.co/brandonmusic/GLM-5.3-Flash-tr3-4bpw); text in the repository's `LICENSE` file | **Read it. It is short and it is unusual.** See the section below. |
 | `incoai/GLM-5.3-Flash-DFlash2` (speculative draft) | — | **CC BY-NC-ND 4.0** ([model card](https://huggingface.co/incoai/GLM-5.3-Flash-DFlash2)) | **Non-commercial, no derivatives, attribution required.** See the section below. |

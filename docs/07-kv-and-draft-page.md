@@ -237,13 +237,92 @@ exactly the state you do not want under load.
 
 **Climb it yourself, one rung at a time, and check free memory and swap at each rung.** The ladder is
 not forbidden — it is just that on this stack it runs into the free-memory rule before it runs into
-anything else. There is one open lead: the fast-load work in [docs/08](08-fast-boot.md) removed a
-large page-cache spike during loading, so a rung at 0.82–0.83 may now sit differently from how it sat
-before. That has not been measured `[not tested]`.
+anything else.
+
+**The 0.85 rejection is older than the machine it was measured on.** That boot predates the fast-load
+work, which removed a large page-cache spike during loading and added `MADV_DONTNEED` plus
+`malloc_trim` at the end of it ([08](08-fast-boot.md) §5). Since then the same production
+configuration sits at 11–12 GiB free with **zero** swap and 3.0–3.5 GiB of page cache, where the
+0.85 boot had hit 1.9 GiB free and 1.6 GB of swap. The rung at **0.82–0.83** was never tried at all,
+and 0.85 deserves a re-run rather than a carried-forward verdict `[not tested]`.
+
+There is a second, sharper instrument nobody here has used: **`--kv-cache-memory`**, which sizes the
+pool in bytes instead of as a fraction of the device. `gpu-memory-utilization` budgets a share of the
+**total**, so a worker that starts with 113 GiB free is still squeezed into a 97.3 GiB budget, and
+vLLM's own boot log says as much — it prints the byte figure it thinks would fully utilise the device
+against the far smaller one we actually take. Ladder first and pin last, because a pin removes the
+headroom that the free-memory rule is protecting `[not tested]`.
 
 ---
 
-## 7. Where the pool stands
+## 7. The draft cache at fp8
+
+The main cache is `fp8`; the drafter's is `bf16`, because our launcher pins it there —
+`"kv_cache_dtype": "auto"` inside `--speculative-config`, where `auto` for the draft means "inherit"
+only if the field is left unset. A prelude patch (`HAREM_DRAFT_KV_DTYPE`) overrides
+`SpeculativeConfig` before any validation runs, so the launcher is untouched and the rollback is one
+environment variable. With the knob unset the patch does not run at all.
+
+**What it is worth, and why an earlier number was wrong.** The drafter's page halves, so the
+per-block cost falls and the blocks-per-request divisor — the thing that actually decides the pool
+(§1) — does not move:
+
+| geometry | bytes per block | divisor | pool |
+|---|---|---|---|
+| draft page 16 (measured before the page surgery) | 20,074,240 → 20,012,800 | 723, unchanged | **+0.3 %** |
+| **draft page 256 (production today)** | 21,917,440 → **20,934,400** (−4.5 %) | 363, unchanged | **+4.7 %** `[estimate]` |
+
+The **+0.3 %** figure that appeared in our earlier notes belongs to the pre-256 geometry and does not
+apply to this stack `[retracted]`. The draft group is a larger share of the per-block cost now
+precisely because §3 made its page 16× bigger.
+
+**Measured: it is safe.** The arm booted, which answers the only question a boot could answer — the
+DFlash sliding-window backend does accept an fp8 cache, and would have failed loudly rather than
+silently if it did not. The engine's log carries the mechanism directly: draft page
+393,216 → **196,608 bytes**, per-block 21,917,440 → **20,934,400**, divisor still 363. Gates
+**10/10 · 12/12** cold and warm. **Draft acceptance 60.1–64.0 %** across all concurrency levels and
+rounds, with one C1 round at 57.3 % — against production's 61–65 %, and against a gate that said the
+arm dies if acceptance leaves the 60–65 band. Speed is inside the bands ([09](09-measurement-protocol.md)
+§1.2). Full table in [10](10-results-and-roofline.md) §2.1 `[measured-here]`.
+
+**What it has not produced is the pool number.** The arm added three prelude patches, which
+invalidates the fast-load sidecar and forces a dump boot ([09](09-measurement-protocol.md) §11), and
+a dump boot's pool reads low because 56 GiB per node goes out through the page cache — this one read
+4,382,920, which is *below* production and means nothing. The expected figure on a load boot is about
+4.66M. **Not promoted until that boot happens** `[not tested]`;
+[11](11-open-issues.md) §2.18 tracks it.
+
+---
+
+## 8. Every newly allocated block is zeroed, and here that cannot be switched off
+
+Reading the per-block table in §2 raises an obvious question: 21.9 MB per block is a lot of bytes to
+hand to a request, and vLLM zeroes each one before use. Per prefill chunk that is a single kernel
+writing **2.4–2.9 GB**, where the new tokens' real KV is about 3.4 MB — 1.3 % of a prefill chunk, at
+100 % of the memset roofline, so there is nothing to win inside the kernel and the only lever was to
+not run it ([10](10-results-and-roofline.md) §5.6).
+
+vLLM zeroes when the cache has Mamba layers **or** mixed precision. The zeroer visibly skips Mamba
+layers, which made the inference "so on this stack the only live reason is the bf16 draft cache; move
+it to fp8 and the zeroing can stop" look sound. It is wrong, and the reason is the same slot sharing
+that makes §2's table look the way it does: in this model's hybrid layout **one tensor is co-owned by
+an MLA layer and one Mamba layer from each group**, so a block released by the Mamba group and handed
+to the attention group arrives carrying 1.7 MB of raw SSM state. Measured per block, **85.5 %** of
+what is being zeroed is that co-owned region; the indexer tail is 5.5 % and the draft's sliding
+window 9.0 % `[measured-here]`.
+
+So the Mamba half of the condition is the binding one, it is independent of precision, and **draft
+fp8 does not open this door**. The two changes are unrelated after all — which is worth stating
+plainly, because they were designed as one change. A fail-closed gate was written anyway
+(`HAREM_ZERO_ATTENTION_KV=0`, off by default, three conditions proved from the engine's own
+configuration, `raise` rather than warn) so that the conclusion is checked by the machine instead of
+believed: on this model it refuses to boot, by design. The safe remainder — indexer plus draft, if the
+cache were uniform — is 0.19 % of prefill and no partial mode was written for it
+([11](11-open-issues.md) §2.13).
+
+---
+
+## 9. Where the pool stands
 
 Production, `gpu-memory-utilization 0.80`, draft page 256, `--max-num-batched-tokens 2048`, with the
 fast-load sidecar in place `[measured-here]`:
@@ -261,7 +340,7 @@ the third node was bought for.
 
 ---
 
-## 8. What is next
+## 10. What is next
 
 [08 — Fast boot](08-fast-boot.md), which is where the last +1.6 % of that pool came from, as a side
 effect of not reading 163 GB through the page cache.

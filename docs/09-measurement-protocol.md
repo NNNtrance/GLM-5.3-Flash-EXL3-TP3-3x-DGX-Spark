@@ -45,8 +45,54 @@ Three conditions, all of them, or go back to five:
    still a five-round boot;
 3. the three rounds agree within about 5 %. If they do not, that is a signal, not a number.
 
-Every arm in this repository up to *fast boot S4* is a five-round median with two discarded; the two
+Every arm in this repository up to *fast boot S4* is a five-round median with two discarded; the ones
 after it are three-round medians. The tables say which, and the two are not interchangeable.
+
+### 1.1 Our own harness disagreed with its own documentation
+
+The quick-arm script carried the header "5 rounds, the first 2 discarded" and its body ran **three**.
+Applied literally, the rule would have left a median of one `[retracted]`. Nothing published here was
+computed that way — the three-round arms were reported as medians of three, which is what they are —
+but the discrepancy stood in the script for a day and is exactly the class of thing that quietly
+turns into a wrong number.
+
+Two things were checked before fixing it in the direction of the code rather than the header. First,
+**the warm-up ramp is gone on a warm cache**: across the three settled arms of 5 September, round 1
+was the *fastest* round twice. There is no ordered penalty left to discard. Second, the round-to-round
+spread inside an arm is what §1.2 measures, and it is larger than most of the differences we have been
+calling results.
+
+**The quick tier is now one warm-up round plus three measured rounds, median of the three** — four
+rounds in total, ~4 minutes more than the old three and the only version in which the "discard the
+warm-up" sentence is true.
+
+### 1.2 The noise band, per metric, and the rule that follows from it
+
+Round-to-round spread within a single settled arm, three arms, warm tuner cache, nothing changed
+between rounds `[measured-here]`:
+
+| arm (rounds) | C1 | C2 | C4 | C6 | C8 |
+|---|---|---|---|---|---|
+| production 6 (3) | 57.24 / 56.85 / 56.10 → **1.9 %** | 84.43 / 82.95 / 84.17 → 1.7 % | 114.94 / 125.07 / 118.51 → **8.5 %** | 142.78 / 146.44 / 142.91 → 2.6 % | 167.31 / 170.22 / 168.95 → 1.7 % |
+| mesh arm (3) | 56.15 / 56.35 / 58.51 → 4.2 % | 79.40 / 84.44 / 83.77 → 6.0 % | 123.46 / 125.11 / 119.32 → 4.7 % | 151.42 / 143.27 / 143.30 → 5.7 % | 175.03 / 171.07 / 170.45 → 2.7 % |
+| draft page 256 (5) | 54.62…52.34 → 4.4 % | — | — | — | 167.83…162.00 → 3.6 % |
+
+**The declared bands: C1 ±4 %, C2 ±6 %, C4 ±9 %, C6 ±6 %, C8 ±3 %.** C4 is the noisiest column on
+this stack and C8 the quietest, which is the opposite of the intuition that more streams means more
+variance.
+
+Two rules follow, and they apply to every table in this repository:
+
+- **A difference of 3 % or less is written down as "equal".** Report the numbers, do not report a
+  winner. This is a floor, not the whole test.
+- **Above the floor, a difference still has to clear its own metric's band** before it is called a
+  result — and if the decision matters, §2 applies as well: repeat it on a second boot.
+
+Judgements already on record that this rule reclassifies as "equal": the combine-staging arm's
++2.3 % at C4, and patch 0007's −0.9…+4.2 %. One survives it: production 5 → 6 is +4.4 % at C1
+(inside C1's band) but **+5.6 % at C8**, which clears C8's ±3 %, so that conclusion stands.
+
+None of this replaces §2. The bands above are *within one boot*; boot-to-boot is 15.9 %.
 
 ## 2. Boot-to-boot variance is 16 %, so two rounds decide nothing
 
@@ -188,8 +234,13 @@ before every measurement is which of these can actually settle it. Working down 
 | Tier | What it runs | Cost | Answers |
 |---|---|---|---|
 | **A — model-free** | `bench/`: the real shapes, engine **down**. `bench/validate.sh <image>`, `bench/ar_bench.py`, `bench/mesh-multilink-sweep.sh`, `bench/moe_stage_bench.py`, `bench/topk_bench.py`, `bench/mhc_bench.py`, `bench/zerokv_bench.py`, and always `bench/bw.py` + `bench/gemmpeak.py` in the same run | seconds to ~45 min, no boot | kernel and collective questions; rejecting a setting outright; anything with a mechanism |
-| **B — quick arm** | one boot → gates cold → `soguk-c1` → `prefill-7k` → **`prefill-fresh`** → **3** C1–C8 rounds → gates warm → free RAM and swap | ~17 min | does a model-free win survive the engine, and did it cost anything |
-| **C — full arm** | tier B with **5** rounds, plus `category-speed.py` and `mixed-load-probe.py` | ~30–40 min | a configuration that is going into production, or a claim about content types or latency under load |
+| **B — quick arm** | one boot → gates cold → `soguk-c1` → `prefill-7k` → **`prefill-fresh`** → **1 warm-up + 3 measured** C1–C8 rounds → gates warm → free RAM and swap | ~17–21 min | does a model-free win survive the engine, and did it cost anything |
+| **C — full arm** | tier B with **5** measured rounds, plus `category-speed.py` and `mixed-load-probe.py` | ~30–40 min | a configuration that is going into production, or a claim about content types or latency under load |
+
+The tier B row is a measured cost, not an estimate: two arms on 5 September ran 07:38→07:55 and
+09:20→09:36, of which the boot is about 5 minutes `[measured-here]`. Its KV pool line comes free —
+`GPU KV cache size` is in the boot log — and on any arm that changes a page size or a batch budget
+**that line is the result**, not a footnote.
 
 A fourth thing, which is not a tier and is cheaper than all of them: **the live server's own
 metrics**. `bench/live-step.py` and `bench/live-decode.py` get a prefill ladder, a chunk-boundary
@@ -238,10 +289,13 @@ The rule around that file is four lines:
 2. **Check it first, and wait rather than interleave.** If it is held, your measurement is not
    cheaper for starting now; it is worthless.
 3. **A model-free container beside an idle engine is allowed and is not free.** Everything measured
-   this way in this repository ran pinned to the engine's own cpuset with a memory cap
-   (`--cpuset-cpus`, `--memory=8g`), against an engine that was serving nothing. That is a
-   deliberate choice — it is how the numbers stay comparable with the ones taken while the engine was
-   down — and it is only defensible while the engine is idle.
+   this way in this repository ran in a throwaway container (`--rm`) with a memory cap
+   (`--memory=8g`), on a **cpuset disjoint from the engine's**, and with its own JIT cache
+   directories so it could not warm or poison the engine's. The engine is pinned to `CPUSET=5-9,15-19`
+   ([envs/env.tp3.example](../envs/env.tp3.example)), so the bench gets `--cpuset-cpus 0-4,10-14` and
+   the two do not share a core. Write both sets down in the report. This is only defensible while the
+   engine is idle, and it is still not free: the GPU and its memory bandwidth are shared no matter how
+   the cores are split, which is why §10 exists at all.
 4. **Three-node NCCL work needs the engine down, not idle** `[measured-here]`. This is the one hard
    line: a fabric sweep beside a running engine can exhaust queue-pair resources and take the engine's
    next collective with it. Every mesh number on this stack was taken with all three containers
@@ -254,7 +308,40 @@ configuration read with no effect on a running container, and it is written down
 not the confession, it is that the next person debugging an odd number can rule the engine in or out
 without guessing.
 
-## 11. What is next
+## 11. Changing a patch changes the sidecar: budget the dump boot into the arm
+
+This is a planning rule, and it has cost us an hour of downtime once already.
+
+The fast-load sidecar's identity hash covers **every `patch-*.py` in the patch directory and the
+prelude script**, not just the patches that touch a weight ([08](08-fast-boot.md) §4). So any arm
+that adds, edits or reorders a patch — including a patch that only writes a log line, only changes a
+KV page size, or is gated off by an environment variable it does not set — **invalidates the sidecar,
+and the preflight refuses the boot**. That is the design working. It is also a 682-second dump boot
+on every node before the arm can start `[measured-here]`.
+
+Three consequences for how an arm is planned:
+
+1. **Read the arm's patch list before you cost it.** A "one boot, ~17 minutes" quick arm that touches
+   the patch directory is a **dump boot plus a load boot**, closer to 45 minutes, and the dump boot's
+   own numbers are not usable: its KV pool reads low because 56 GiB per node goes out through the
+   page cache, and its weights+non-torch ledger is not the production one either. **Never record a
+   dump boot's pool as a result** ([08](08-fast-boot.md) §5).
+2. **A dump boot is still a real arm for everything that is not memory.** Gates, draft acceptance,
+   tok/s and TTFT are all valid on it — the draft-fp8 arm was validated exactly that way
+   ([07](07-kv-and-draft-page.md) §7, [11](11-open-issues.md) §2.18) — so if the question is
+   "is this safe", the dump boot answers it and the load boot only supplies the pool number.
+3. **Do not touch the patch directory while a boot is in progress.** It is mounted live into the
+   container, so an edit mid-boot changes the identity underneath the running dump. This has happened
+   once and it cost the boot.
+
+The narrower gate this argues for — hashing only the patches that can affect a weight, and hashing
+the prelude's ordered list of calls rather than its full text — is written up as an open item in
+[11](11-open-issues.md) §2.21. Until it exists, the rule is the one above: budget the dump boot, or
+do not touch the patches.
+
+---
+
+## 12. What is next
 
 [10 — Results and roofline](10-results-and-roofline.md) — the numbers this protocol produced, and how
 close to the hardware they are. [12 — The tuner cache](12-tuner-cache.md) — why §1 has two protocols

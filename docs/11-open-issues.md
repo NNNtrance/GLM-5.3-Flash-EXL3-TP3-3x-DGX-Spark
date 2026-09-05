@@ -8,9 +8,10 @@ elsewhere.
 
 ## 1. Retracted
 
-Seven things we wrote down as findings and later measured properly, plus two smaller ones. Each was
-published — in a report, an upstream issue, or both — before it was corrected. Two of them (§1.6 and
-§1.7) are the same number, corrected twice, in opposite directions.
+Seven things we wrote down as findings and later measured properly, plus two smaller ones, plus a
+full audit of every claim of ours that a later measurement overturned (§1.9 — **24 of them**). Each
+was published — in a report, an upstream issue, or both — before it was corrected. Two of them (§1.6
+and §1.7) are the same number, corrected twice, in opposite directions.
 
 ### 1.1 "The missing `n_rows` also costs the non-expert-parallel path"
 
@@ -83,6 +84,46 @@ computed a ceiling twice from a datasheet and never once from the machine.
   **3.5 s**: the autotune was also doing JIT and kernel warm-up, which simply moved into graph
   capture `[retracted]`. See [08](08-fast-boot.md).
 
+### 1.9 The full audit: every claim of ours that a measurement overturned
+
+On 5 September the whole stack was re-read against its own raw data, and every published claim was
+checked against the evidence behind it. Twenty-four did not survive. The nine above are the ones with
+a story worth telling; this table is the complete list, so that nothing is quietly dropped and so the
+shape of the mistakes is visible in one place `[retracted]`.
+
+| # | What we claimed | What the measurement says | Where |
+|---|---|---|---|
+| 1 | Memory ruler is 273 GB/s | Achievable read is **225 GB/s**; every roofline published before was ~22 % optimistic | [10](10-results-and-roofline.md) §4.1 |
+| 2 | "A 25 GB/s link" per neighbour | The cable is not the ceiling; the card's PCIe Gen5 x4 slot is, at ~15 GB/s | §1.6 |
+| 3 | "A 50 GB/s pair of cables", so the collective is at 28 % | Same number wrong again, other direction; ~30 GB/s per node, collective at ~70 % | §1.7 |
+| 4 | The 13 GB/s ceiling is because the device-pointer path is off | Turning it on added **nothing** at 16 MB (1,611 → 1,606 µs); the ceiling was PCIe | §1.6, [06](06-nccl-mesh.md) §9 |
+| 5 | Expert-stationary scheduling is worth 14–27 % of MoE traffic | Doubling blocks per expert costs 1.11×, not 2×; the trellis stays L2-resident | §2.12 |
+| 6 | The KV-zeroing gate is worth −1.2…1.4 % of prefill | 85.5 % of those bytes are Mamba/KDA state; safe remainder **−0.19 %** | §2.13 |
+| 7 | NCCL picks `LL` at 16 MB and leaves half the link unused | Forcing LL there is **11× worse**; the tuner is not choosing it | §1.4 |
+| 8 | No CUDA graphs on this stack / the `22 % 4` head-count obstacle | That was a different image. Here graphs capture and run (PIECEWISE **and** FULL); the 36/9 drafter sidecar removed the obstacle | [envs/env.tp3.example](../envs/env.tp3.example) |
+| 9 | One upstream build is ~10 % slower end to end | Boot-to-boot variance is 15.9 % | §1.3 |
+| 10 | Build `1699c89` costs 16 % at C1 | Single round. Over five rounds there is no loss (+1.2 %) | §1.3 |
+| 11 | Disabling flashinfer autotune saves 34 s | ~3.5 s | §1.8 |
+| 12 | Draft KV at fp8 is worth +0.3 % of the pool | That was the pre-256 geometry; today the same knob is **+4.7 %** | §2.18 |
+| 13 | Fusing the hyper-connection pair saves 40 ms, −3.6 % of prefill | Measured ceiling −30 ms, −2.7 %; the kernel that exists delivers −1.0…1.1 % | §2.16 |
+| 14 | The existing fused HC kernel is the better route at small M | At M=8 the fused route is 1.6 % **worse**; at M=2048 it is +32 % worse | [10](10-results-and-roofline.md) §5.5 |
+| 15 | The MoE trellis GEMM is target number one | Against the corrected ruler it runs at 81–96 %. The two largest prefill items are **outside** the EXL3 kernel library | [10](10-results-and-roofline.md) §6 |
+| 16 | The quick-arm harness runs five rounds and discards two | Its body ran three. Applied literally the rule left a median of one | [09](09-measurement-protocol.md) §1.1 |
+| 17 | The chat template we serve comes from the base model | Its md5 matches **neither** checkpoint on disk. It has never been verified against a named source | [envs/env.tp3.example](../envs/env.tp3.example) |
+| 18 | `NCCL_BUFFSIZE` is an open lever worth trying | It had already been measured and eliminated ("no difference"); `NCCL_P2P_NET_CHUNKSIZE` only affects point-to-point. We listed a closed item as open twelve hours later | [06](06-nccl-mesh.md) §12 |
+| 19 | `NCCL_MAX_NCHANNELS=8` had already been tried and eliminated | That arm set 8 channels **together with** `NCCL_PROTO=LL` and was never written up. Tried cleanly it is +13 % at C8 | [06](06-nccl-mesh.md) §8 |
+| 20 | The extra masking pass is under 1 % of the MoE layer | 2.9 % at M=8 rising to 15.8 % at M=2048 | §1.2 |
+| 21 | The missing `n_rows` also costs the non-expert-parallel path | With no expert map the tail is `-1` everywhere; the author's reading was right | §1.1 |
+| 22 | `--language-model-only` stops the vision tower being built | It only stops it being *run*. 1.05 GiB wasted at TP=2, and only visible at TP=3 when `divide(16, 3)` asserted | [03](03-tp3-padding-and-sidecars.md) |
+| 23 | The TP=2 KV collapse came from the draft's page layout | The dominant cause was memory scarcity at two nodes; the page layout was second-order | [07](07-kv-and-draft-page.md) §4 |
+| 24 | Overlapping the collective with compute is worth −10…13 % of prefill and −6…10 % of decode | That estimate counted the hideable collective and not the second MoE weight stream the split pays for. Corrected: prefill −6.3…+8.0 %, decode +6…+38 % (worse) | §2.17 |
+
+Read the shape rather than the rows. **Six of the twenty-four are a ruler we quoted instead of
+measured** (1, 2, 3, 4, 15, and the roofline percentages that followed). **Four are a single pair of
+sweeps treated as a result** (9, 10, 16, 19). **Three are an arithmetic model that a bench refuted**
+(5, 6, 24). **Two are our own tooling disagreeing with our own documentation** (16, 18). Only one (17)
+is a provenance claim, and it is still open.
+
 ---
 
 ## 2. Open, with a known next step
@@ -139,22 +180,65 @@ What is still genuinely open here is small and specific:
 4. **Nobody has tried to make one collective use both cards at once.** Channels alternate between the
    two NICs; whether a single large all-reduce can saturate both PCIe paths at the same time is
    unmeasured, and it is where the remaining ≤30 % would have to come from `[not tested]`.
+5. **`NCCL_ALGO=Ring,Tree` has never been run on this mesh** `[not tested]`, and it is the cheapest
+   untried thing in this repository. Our launcher **forces** `NCCL_ALGO=Ring`; at `world_size = 3` a
+   ring all-reduce is `2(w−1) = 4` sequential steps against a tree's `~2·log₂3 ≈ 3.2`, and decode is
+   latency-bound on a fixed 102 collectives per step ([10](10-results-and-roofline.md) §5.3), so step
+   count converts straight into time. Expected **−1…3 % of a decode step**, ~0 at prefill where Ring
+   is already the right choice at 16.78 MB. Handing the list to the tuner rather than pinning Tree is
+   the arm to run. Cost: **zero** — it is a model-free sweep with the engine down; only a win goes to
+   an engine arm.
+
+`NCCL_BUFFSIZE` and `NCCL_P2P_NET_CHUNKSIZE` are **not** on this list, and were briefly put back on
+it by mistake: the first was measured and made no difference, the second only affects point-to-point
+transfers ([06](06-nccl-mesh.md) §12, §1.9 row 18).
 
 **Retracted here, twice** `[retracted]`: this section once said the disabled GPUDirect path "holds
 the ceiling at ~13 GB/s against a 25 GB/s link", and then said the true ceiling was a 50 GB/s pair of
 cables. Both are wrong; see §1.6 and §1.7.
 
-### 2.3 The pool is sized by the smallest rank
+### 2.3 The pool is sized by the smallest rank — and the imbalance is bigger than we said
 
 The head node has 35.40 GiB available for KV and the binding rank has 32.85 GiB, so **2.55 GiB on the
-head node is simply unused** `[measured-here]`. The asymmetry comes from rank 0 carrying the API
-server and the drafter's own overhead. Nothing has been tried here `[not tested]`.
+head node is simply unused** `[measured-here]`. That was the production-6 reading. It is the wrong
+end of the telescope: the pool is set by the **worst** rank, so every GiB a worker spends that the
+head does not is a GiB of pool nobody gets.
+
+Reading the same ledger by class rather than by total makes it much larger. The weights are
+**identical on all three ranks** — the engine logs `Model loading took 54.86 GiB` three times — and
+yet weights-plus-non-torch reads 56.36 / 64.34 / 64.58 GiB, which puts **non-torch memory at 1.50 GiB
+on rank 0 and 9.48–9.72 GiB on the workers**. About **8.2 GiB per worker is stranded**, and the pool
+is sized against it. If it were equalised the pool would grow by roughly **8–26 %**, which is larger
+than every kernel item left on this page `[measured-here]`.
+
+**Under diagnosis, and honestly labelled: nobody knows yet what that 9.5 GiB is.** Candidates nobody
+has separated: NCCL and mesh-plugin buffers (the workers hold more peer state than the head),
+the 32 GB shared-memory segment, `--headless` worker startup, and the fast-load dumper. Two caveats
+before anyone prices it: the 8.2 GiB figure was read from a **dump boot**, whose ledger is not
+production's ([09](09-measurement-protocol.md) §11), and the production-6 era numbers were milder
+(5.2 / 7.7 / 7.9 GiB), so part of this may be the dump. The next step is cheap and does not need a
+new arm: read the per-class ledger on the next ordinary boot, and if it holds, one instrumented boot
+that names the allocations `[not tested]`.
 
 ### 2.4 The memory ladder above 0.80
 
-0.85 was measured and rejected on the free-memory rule; 0.88 was never attempted. One lead: the
-fast-boot work removed a large page-cache spike during loading, so a rung at 0.82–0.83 may sit
-differently now from how it sat before `[not tested]`. See [07](07-kv-and-draft-page.md) §6.
+0.85 was measured and rejected on the free-memory rule; 0.88 was never attempted. Two things have
+changed since that verdict was recorded, and both argue for re-running it rather than carrying it
+forward `[not tested]`:
+
+- **The rejection predates the fast-load work.** That work removed a large page-cache spike during
+  loading and added `MADV_DONTNEED` plus `malloc_trim` after it ([08](08-fast-boot.md) §5). The
+  0.85 boot hit 1.9 GiB free with 1.6 GB of swap; the same production configuration today sits at
+  11–12 GiB free with **zero** swap and 3.0–3.5 GiB of page cache. The rung at **0.82–0.83** was
+  never tried at all.
+- **`--kv-cache-memory` has never been used.** It sizes the pool in bytes rather than as a fraction
+  of the device, which matters here because `gpu-memory-utilization` budgets a share of the **total**
+  while a worker starts with 113 GiB actually free — and vLLM's own boot log says so, printing the
+  byte figure it believes would fully utilise the device against the far smaller one we take.
+
+Order matters: **ladder first, pin last.** A byte pin removes exactly the headroom the 4 GiB
+free-memory rule exists to protect, so it is the last rung, not a shortcut past the others. See
+[07](07-kv-and-draft-page.md) §6.
 
 ### 2.5 `--max-num-batched-tokens 3072`
 
@@ -269,21 +353,39 @@ an open arm for two days and because the outcome — upstream deleting 232 kerne
 tuning a threshold — is the useful part of the story ([02](02-image-build.md),
 [10](10-results-and-roofline.md) §2).
 
-### 2.16 The hyper-connection fusion kernel — open, and the largest kernel-side item left
+### 2.16 The hyper-connection fusion kernel — written and measured; not adopted on its own
 
 `hc_mult = 4` carries the residual stream in four copies, and a fused post+pre block touches
 `residual_cur` three times per call: the first kernel writes it, the second reads it, the third reads
-it. The second kernel's **entire** traffic is that one re-read. Fusing kernels one and two saves
-30.5 % of that pair's bytes — **−28 to −30 ms per prefill chunk, −2.5 to −2.7 % of prefill**
-`[measured-here]`.
+it. The second kernel's **entire** traffic is that one re-read. Fusing kernels one and two removes
+30.4 % of that pair's bytes, which is a ceiling of **−2.5 to −2.7 % of prefill** `[measured-here]`.
 
-The kernel that would do it does not exist yet. The existing `mhc_fused_tilelang` is the wrong shape:
-it grids per token per n-tile and re-reads the residual in every CTA, and forced at large M it is
-**+32 % worse** at M=2048 — worse at every M we tried, including the M≤16 range production actually
-selects it in. What is needed is a large-M kernel that tiles over `block_m` so the 1.57 MB projection
-is shared across tokens, finishes the n dimension in one CTA, and reduces `residual_cur` while it is
-being written. The skeleton exists (`hc_prenorm_gemm_block_m_tilelang`); adding the post mapping to
-its A-operand load is the work. **This is vLLM/TileLang work, not EXL3 work** `[not tested]`.
+**The kernel now exists.** A Triton kernel that grids over token tiles and reduces the post mapping
+against the projection while the row is still in registers was written, swept over 33 configurations
+and measured model-free in two independent runs: **−14.9 to −15.5 %** on the fused pair, **−9.0 to
+−9.9 %** on the three-kernel route, **−1.0 to −1.1 % of the prefill wall** at M=2048. Correctness is
+bit-identical on `residual_cur` at every M except one 7-element, 1-ulp difference at M=64;
+`layer_input` differs by at most one bf16 ulp on 5.1 % of elements. Full tables:
+[10](10-results-and-roofline.md) §5.5.1.
+
+**It reached about 40 % of its own ceiling and it is not going in alone.** The loss is entirely
+bytes-per-second — the fused kernel runs at 187.7 GB/s against the 229.5 the route it replaces gets —
+and a full configuration sweep could not improve it, so it is not tiling or occupancy. Set against
+adoption's price (Triton JIT inside the serving process, a warm-up before graph capture, and a
+configuration surface that is a cliff rather than a slope: the winner reads 187.8 GB/s and its
+neighbours 79.4 and 44.5), −1 % does not earn its own boot. **It rides the next image bundle with
+`had_in` (§2.19), where one boot measures both.**
+
+Two threads left open:
+
+- **The one untried arm that would change the verdict** `[not tested]`: the `tl.dot` operand path
+  transposes the projection inside the kernel through shared memory. Pre-transposing it once on the
+  host would remove that; if it lifts the kernel to the band the first kernel already achieves, the
+  result becomes −2.2 % of prefill and this stops being a bundle rider. Half an hour of work,
+  not measured, not claimed.
+- **The size threshold is measured now, and it was wrong.** Fusing *loses* below about M=1024 —
+  +37.7 % at M=512 — because `residual_cur` at that size is 16.8 MB and fits the 24 MiB L2, so the
+  re-read it deletes was never going to DRAM. The module shipped with the threshold at 256.
 
 Two smaller, cheaper pieces of the same class are measured and unclaimed: passing two keyword
 arguments the call site currently leaves at their defaults is −4.9 % on the first kernel, and one
@@ -292,42 +394,157 @@ residual once and writes both outputs once would be −5.3 % of prefill, but nee
 memory per token and would collapse occupancy on 48 SMs; not measured, not recommended, recorded so
 the ceiling is known `[estimate]`.
 
-### 2.17 Overlapping the all-reduce with compute — the larger fabric lever, untouched
+### 2.17 Overlapping the all-reduce with compute — dual-batch overlap is closed; one variant survives
 
-The collective is **16.5 % of a prefill chunk** and GPU occupancy in that window is **99.3 %**, which
-means the all-reduce is essentially **serialised** against the compute rather than hidden behind it.
-Making the fabric faster can win at most 2–4 % of prefill (§2.2); making the collective *overlap*
-could reach for most of the 16.5 %, and nothing in this stack has tried.
+The collective is **16.5 % of a prefill chunk** and GPU occupancy in that window is **99.3 %**, so the
+all-reduce is **serialised** against the compute rather than hidden behind it. Making the fabric
+faster can win at most 2–4 % of prefill (§2.2); making the collective *overlap* could reach for most
+of the 16.5 %. That is why this item carried the largest number on the page. It is now much smaller,
+and the reason is arithmetic rather than engineering.
 
-It is not a plugin change. It is a scheduling question in the engine — chunk the hidden state so the
-all-reduce for one slice runs while the next slice computes — and it interacts with the MoE stage's
-per-token cost curve and with the batched-token budget. We have not designed it, measured it, or
-established that this vLLM's collective path can be driven that way `[not tested]`. It is written
-down here because after a day of fabric work it is the item with the largest number attached to it.
+**First, what is not available.** Every overlap mechanism vLLM ships behind a flag is dead on this
+configuration, and each for a checkable reason `[measured-here]`, read out of the image with the
+engine down: async tensor parallelism, the sequence-parallelism pass and the FlashInfer
+all-reduce+RMSNorm fusion all require `torch.compile`, and this model family never enters it — it is
+on a fixed list that forces `CompilationMode.NONE`. The FlashInfer path additionally supports world
+sizes 2/4/8/16, custom all-reduce 2/4/6/8/16, NCCL symmetric memory a minimum of 4, and torch
+symmetric memory neither this capability nor this world size — **`world_size = 3` is excluded by all
+four**. DeepEP is installed but never engages, because with `data_parallel_size = 1` the all-to-all
+path is not constructed at all. Nothing here is a tuning opportunity; they are all structural.
 
-### 2.18 Draft KV at fp8 — written, gated, not yet booted
+**Second, dual-batch overlap (DBO), which was the real candidate — closed.** The mechanism suits an
+all-reduce: the yield primitives are stream-based and collective-agnostic, vLLM's TP all-reduce lands
+on `current_stream()`, and the ping-pong between micro-batches is deterministic so every rank issues
+in the same order. The patch is also **smaller than we estimated** — about 95–160 lines across five
+files, and it does **not** touch the model file, because one bottleneck (`GroupCoordinator.all_reduce`)
+covers all 102 collectives. Our earlier "medium-to-large vLLM patch, mHC state at risk" reading was
+wrong on both counts: the mHC triple is thread-local dataflow, not a shared buffer `[retracted]`.
+
+It fails on arithmetic instead. **Splitting the batch pays the MoE expert weight stream twice.** At
+M ≥ ~128 every local expert is already touched, so two half-batches stream the same 96 experts per
+rank twice: **+73 to +232 ms per chunk**, against **−135 ms** of collective that could be hidden at
+best. The break-even is in the middle of that uncertainty band.
+
+| arm (per 2,032-token chunk, f = 0.8 hidden) | ms/token | vs today |
+|---|---|---|
+| today, MNBT 2048 | 0.5458 | — |
+| MNBT 4096, no DBO | 0.4584 | **−16.0 %** |
+| MNBT 4096 + DBO | 0.4702 | −13.9 % |
+| MNBT 2048 + DBO | 0.5113…0.5896 | **−6.3 %…+8.0 %** |
+
+Decode is worse and not marginal: C1 **+38 %**, C8 +6 %, because the collectives are latency-bound
+(102 → 204 of them, and halving the message does not halve the time), the drafter cannot be
+micro-batched at all, and `use_ubatching` **disables the breakable CUDA graph for both the target
+model and the drafter**. There is also a correctness hazard that would have to be solved first: 34 of
+45 layers are KDA/Mamba, and the batch splitter does not align to request boundaries, so a fresh
+prompt split in two has its second half start its recurrent state from zero and write it into the
+same state slot — fluent, wrong, and silent. `VLLM_DBO_COMM_SMS` is a **no-op** here (the SM-reservation
+setter is empty on this communicator and `deep_gemm` is not installed), so NCCL and the trellis GEMM
+would compete for SMs unmanaged. **Verdict: do not build DBO.** Increasing the batched-token budget
+buys more than overlapping does, for the same KV price and no code — and the budget is a decision we
+have already made the other way (§2.5, [07](07-kv-and-draft-page.md) §5).
+
+**Third, the one variant still open** `[not tested]`: **attention-scoped micro-batching**. Split the
+chunk only across the attention block and rejoin before the MoE stage. It hides the 45 attention
+`o_proj` all-reduces (~80 ms, 44 % of the collective) and pays only for attention weights streaming
+twice (~15–25 ms, because the experts dominate the model). Expected **−3 to −6 % of prefill**, ~0 at
+decode, ~120–160 lines in the model file and the runner. It carries the **same KDA state hazard**, so
+it cannot be written before that is solved.
+
+Before any of this, one model-free probe is worth more than the design work and costs nothing with
+the engine down: **does an all-reduce on a second stream actually overlap a GEMM on this hardware**,
+or does the plugin's proxy thread or SM contention serialise them? A probe is written and has not
+been run; the gate is `overlap_frac ≥ 0.60` and `gemm_stretch ≤ 1.15` at 16.78 MB. If it fails, every
+overlap variant above dies with it `[not tested]`.
+
+Also closed while looking: model-level **sequence parallelism** would be a one-line gate change and is
+a bad idea here — the bytes are identical (2 × 1.333 S per layer either way), the collective *count*
+doubles from 90 to 180, and decode is latency-bound, so it is **+10…15 % worse at decode** for a
+~10 % prefill compute saving. And **pipeline parallelism** removes ~98 % of the collective bytes at
+the cost of ~3× single-stream decode latency. Both are written down because "just turn on SP" is the
+obvious next reflex and it is wrong on this workload.
+
+### 2.18 Draft KV at fp8 — validated on a dump boot; the pool number needs a load boot
 
 The DFlash draft's KV cache is bf16 while the main cache is fp8, which is the *other* half of the
-mixed-precision condition in §2.13 and also costs KV pool. A prelude patch exists
-(`HAREM_DRAFT_KV_DTYPE=fp8`, overriding `SpeculativeConfig` without touching the launcher, no-op when
-the knob is unset) and the arithmetic says the pool grows **+4.7 %** at today's 256-token draft page
-`[estimate]` — the +0.3 % figure in our earlier notes belongs to the pre-256 geometry and is
-`[retracted]`.
+mixed-precision condition in §2.13 and also costs KV pool. A prelude patch overrides
+`SpeculativeConfig` (`HAREM_DRAFT_KV_DTYPE=fp8`) without touching the launcher and is a no-op when the
+knob is unset. The pool should grow **+4.7 %** at today's 256-token draft page; the +0.3 % in our
+earlier notes belongs to the pre-256 geometry `[retracted]`.
 
-It has **not been booted** `[not tested]`. Two things it has to survive: the DFlash sliding-window
-backend has to accept an fp8 KV at all (if it does not, the boot fails loudly rather than corrupting
-anything), and the draft now attends over fp8, which can weaken its proposals — so **draft acceptance
-must stay in the 60–65 % band** or the arm is rejected. Gates cold and warm catch a broken drafter;
-only the acceptance rate catches a merely weakened one.
+**It has now booted, and both risks are retired** `[measured-here]`. The DFlash sliding-window backend
+accepts an fp8 cache. Draft acceptance is **60.1–64.0 %** across all concurrency levels and rounds
+(one C1 round at 57.3 %) against production's 61–65 % and a gate that required the 60–65 band — so the
+drafter is not merely unbroken, it is not measurably weakened. Gates 10/10 · 12/12 cold and warm;
+speed inside the bands. The mechanism is visible in the log rather than inferred: draft page
+393,216 → **196,608 bytes**, per-block 21,917,440 → **20,934,400**, divisor unchanged at 363.
+Tables in [10](10-results-and-roofline.md) §2.1 and [07](07-kv-and-draft-page.md) §7.
 
-### 2.19 `exl3_moe_had_in`, taken upstream and not yet built
+**What is still missing is the only number that would promote it.** The arm added three prelude
+patches, which invalidates the fast-load sidecar and forces a dump boot
+([09](09-measurement-protocol.md) §11), and a dump boot's KV pool reads low — this one read 4,382,920,
+*below* production, and it means nothing. Expected on a load boot: about **4.66M**. Until that boot,
+production stays at the bf16 draft cache `[not tested]`.
+
+### 2.19 The next image bundle: `exl3_moe_had_in`, and what rides with it
 
 `had_in` was the only sub-roofline kernel left in the MoE stage at 37–57 % of the ruler. Upstream took
 it in `a47da6e` by removing a 64-bit division in favour of deriving the index from the grid:
 **−10 to −18 %** on that kernel, roofline 57 % → 63 % `[reported]`. On this stack that is ~0.2–0.3 %
-of prefill wall, which does not justify an image rebuild on its own; it goes into the next build
-bundle together with whatever else has accumulated. Until then the production image does not have it,
-and [10](10-results-and-roofline.md) §6 row 7 still quotes the old number `[not tested]`.
+of prefill wall, which does not justify an image rebuild on its own. Until then the production image
+does not have it, and [10](10-results-and-roofline.md) §6 row 7 still quotes the old number
+`[not tested]`.
+
+It is no longer alone, and that is the point of the item. **The bundle now holds two things**:
+`had_in` at −0.2…0.3 % and the hyper-connection fusion kernel at −1.0…1.1 % (§2.16). Together they
+are worth about **−1.3 % of prefill** for one build and one arm — still small, and now large enough
+that the arm is worth scheduling rather than deferring. If the pre-transpose arm in §2.16 lands first,
+the bundle is worth −2.4 % and the calculation is no longer marginal. The rule the bundle exists to
+enforce: **do not spend a boot on a sub-1 % change**; accumulate them and spend one boot on the pile.
+
+### 2.20 This stack has no autostart, and the sibling's unit will win a reboot
+
+There is no systemd unit for this engine. The container runs with `--restart no` — deliberately, since
+a half-started rank quietly retrying is exactly the "fluent and wrong" failure class this stack is
+built to refuse — and nothing supervises it, so an unattended reboot leaves the cluster down. That is
+a known, accepted gap.
+
+**The hazard is the other half of it.** The NVFP4 sibling stack's own unit, `harem-motor.service`, is
+`enabled` on all three nodes. A reboot today therefore does not leave the cluster down — it brings up
+the **other engine**, on the same GPUs and the same memory, which is worse than nothing if you were
+expecting this one `[measured-here]`. The two must never both be enabled: whichever unit is installed
+needs `Conflicts=` against the other, and installing this one has to be paired with disabling that
+one.
+
+A unit template is in [`systemd/`](../systemd/) with its three unfinished pieces named — the preflight
+script it calls does not exist, systemd will not honour the worker-2 → worker-1 → head start order on
+its own, and its `ExecStop` names the wrong container. It is **not installed anywhere** and is not
+recommended for installation as it stands.
+
+The cheaper half of the same problem is a watchdog rather than a unit: a 60-second `docker ps` plus
+`/health` poll that records `docker logs --tail 40` when the container exits. One outage during this
+work ran an hour purely because nothing was watching `[measured-here]`. Not written `[not tested]`.
+
+### 2.21 The fast-load identity gate is stricter than it needs to be
+
+The sidecar's identity hashes **every** `patch-*.py` in the patch directory and the full text of the
+prelude script. Three patches that do not touch a single weight byte — a KV-page knob, a fail-loud
+import guard and a draft-dtype override — refused a boot on that basis and cost an hour
+`[measured-here]`. The gate is doing what it was built to do; it is simply drawing the line in the
+wrong place, and it makes every experiment that adds a patch cost a dump boot
+([09](09-measurement-protocol.md) §11).
+
+The narrower gate, not written `[not tested]`: an explicit allow-list of the patches that can affect a
+weight (the padding patch, the expert-parallel patch and its overlay, the drafter patch, the
+expert-filter patch) plus the environment keys that decide the layout; a patch not on that list does
+not change the identity, and adding a name to the list is then a deliberate act. The prelude would
+contribute its **ordered list of patch invocations** rather than its full text, so a comment change
+stops invalidating 56 GiB per node while a reordering or a skipped patch still fails. And the launcher
+should snapshot the patch directory to a private path before mounting it, which turns "do not touch
+the directory during a boot" from a rule into a property.
+
+What must not change: the 32-tensor sha256 sample still runs on every boot. The identity gate is a
+cheap early warning, not the proof — which is why it can be narrowed and must not be removed.
 
 ---
 
@@ -343,7 +560,11 @@ and [10](10-results-and-roofline.md) §6 row 7 still quotes the old number `[not
 | **The mesh plugin patches on the NVFP4 stack** | The idle second cable and the host bounce buffer are properties of the fabric and the plugin, not of the quantization, so both should transfer and are worth more there than the channel cap. Not applied. |
 | **A torch-profiler run on the production configuration** | The engine was launched without `--profiler-config`, `/start_profile` returns 404 and this `nsys` cannot attach, so the step breakdown in [10](10-results-and-roofline.md) §5 is a reconciliation with a 2.8 % residual rather than a direct profile. It would settle the NCCL band (14–17 % of prefill) and the C8 decode split. Cost: one boot, and a launcher flag set before you need it. |
 | **The MLA prefill kernel's efficiency** | 8.2 % of a prefill chunk, and the trace does not carry the selected-key count, so there is no denominator. Needs its own model-free measurement before anyone calls it a target. |
-| **Draft KV at fp8** | Written and gated, never booted — [§2.18](#218-draft-kv-at-fp8--written-gated-not-yet-booted). |
+| **Draft KV at fp8 on a load boot** | Booted and validated on a dump boot; the pool number still needs an ordinary boot — [§2.18](#218-draft-kv-at-fp8--validated-on-a-dump-boot-the-pool-number-needs-a-load-boot). |
+| **`NCCL_ALGO=Ring,Tree`** | Never run on this mesh, and it is free — the sweep is model-free with the engine down. Our launcher forces `Ring`. §2.2 item 5. |
+| **Whether a second-stream all-reduce overlaps a GEMM at all on this part** | The probe is written and has not been run. It gates every overlap variant in §2.17, and it costs one engine-down bench. |
+| **A long unattended run** | The longest continuous uptime on record is about an hour between arms. Leaks, KV fragmentation, fabric drift and acceptance drift over 6–12 hours of mixed load are all unmeasured. |
+| **`--max-num-seqs` above 8** | Chosen to match the TP=2 arrangement and never A/B'd, and C8 sits exactly on the cap. It does not enter the KV divisor, so the cost would be TTFT, not pool. |
 | **Prefix caching** | With a 3,328-token attention block our benchmark prompts never fill one, so the hit rate is 0 % throughout and the benchmark measures nothing about it. |
 | **Long-context behaviour under load** | KV usage never exceeded 13 %. The pool is insurance, not something we have stress-tested. |
 | **Pipeline parallelism** | The other way to run a fully quantized checkpoint on three nodes. Not evaluated; its interaction with speculative decoding is unknown. |
@@ -381,6 +602,25 @@ and [10](10-results-and-roofline.md) §6 row 7 still quotes the old number `[not
   nothing.** The one-sided RDMA_WRITE transport takes RNR retries to zero, which is what it was
   built for, and moves throughput by zero, because the constraint was somewhere else entirely
   ([06](06-nccl-mesh.md) §10). A mechanism working is not a result.
+- **A compile check answers "does it build", never "does it run".** A GPU-free ahead-of-time compile
+  of 18 kernel configurations reported all 18 building and all 18 inside the shared-memory limit. At
+  real launch **6 of the 18 failed with `OutOfResources`** — the ahead-of-time path reported 36,864
+  bytes of shared memory where the launch needed 106,496 `[measured-here]`. Resource allocation only
+  becomes visible when something is actually launched, and the static test had already been written
+  up as a pass.
+- **Our own harness disagreed with its own documentation for a day**, claiming five rounds with two
+  discarded while running three ([09](09-measurement-protocol.md) §1.1). Nothing was published from
+  the wrong reading, but a tool that describes itself incorrectly is the same failure class as a
+  ruler that reads high: it will eventually be believed instead of read.
+- **Two of the twenty-four retractions in §1.9 are us re-opening something we had already closed and
+  measured.** `NCCL_BUFFSIZE` was listed as an open lever twelve hours after it had been eliminated,
+  because the elimination lived in one report and the candidate list was written from another. The
+  fix is not diligence, it is that a closed item has to be closed **in the place where the next
+  person will look**, which is why §2 keeps closed items rather than deleting them.
+- **The two changes designed as one turned out to be unrelated.** The KV-zeroing gate and the fp8
+  draft cache were built together, on the reading that uniform precision would let the zeroing stop.
+  The zeroing is bound by Mamba slot sharing, not precision, so one of the two is closed at zero and
+  the other is a 4.7 % pool gain that never needed it (§2.13, §2.18).
 
 ---
 

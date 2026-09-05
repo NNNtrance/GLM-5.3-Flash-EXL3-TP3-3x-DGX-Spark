@@ -1,0 +1,23 @@
+--- sparse_attn_indexer.py.orig	2026-09-04 07:50:17.000000000 +0300
++++ sparse_attn_indexer.py	2026-09-04 07:50:17.000000000 +0300
+@@ -1,3 +1,4 @@
++import os
+ # SPDX-License-Identifier: Apache-2.0
+ # SPDX-FileCopyrightText: Copyright contributors to the vLLM project
+ """Custom Sparse Attention Indexer layers."""
+@@ -622,10 +623,11 @@
+             and current_platform.has_device_capability(90)
+             and not current_platform.is_device_capability_family(120)
+         )
+-        use_persistent_topk = current_platform.is_cuda() and topk_tokens in (
+-            512,
+-            1024,
+-            2048,
++        # HAREM-GB10-TOPK: env gate, see sparse_attn_indexer_kpool.py
++        use_persistent_topk = (
++            current_platform.is_cuda()
++            and topk_tokens in (512, 1024, 2048)
++            and os.environ.get("HAREM_DISABLE_PERSISTENT_TOPK") != "1"
+         )
+         if use_cooperative_topk:
+             workspace_manager = current_workspace_manager()

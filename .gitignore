@@ -1,0 +1,8 @@
+*.safetensors
+*.trellis
+*.tar
+*.tgz
+*.tar.gz
+__pycache__/
+.env
+scripts/cluster.env

@@ -1,0 +1,195 @@
+diff --git a/src/cuda_exl3/csrc/bindings.cpp b/src/cuda_exl3/csrc/bindings.cpp
+index 46ca27b..ba6af22 100644
+--- a/src/cuda_exl3/csrc/bindings.cpp
++++ b/src/cuda_exl3/csrc/bindings.cpp
+@@ -1,3 +1,4 @@
++#include <optional>
+ #include <torch/extension.h>
+ #include <torch/library.h>
+ 
+@@ -16,7 +17,8 @@ void exl3_moe_glu_had_in(const at::Tensor& x, at::Tensor& out, const at::Tensor&
+                          const at::Tensor& expert_ids, const at::Tensor& n_rows,
+                          int64_t block_m);
+ at::Tensor exl3_moe_combine(const at::Tensor& rows_out, const at::Tensor& sorted_ids,
+-                            const at::Tensor& topk_weights, int64_t num_tokens);
++                            const at::Tensor& topk_weights, int64_t num_tokens,
++                            const std::optional<at::Tensor>& expert_ids, int64_t block_m);
+ at::Tensor exl3_moe_gemm(const at::Tensor& a_had, const at::Tensor& trellis,
+                          const at::Tensor& suh_unused, const at::Tensor& svh,
+                          const at::Tensor& expert_ids, const at::Tensor& n_rows,
+@@ -55,9 +57,13 @@ TORCH_LIBRARY(cuda_exl3_C, m)
+         "exl3_moe_gemm(Tensor a_had, Tensor trellis, Tensor suh, Tensor svh, "
+         "Tensor expert_ids, Tensor n_rows, int[] group_n, int cb, int block_m, "
+         "ScalarType out_dtype) -> Tensor");
++    // expert_ids / block_m are optional and default to the pre-EP behaviour, so
++    // an older caller keeps working unchanged. Passing them lets the combine
++    // treat a retired (-1) block's rows as zero, which is what makes the
++    // caller-side clearing pass unnecessary under expert parallel.
+     m.def(
+         "exl3_moe_combine(Tensor rows_out, Tensor sorted_ids, Tensor topk_weights, "
+-        "int num_tokens) -> Tensor");
++        "int num_tokens, Tensor? expert_ids=None, int block_m=0) -> Tensor");
+     m.def(
+         "mla_decode(Tensor q, Tensor kv, Tensor sel, Tensor seqlens, float scale, "
+         "int v_head_dim, int split_chunk, int heads_per_block, float kv_scale) -> Tensor");
+diff --git a/src/cuda_exl3/csrc/hadamard.cu b/src/cuda_exl3/csrc/hadamard.cu
+index 204ac97..ad3ea1b 100644
+--- a/src/cuda_exl3/csrc/hadamard.cu
++++ b/src/cuda_exl3/csrc/hadamard.cu
+@@ -12,6 +12,7 @@
+ // in a single launch here, loading x once and writing G outputs, rather than one
+ // launch and one re-read of x per shard.
+ 
++#include <optional>
+ #include <ATen/ATen.h>
+ #include <ATen/cuda/CUDAContext.h>
+ #include <c10/cuda/CUDAGuard.h>
+@@ -23,6 +24,10 @@
+ 
+ namespace cuda_exl3 {
+ 
++// Routing fan-out per token. GLM-5.3-Flash uses 8; the combine stages this many
++// row indices and weights per block in shared memory.
++static constexpr int MAX_TOPK = 32;
++
+ template <typename IN_T>
+ __global__ void exl3_had_in_kernel(const IN_T* __restrict__ x, half* __restrict__ a_had,
+                                    const half* __restrict__ suh, int m, int k, int groups)
+@@ -104,6 +109,18 @@ __global__ void exl3_moe_had_in_kernel(const IN_T* __restrict__ x,
+     // Surplus rows from the worst-case padding are never read by the gemm
+     // (it retires those blocks on the same count), so skip them entirely.
+     if (n_rows && row >= *n_rows) return;
++
++    // Retire a block that belongs to no expert BEFORE anything is written.
++    // Under expert parallel two thirds of the live blocks are remote, and the
++    // gemm retires them on the same predicate, so nothing downstream ever reads
++    // their activations -- not even the padding rows. Testing this after the
++    // padding branch (the original order) made every remote block still write
++    // 2*k zeros per padding row, which at decode is most of this kernel's
++    // traffic: at M=8, 288 experts, block_m=16 the live region is 944 rows of
++    // which ~880 are padding and ~2/3 of those sit in remote blocks.
++    int e = expert_ids[row / block_m];
++    if (e < 0) return;                  // block belongs to no expert
++
+     int blk = (int) (w % blocks_per_row);
+     int lane = threadIdx.x & 31;
+     long long dst = (long long) row * k + blk * 128;
+@@ -122,8 +139,6 @@ __global__ void exl3_moe_had_in_kernel(const IN_T* __restrict__ x,
+     }
+ 
+     int token = idx / top_k;
+-    int e = expert_ids[row / block_m];
+-    if (e < 0) return;                  // block belongs to no expert
+     const IN_T* src = x + (long long) token * k + blk * 128;
+ 
+     for (int g = 0; g < groups; ++g)
+@@ -199,23 +214,51 @@ template <typename T_>
+ __global__ void exl3_moe_combine_kernel(const T_* __restrict__ rows_out,
+                                         const int* __restrict__ inv,
+                                         const float* __restrict__ w,
+-                                        T_* __restrict__ out, int top_k, int H)
++                                        T_* __restrict__ out, int top_k, int H,
++                                        const int* __restrict__ expert_ids, int block_m)
+ {
+     int token = blockIdx.x;
++
++    // Under expert parallel the gemm allocates with at::empty and returns early
++    // for a block whose expert lives on another rank, so those rows are never
++    // written. Reading them is not merely wrong, it is unbounded: recycled
++    // memory can hold a NaN bit pattern, and this rank's contribution goes
++    // straight into an all-reduce. Deciding it here costs one int load per
++    // (token, k) pair and saves both the H-wide read of a dead row and the
++    // separate (rows, H) clearing pass the caller would otherwise need.
++    // expert_ids == nullptr keeps the pre-EP behaviour exactly.
++    //
++    // Staging the row indices and the routing weights in shared memory is a
++    // second, unrelated win that comes free with the loop split: the original
++    // re-read inv[] and w[] from global for every h a thread owned, i.e.
++    // ceil(H/blockDim) times per thread per (token, k) pair.
++    __shared__ int s_row[MAX_TOPK];
++    __shared__ float s_w[MAX_TOPK];
++    if ((int) threadIdx.x < top_k)
++    {
++        int r = inv[token * top_k + threadIdx.x];
++        bool live = (expert_ids == nullptr) || (expert_ids[r / block_m] >= 0);
++        s_row[threadIdx.x] = live ? r : -1;
++        s_w[threadIdx.x] = w[token * top_k + threadIdx.x];
++    }
++    __syncthreads();
++
+     for (int h = threadIdx.x; h < H; h += blockDim.x)
+     {
+         float acc = 0.0f;
+         for (int k = 0; k < top_k; ++k)
+         {
+-            int r = inv[token * top_k + k];
+-            acc += w[token * top_k + k] * (float) rows_out[(size_t) r * H + h];
++            int r = s_row[k];
++            if (r < 0) continue;        // this (token, k) pair is another rank's
++            acc += s_w[k] * (float) rows_out[(size_t) r * H + h];
+         }
+         out[(size_t) token * H + h] = (T_) acc;
+     }
+ }
+ 
+ at::Tensor exl3_moe_combine(const at::Tensor& rows_out, const at::Tensor& sorted_ids,
+-                            const at::Tensor& topk_weights, int64_t num_tokens)
++                            const at::Tensor& topk_weights, int64_t num_tokens,
++                            const std::optional<at::Tensor>& expert_ids, int64_t block_m)
+ {
+     const at::cuda::OptionalCUDAGuard guard(rows_out.device());
+     TORCH_CHECK(sorted_ids.scalar_type() == at::kInt, "exl3_moe_combine: sorted_ids int32");
+@@ -225,6 +268,19 @@ at::Tensor exl3_moe_combine(const at::Tensor& rows_out, const at::Tensor& sorted
+     int top_k = (int) topk_weights.size(1);
+     auto stream = at::cuda::getCurrentCUDAStream();
+ 
++    const int* eids = nullptr;
++    if (expert_ids.has_value() && expert_ids->numel())
++    {
++        TORCH_CHECK(expert_ids->scalar_type() == at::kInt,
++                    "exl3_moe_combine: expert_ids must be int32");
++        TORCH_CHECK(block_m > 0, "exl3_moe_combine: expert_ids given without a block_m");
++        TORCH_CHECK((long long) expert_ids->numel() * block_m >= (long long) rows_out.size(0),
++                    "exl3_moe_combine: expert_ids covers ", expert_ids->numel() * block_m,
++                    " rows but rows_out has ", rows_out.size(0));
++        eids = expert_ids->data_ptr<int>();
++    }
++    TORCH_CHECK(top_k <= 32, "exl3_moe_combine: top_k > 32 is not supported");
++
+     auto w = topk_weights.to(at::kFloat).contiguous();
+     auto inv = at::empty({(long long) M * top_k},
+                          at::TensorOptions().dtype(at::kInt).device(rows_out.device()));
+@@ -236,11 +292,12 @@ at::Tensor exl3_moe_combine(const at::Tensor& rows_out, const at::Tensor& sorted
+     if (rows_out.scalar_type() == at::kHalf)
+         exl3_moe_combine_kernel<half><<<M, threads, 0, stream>>>(
+             (const half*) rows_out.data_ptr(), inv.data_ptr<int>(), w.data_ptr<float>(),
+-            (half*) out.data_ptr(), top_k, H);
++            (half*) out.data_ptr(), top_k, H, eids, (int) block_m);
+     else
+         exl3_moe_combine_kernel<__nv_bfloat16><<<M, threads, 0, stream>>>(
+             (const __nv_bfloat16*) rows_out.data_ptr(), inv.data_ptr<int>(),
+-            w.data_ptr<float>(), (__nv_bfloat16*) out.data_ptr(), top_k, H);
++            w.data_ptr<float>(), (__nv_bfloat16*) out.data_ptr(), top_k, H, eids,
++            (int) block_m);
+     C10_CUDA_KERNEL_LAUNCH_CHECK();
+     return out;
+ }
+diff --git a/src/cuda_exl3/moe.py b/src/cuda_exl3/moe.py
+index 4f796d0..d721241 100644
+--- a/src/cuda_exl3/moe.py
++++ b/src/cuda_exl3/moe.py
+@@ -389,4 +389,13 @@ class Exl3MoEMethod(FusedMoEMethodBase):
+         # (token, k) pair appears exactly once among the live rows, so inverting
+         # sorted_ids gives a direct gather -- no atomics, no (M*top_k, H) scratch,
+         # and no device sync, so it stays CUDA-graph safe.
+-        return ops.exl3_moe_combine(rows_out, sorted_ids, topk_weights, M)
++        #
++        # expert_ids and block_m are handed over so the combine can treat a
++        # retired block's rows as zero. exl3_moe_gemm allocates with at::empty
++        # and returns early for a block whose expert id is -1, so those rows are
++        # never written; with expert parallel that is most of them. Deciding it
++        # here costs one int load per (token, k) pair and removes the need for a
++        # separate (rows, hidden) clearing pass. With EP off no entry is
++        # negative and the result is bit-identical to not passing them.
++        return ops.exl3_moe_combine(rows_out, sorted_ids, topk_weights, M,
++                                    expert_ids, block_m)

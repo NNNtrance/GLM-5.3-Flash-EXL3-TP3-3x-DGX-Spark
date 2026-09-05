@@ -1,0 +1,12 @@
+--- sparse_attn_indexer_kpool.py.orig	2026-09-04 07:50:17.000000000 +0300
++++ sparse_attn_indexer_kpool.py	2026-09-04 07:50:17.000000000 +0300
+@@ -807,7 +807,8 @@
+         else:
+             topk_dst = topk_indices_buffer[:num_padded_tokens, :topk_tokens]
+ 
+-        if current_platform.is_cuda() and select_k in (512, 1024, 2048):
++        # HAREM-GB10-TOPK: persistent_topk needs >=128KB smem fallback on oversubscription (GB10 has 101376) -> env gate
++        if current_platform.is_cuda() and select_k in (512, 1024, 2048) and os.environ.get("HAREM_DISABLE_PERSISTENT_TOPK") != "1":
+             workspace_manager = current_workspace_manager()
+             (topk_workspace,) = workspace_manager.get_simultaneous(
+                 ((RADIX_TOPK_WORKSPACE_SIZE,), torch.uint8),

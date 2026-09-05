@@ -1,0 +1,12 @@
+{"prompt": "Write a Python function that merges two sorted lists into one sorted list without using sort(). Include a docstring and three doctest examples."}
+{"prompt": "Implement an LRU cache class in Python with get and put in O(1) using a dict and a doubly linked list. Add brief comments."}
+{"prompt": "Write a Python script that reads a CSV file path from argv, counts rows per value of the 'status' column, and prints a small table. Handle missing file errors."}
+{"prompt": "Implement binary search in Python that returns the insertion index when the target is absent. Include type hints and edge-case tests."}
+{"prompt": "Write a Python function that validates an IPv4 address string without regex and explain each check in comments."}
+{"prompt": "Write a Python generator that yields Fibonacci numbers up to a limit, then use it to print all even Fibonacci numbers below 4 million."}
+{"prompt": "Implement a simple tokenizer in Python that splits an arithmetic expression like '3 + 4*(2 - 1)' into tokens, then a recursive-descent parser that evaluates it."}
+{"prompt": "Write a Python context manager that measures elapsed wall time of a block and logs it with the logging module. Show usage."}
+{"prompt": "Write a Python function to flatten an arbitrarily nested list of lists iteratively (no recursion). Include tests for empty and deeply nested input."}
+{"prompt": "Implement Dijkstra's shortest path in Python over an adjacency dict using heapq. Return distances and predecessor map. Add a tiny example graph."}
+{"prompt": "Write a Python class representing a bank account with deposit, withdraw and transfer methods, raising custom exceptions on invalid operations. Include unit tests with unittest."}
+{"prompt": "Write a Python function that parses ISO-8601 date strings into datetime objects, supporting optional timezone offsets, with clear error messages."}

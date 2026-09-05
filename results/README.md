@@ -1,0 +1,50 @@
+# results — the measurements behind the documents
+
+Every number in [`../docs/10-results-and-roofline.md`](../docs/10-results-and-roofline.md) and in the
+rest of `docs/` traces to a file in here, or carries `[measured-here, raw lost]`, `[reported]`,
+`[estimate]`, `[not tested]` or `[retracted]` in the document.
+
+All of it was produced on 4–5 September 2026 on three DGX Spark (GB10) nodes: TP=3 with expert
+parallelism, EXL3 4bpw weights (`brandonmusic/GLM-5.3-Flash-tr3-4bpw` at revision `b20c49ba`), KV
+`fp8`, DFlash2 draft at k=7, CUDA graphs on, temperature 0, thinking on at `reasoning_effort: low`.
+The exact settings per arm are in each file's header.
+
+## What is here
+
+| Path | What it is |
+|---|---|
+| `speed/concurrency-sweeps.csv` | Every arm × C1/C2/C4/C6/C8: aggregate and per-stream tok/s, the round-3-to-5 spread, TTFT, TPOT, draft acceptance, accepted tokens per step, KV pool. Machine-readable. |
+| `speed/concurrency-sweeps.md` | The same table, readable, with a line on what each arm is. |
+| `speed/category-prefill-and-mixed-load.md` | Decode rate by content type (prose / code / math / JSON) at C1 and C4; prefill, warm and fresh; the mixed-load probe; cold versus warm single stream. |
+| `gates/quality-gates.md` | The correctness probe and code exam for every arm, cold and after the benchmark; the MMLU sample; long-form generation. |
+| `boot/boot-ledger.md` | Boot time per phase across the four arms, the bit-identity evidence, the block-layer forensics, memory and swap. |
+| `mesh/all-reduce-sweep.md` | The mesh all-reduce cliff: bandwidth by message size against point-to-point, the hardware counters, the channel-count dose–response, the protocol sweep, and the engine A/B. |
+
+## What is deliberately not here
+
+- **Per-round raw JSON.** The published figures are medians of sweep rounds 3–5 with rounds 1–2
+  discarded; the medians are in the CSV and re-running `scripts/bench-sweep.py` five times reproduces
+  them. Keeping 40 raw files whose only use is to be re-medianed added weight without adding
+  evidence.
+- **Boot and engine logs.** They carry host names and addresses throughout. What they proved is
+  quoted as individual log lines in the documents, in context, with the surrounding text.
+- **Profiler traces.** Large binary artefacts; the extracted kernel breakdown is in
+  [`../docs/05-expert-parallel-and-cuda-exl3-fixes.md`](../docs/05-expert-parallel-and-cuda-exl3-fixes.md) §4.
+- **Weights of any kind**, including the model sidecars and the fast-load sidecar.
+
+## Scrubbing
+
+These files are derived from our own run output. Node names were replaced with `head`, `worker-1` and
+`worker-2`, addresses with documentation addresses, and local absolute paths with placeholders.
+Turkish labels in our own runner logs were translated; the values are unchanged. Numbers, timings and
+model output are untouched.
+
+## Reading a sweep row
+
+`agg_tok_s` is aggregate output throughput across all streams at that concurrency — the number that
+describes the machine. `per_stream_tok_s` is the decode rate one user sees, excluding TTFT.
+`accept_rate_pct` is the fraction of drafted tokens accepted; `accept_len` is accepted tokens per
+speculative step. **`accept_len` is the one that decides throughput.** A shallower draft raises
+`accept_rate_pct` and lowers `accept_len`, and the second effect wins wherever the target forward
+dominates — that is the whole k=7 versus k=5 argument in
+[`../docs/04-dflash2-port.md`](../docs/04-dflash2-port.md).

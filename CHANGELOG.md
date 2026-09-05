@@ -11,13 +11,105 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-05 — where a step actually goes, and four items closed
+
+Production configuration 6 is **unchanged**. Everything in this entry is measurement.
+
+- **Both rulers were wrong, by ~22 %.** Measured on this device in our own image: achievable read
+  bandwidth **225.2 GB/s** against a vendor 273, BF16 GEMM peak **97.3 TFLOP/s** against an implied
+  ~125. Every roofline percentage published here before today was optimistic by that much
+  `[retracted]`. Two new tools, `bench/bw.py` and `bench/gemmpeak.py`, seconds each; run them in the
+  same process as the thing you are measuring. The read ruler itself drifted 6.5 % across three runs
+  on the same idle machine the same morning, so percentages are now given as bands where it matters.
+- **Step-time breakdown, per 2,048-token prefill chunk** (1,109 ms, occupancy 99.3 %): MoE trellis
+  GEMM **26.4 %**, NCCL all-reduce **16.5 %**, dense BF16 GEMM **16.2 %**, hyper-connection mixing
+  **11.7 %**, MLA 8.2 %, KDA 7.5 %, MoE `had_in` 6.1 %, KV zeroing 1.3 %, DSA indexer 0.6 %. Per C1
+  decode step (89.1 ms): dense BF16 GEMM **44.8 %**, MoE trellis GEMM 29.3 %, all-reduce 10–15 %, and
+  the k=7 drafter **19.5 %**. Since the previous configuration, prefill throughput at 8.4K is
+  **+43 %** and the C1 step is **−17.5 %**.
+- **Two corrections to our own earlier reading of the same trace** `[retracted]`: the `mhc_*` kernels
+  are hyper-connection mixing, a class of their own worth 11.7 %, not dense GEMM and not the indexer;
+  and MLA is 7.4 % in a steady chunk, not the 9 % a window average reported.
+- **Method, stated because it has a caveat.** The running engine had no profiler endpoint and a
+  restart was not available, so this is a reconciliation — structure from an earlier trace
+  re-segmented per chunk, changed classes re-measured model-free, totals measured live — with a
+  **2.8 % residual**. Read NCCL as a 14–17 % band. One profiling boot closes it.
+- **Closed: expert-stationary MoE scheduling.** Our 14–27 % traffic estimate rested on a traffic
+  model a trace cannot verify. The kernel author wrote a bench for it (`9b17ea9`); run unmodified on
+  GB10, three times: doubling blocks per expert costs **1.11×**, not 2×. The trellis stays resident.
+  Nothing to win `[measured-here]`.
+- **Closed: the KV-zeroing gate.** The kernel runs at 100 % of the memset roofline and zeroes
+  2.4–2.9 GB per chunk against ~3.4 MB of real new KV, so the only lever was to skip it. It cannot be
+  skipped here: **85.5 %** of those bytes are MLA pages co-owned with Mamba/KDA state in this model's
+  hybrid layout, which is the Mamba half of vLLM's condition and is independent of precision. A
+  fail-closed gate was written so the machine checks the conclusion; on this model it refuses to boot,
+  by design. Safe remainder 0.19 % of prefill; no partial mode written `[measured-here]`.
+- **Closed: a cooperative (`grid.sync`) MoE stage.** Outside a CUDA graph the barrier wins on a 48-SM
+  part, as predicted — up to 33 % at medium sizes. **Inside a graph, which is what production runs,
+  the sign flips back** and it costs 0.2–0.3 µs per phase boundary. The deciding detail was the
+  graph, not the SM count `[measured-here]`.
+- **Closed: the DSA indexer**, at 0.6 % of prefill — the same conclusion an earlier micro-benchmark
+  reached from the other side, now confirmed from the share itself.
+- **Hyper-connection mixing measured**: 86–91 % of the ruler, memory-bound by a factor of 76, **not**
+  launch-bound (CUDA graphs change it by 0.03 % at M=2048), **not** badly tuned (the two available
+  knobs are worth 0.4 % of prefill, and the third kernel does not compile above 96 threads), and the
+  torch fallback is unreachable on CUDA and 5–15× slower. One real lever remains: fusing the first two
+  kernels to stop re-reading the residual, **−2.5 to −2.7 % of prefill**, which needs a new large-M
+  kernel — forcing the existing fused one is +32 % worse. Our earlier −3.6 % estimate was 30 %
+  optimistic `[retracted]`.
+- Upstream took `exl3_moe_had_in` in `a47da6e` (−10…18 % on that kernel, ~0.2–0.3 % of prefill here).
+  **Not in the production image**; queued for the next build.
+- New protocol rule, learned the hard way: **one measurement holds the cluster at a time**, written in
+  a lock file, and three-node NCCL work needs the engine **down** rather than idle — a fabric sweep
+  beside a live engine can exhaust queue-pair resources and take its next collective with it.
+  [docs/09](docs/09-measurement-protocol.md) §10.
+
+## 2026-09-05 — the fabric ceiling is PCIe, and a transport rewrite that changed nothing
+
+- **Retracted, one day after we published it** `[retracted]`: "the pair of cables is worth 50 GB/s,
+  so the collective is at 28 % of the fabric". That is the **wire**. Each ConnectX-7 sits in a
+  **PCIe Gen5 x4** slot (`LnkSta: Speed 32GT/s, Width x4`) and carries ~15 GB/s regardless of its two
+  200 Gb/s ports, so the real ceiling is **~30 GB/s per node** and the collective at ~20 GB/s is at
+  about **70 %** of it. The old 13 GB/s ceiling was never "half a link" either — it was one card's
+  PCIe limit at 87 % of it, which is why the second cable, on the second card, took it to 20 and not
+  to 40. **Remaining fabric headroom ≤30 %, worth 2–4 % of prefill**, against the 12–17 % we had
+  priced it at. Two wrong ceilings in two days, both computed from a datasheet.
+- **Patch 0007: one-sided transport (receiver-advertised FIFO + `RDMA_WRITE_WITH_IMM`), built,
+  measured, not adopted.** +977/−16 lines over 0004–0006: FIFO in the sender's memory (one per cable
+  after 0005), zero-byte RECV armed before the slot is advertised so **RNR becomes structurally
+  impossible**, torn-slot double check, fail-closed ring overrun, a version handshake that keeps
+  `mesh_qp_info` at 32 bytes and refuses a peer that does not speak the extension, and no dependence
+  on NCCL's `*request = NULL` contract. Default `send` is byte-for-byte the old path.
+- **It does exactly what it was designed to do and it is worth nothing here.** Six arms, two
+  repetitions: every write arm reports **zero** RNR retries and **zero** out-of-buffer events at every
+  size, against 1–9 per operation on the control — and throughput does not move. The gate (≥1.3× at
+  ≥16 MB) was not met at any FIFO depth, with or without the flush, and all six arms sit within 0.17 ms
+  of each other on the decode-sized message. Engine arm: C1 56.4, C8 171.1, prefill-fresh 1,763 against
+  production's 56.9 / 168.9 / 1,792 — differences in both directions, inside boot spread, gates
+  10/10 · 12/12 cold and warm `[measured-here]`.
+- **Why**: at ~20 GB/s the transfer is against a PCIe wall, not a flow-control stall. Removing RNR
+  from a path that was not waiting on RNR buys nothing.
+- **Kept, not deleted, and not offered upstream.** The patch, its unit-test parity with the 0004–0006
+  baseline and the measurement that rejected it are in the repository. Sending a transport rewrite
+  upstream on the strength of a mechanism that moves no number would waste the maintainer's time.
+- **Patches 0004, 0005 and 0006 are now on a public fork and offered as a pull request** —
+  [`NNNtrance/nccl-mesh-plugin`](https://github.com/NNNtrance/nccl-mesh-plugin), branch
+  `gb10-dual-link-ptrcuda` on `19924dcc`, [PR #59](https://github.com/autoscriptlabs/nccl-mesh-plugin/pull/59),
+  referencing the issue thread the findings were reported on. 0007 is not in it.
+- **Closed as an open item**: the collective's share of a step, which had been "the cheapest unspent
+  measurement in this repository" through three separate changes. It is 16.5 % of prefill and 10–15 %
+  of a C1 decode step. The C8 split still needs a profiling boot.
+- **Newly written down as the larger lever**: the all-reduce is *serialised* against compute at 99.3 %
+  occupancy. Making the fabric faster is worth ≤2–4 % of prefill; making the collective **overlap**
+  reaches for most of 16.5 %. Nobody has tried. [docs/11](docs/11-open-issues.md) §2.17.
+
 ## 2026-09-05 — production configuration 6: both cables, and no host bounce buffer
 
 - **Half the fabric had never carried a packet.** Two cables run between every pair of nodes;
   `mesh_connect()` discards NCCL's device index and stops at the first reachable peer address, so
   every channel to a peer rode one cable. `port_xmit_data` on the second cable of each pair read
   **exactly zero since driver load**, on all three nodes. The 13 GB/s we had been calling "the link"
-  was one cable of a 50 GB/s pair.
+  was one cable of a pair — and, as the next day's entry records, it was also one card's PCIe limit.
 - `patches/kernel/0005-device-aware-link-selection.patch` (~30 lines, no wire-format change) picks
   `dev % usable` among the parallel links; with one cable, or `NCCL_MESH_LINKS_PER_PEER=1`, the
   selection is bit-identical to the stock plugin. 64 MB all-reduce **12.0 → 16.7 GB/s**.
@@ -38,8 +130,9 @@ rounds, which is what the persisted MLA tuner cache bought — see
 - Patch `0004-min-rnr-timer` is carried into the production build at `NCCL_MESH_MIN_RNR_TIMER=1`
   rather than staying on the shelf. Its isolated engine contribution is still unmeasured.
 - **Retracted:** "the ceiling is ~13 GB/s against a 25 GB/s link, and the GPUDirect path needs a
-  plugin redesign". The link is a pair of cables at 50 GB/s with one idle, and the device-pointer
-  path was two lines. See [docs/11](docs/11-open-issues.md) §1.6.
+  plugin redesign". The link is a pair of cables with one idle, and the device-pointer path was two
+  lines. See [docs/11](docs/11-open-issues.md) §1.6. (The "50 GB/s pair" in this entry was itself
+  retracted the next day — the ceiling is the cards' PCIe slots, ~30 GB/s per node; §1.7.)
 - Reported upstream as a follow-up on the plugin's issue thread, with both patches offered.
 
 ## 2026-09-05 — production configuration 5: the MLA tuner cache stops charging us for measurement

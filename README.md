@@ -9,8 +9,9 @@ A reproducible recipe for serving **`zai-org/GLM-5.3-Flash`** as an **EXL3 4-bit
 DGX Spark (GB10) nodes with vLLM and the `cuda-exl3` kernels: the two-layer image build, expert
 parallelism over 288 experts, the TP=3 shape padding, the DFlash2 speculative-decoding port, the
 kernel bugs we found and what fixed them, the NCCL mesh cliff, the second cable nothing was using,
-the KV-pool surgery, a 274-second cold boot, and what is still broken. Written so that a person **or
-their AI coding agent** can follow it step by step.
+the PCIe wall behind it, the KV-pool surgery, a 274-second cold boot, a measured breakdown of where a
+prefill and a decode step actually go, and what is still broken. Written so that a person **or their
+AI coding agent** can follow it step by step.
 
 This is the EXL3 sibling of our NVFP4 recipe,
 [`NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark`](https://github.com/NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark),
@@ -50,6 +51,15 @@ an image without it the rule is still five rounds with two discarded
 | Free host RAM at rest / swap | 11.3 / 12.6 / 12.5 GiB · ~0.1 GiB | rule: never below 4 GiB free `[measured-here]` |
 | Speed by category, C1 | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 tok/s | acceptance 46 / 56 / 55 / **13 %** — prose is where a k=7 draft is wasted. **Measured one configuration earlier**; not re-run since `[not tested]` |
 
+**Production configuration 6 is unchanged since it was set.** A day of profiling, a MoE re-read
+bench, a hyper-connection analysis and a one-sided RDMA_WRITE transport followed it; all four were
+measurements, three of them closed an item, and **none of them moved a production number**
+([10](docs/10-results-and-roofline.md) §5, [06](docs/06-nccl-mesh.md) §9–§10). Where a step goes is
+now measured rather than inferred: per 2,048-token prefill chunk, MoE trellis GEMM 26.4 %, NCCL
+all-reduce 16.5 %, dense BF16 GEMM 16.2 %, hyper-connection mixing 11.7 %; per C1 decode step, dense
+BF16 GEMM 44.8 % and the k=7 drafter 19.5 %. Both rulers those percentages are against were measured
+on the device — 225 GB/s and 97.3 TFLOP/s, not the 273 and ~125 the datasheet implies.
+
 For reference, our NVFP4 stack on the same three nodes reaches C1 57–60, C8 150, prefill 1,585 and a
 KV pool of 4.32M at `gpu-memory-utilization 0.88`. **EXL3 at TP=3 is now level on single-stream
 decode and ahead on aggregate throughput, prefill, memory and boot.** Read that with one caveat
@@ -75,11 +85,11 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 4. [03 — TP=3 padding and sidecars](docs/03-tp3-padding-and-sidecars.md) — why an EXL3 tensor cannot be split three ways, and the shape surgery that makes it possible anyway.
 5. [04 — The DFlash2 port](docs/04-dflash2-port.md) — porting a speculative decoder into an image that had never seen one.
 6. [05 — Expert parallel and the cuda-exl3 fixes](docs/05-expert-parallel-and-cuda-exl3-fixes.md) — the one-line kernel bug that cost 45 % of the MoE stage.
-7. [06 — The NCCL mesh](docs/06-nccl-mesh.md) — 0.6 GB/s in the middle of the size range and the one environment variable that fixed it; then the second cable of every pair, which had never carried a packet.
+7. [06 — The NCCL mesh](docs/06-nccl-mesh.md) — 0.6 GB/s in the middle of the size range and the one environment variable that fixed it; then the second cable of every pair, which had never carried a packet; then the PCIe slot that was the ceiling all along, and the transport rewrite that proved it.
 8. [07 — KV pool and the draft page](docs/07-kv-and-draft-page.md) — why the pool was capped by a counter, not by memory.
 9. [08 — Fast boot](docs/08-fast-boot.md) — 618 s → 274 s, and the bit-identity proof that makes it safe.
 10. [09 — Measurement protocol](docs/09-measurement-protocol.md) — five rounds, discard two; and four ways to measure a lie.
-11. [10 — Results and roofline](docs/10-results-and-roofline.md) — the full tables and how close to the hardware roof we are.
+11. [10 — Results and roofline](docs/10-results-and-roofline.md) — the full tables, the rulers measured rather than quoted, and where a prefill and a decode step actually go, class by class.
 12. [11 — Open issues](docs/11-open-issues.md) — what is unresolved, what we retracted, and what we never ran.
 13. [12 — The MLA tuner cache](docs/12-tuner-cache.md) — the measurement tax a process-local cache was charging, and the shorter protocol that removes it.
 14. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)

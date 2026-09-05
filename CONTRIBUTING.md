@@ -16,15 +16,19 @@ effort, `max_tokens`, concurrency, prompt type, how many sweep rounds and which 
 
 ## Items we did not run (most useful first)
 
-1. **Re-profile the collective's share of a decode step.** Everything on this stack is reasoned
-   against 21.9 % of prefill and ~24 % of decode going to the all-reduce — profiled at 64 channels,
-   on one cable, before three separate collective changes. One profiling boot replaces three
-   inferences with a measurement. It is the cheapest unspent measurement here.
-   See [docs/06](docs/06-nccl-mesh.md) §12.
+1. **A large-M hyper-connection fusion kernel.** The single largest kernel-side item left in
+   prefill: fusing the post-mapping kernel with the tf32 prenorm GEMM stops the residual stream being
+   re-read once per call and is worth **−2.5 to −2.7 % of prefill**. It needs a new kernel that tiles
+   over `block_m`; the existing fused one grids per token and is +32 % worse at M=2048. TileLang
+   work, and everything needed to price it is in [docs/11](docs/11-open-issues.md) §2.16 and
+   [docs/10](docs/10-results-and-roofline.md) §5.5. If you would rather have the cheap half:
+   two keyword arguments at the call site and one constant in the third kernel are −0.4 % between
+   them, measured, unclaimed.
 2. **`NCCL_MAX_NCHANNELS=12` over two cables.** It was indistinguishable from 8 on a single cable and
    was never taken to the engine; over two cables the arithmetic changed and 16 turned out to be
    2.5× worse on the decode-sized message. 12 is now an open question, not a carried-forward
-   equivalence. One boot settles it, one token in `EXTRA_ENV`. See [docs/06](docs/06-nccl-mesh.md) §8.
+   equivalence. One boot settles it, one token in `EXTRA_ENV`. See [docs/06](docs/06-nccl-mesh.md)
+   §8 and §14 item 1.
 3. **`--max-num-batched-tokens 3072`.** 2048 and 4096 are both measured; the value between them is
    not. Report the KV pool, fresh prefill, mixed-load TTFT and C1–C8.
 4. **The mesh plugin patches on a second cluster.** `patches/kernel/0005` and `0006` are worth +73 %
@@ -53,6 +57,14 @@ effort, `max_tokens`, concurrency, prompt type, how many sweep rounds and which 
     quantization, so they should transfer — and if they do, most of the EXL3-versus-NVFP4 gap in
     [docs/10](docs/10-results-and-roofline.md) §3 transfers with them.
 12. **Anything at max reasoning effort.** Everything here is at `low`. Expect 5–12× the time.
+
+Two more that we would take from anyone, out of order because they are larger than most of the list:
+**overlapping the all-reduce with compute** ([docs/11](docs/11-open-issues.md) §2.17 — the collective
+is 16.5 % of a prefill chunk and is serialised against compute at 99.3 % occupancy, so it is the
+biggest number on the board with nobody on it), and **a torch-profiler run on a production
+configuration** with `--profiler-config` set at launch, which would replace the 2.8 % reconciliation
+residual in [docs/10](docs/10-results-and-roofline.md) §5 with a measurement and settle the C8 decode
+split.
 
 ## What we would rather you did not send
 

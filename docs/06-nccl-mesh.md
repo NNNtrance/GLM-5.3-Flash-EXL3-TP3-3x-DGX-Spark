@@ -1,4 +1,4 @@
-# 06 — The NCCL mesh: the cliff, and the half of the fabric nobody was using
+# 06 — The NCCL mesh: the cliff, the half of the fabric nobody was using, and the wall behind it
 
 The mesh plugin is what makes a switchless three-node triangle work at all ([00](00-hardware-and-os.md)). This page
 is two findings against it, three months of hardware apart in feel and one day apart in fact.
@@ -15,8 +15,16 @@ transmitted **exactly zero bytes since driver load**, on all three nodes, for as
 bounce buffer, and together they take the 64 MB all-reduce from 12.0 to **20.8 GB/s** and the engine to
 **C8 168.9** `[measured-here]`. Sections 6–8.
 
+**The third** is that the corrected ceiling was *still* wrong, in the other direction. Each ConnectX-7 sits in a
+**PCIe Gen5 x4** slot and can carry about **15 GB/s** regardless of what its two 200 Gb/s ports advertise, so a node's
+real fabric ceiling is ~30 GB/s and not the 50 GB/s per pair §6 claims `[retracted]`. That reading closes the case:
+what is left on the fabric is **at most ~30 %**, worth 2–4 % of prefill, and a one-sided RDMA_WRITE transport we
+wrote, measured and did **not** adopt confirms it — it removes RNR retries entirely and moves throughput by nothing.
+Sections 9–10.
+
 If you are reading this to fix your own cluster: do section 4 first, it is free. Then read section 6 and go and
-look at your own `port_xmit_data` counters before you believe anything about your fabric's ceiling.
+look at your own `port_xmit_data` counters before you believe anything about your fabric's ceiling — and then read
+section 9 and go and look at your cards' `LnkSta` before you believe anything about the ceiling you compute.
 
 **Settings for every engine number in §1–§5** (§6–§8 carry their own block, and it differs). Image
 `exl3-zeus:bc0e0f6s`, TP=3 + expert parallel, EXL3 4bpw weights,
@@ -171,7 +179,7 @@ mostly stops happening. Dose-response, median of three runs each `[measured-here
 Counters and time move together, monotonically, and the knee is between 12 and 16 channels. **Why 8 and not 2, 12 or
 16.** At 16 and above the misses come back — the bug returning. At 2 and 4 the cliff is also gone, but the largest
 messages lose parallelism they need, which shows in the 64 MB column and would cost prefill. 12 is indistinguishable
-from 8 within noise model-free and slightly better at 3.4 MB, but has never been taken to the engine (§9); we ship 8
+from 8 within noise model-free and slightly better at 3.4 MB, but has never been taken to the engine (§14 item 1); we ship 8
 because it is the value measured end to end. `NCCL_MIN_NCHANNELS=8` alongside `MAX` measured the same as `MAX` alone
 `[measured-here]`.
 
@@ -255,7 +263,12 @@ advertised address list, stopping at the **first** address a local NIC can reach
 channel to a given peer lands on the same cable, every time, for every peer.
 
 We had been reading a 13 GB/s ceiling as "the link", against a nominal 25 GB/s. It was not the link. It was one
-cable of a pair whose combined capacity is 50 GB/s per direction.
+cable of a pair whose combined **wire** capacity is 50 GB/s per direction.
+
+> **Read §9 before using that 50 GB/s anywhere** `[retracted]`. The wire is not the ceiling on this hardware: each
+> card sits on PCIe Gen5 x4 and carries ~15 GB/s no matter what its ports advertise, so the real ceiling is ~30 GB/s
+> per node. The finding in this section — one cable of each pair idle since driver load — stands exactly as measured;
+> only the roof it is compared against changed, and it changed again the same day.
 
 The proof is in hardware, and it is unambiguous. `port_xmit_data` is cumulative since driver load; read on all three
 nodes while the cluster was busy `[measured-here]`:
@@ -408,12 +421,12 @@ One boot per arm, three sweep rounds each, medians of three, gates cold and afte
 | free RAM / swap, worst node | 11.4 G / 0.11 G | 11.3 G / 0.11 G | unchanged |
 | gates, cold and warm | 10/10 · 12/12 | **10/10 · 12/12** | unchanged |
 
-**What it cost.** We looked in the same places as in §11 and found the same answer: nothing measurable. The KV pool
+**What it cost.** We looked in the same places as in §13 and found the same answer: nothing measurable. The KV pool
 was the one to watch — advertising `NCCL_PTR_CUDA` moves NCCL's transfer buffers from host allocations into device
 memory, which is accounted under `gpu-memory-utilization` — and the pool moved +0.4 %, inside boot-to-boot noise. The
 real cost is elsewhere and it is not a number: **you are now running a patched plugin.** That is a build to maintain,
 a divergence from upstream to track, and a `.so` that has to be rebuilt when the plugin moves. Both patches are
-offered upstream (§12, [../CREDITS.md](../CREDITS.md)).
+offered upstream (§10.4, §14, [../CREDITS.md](../CREDITS.md)).
 
 ### 8.3 How to run it
 
@@ -437,18 +450,185 @@ bash bench/mesh-multilink-sweep.sh 2
 
 Full tables: [`../results/mesh/multilink-sweep.md`](../results/mesh/multilink-sweep.md).
 
+**Upstream.** Patches 0004, 0005 and 0006 are carried in a public fork of the plugin,
+[`NNNtrance/nccl-mesh-plugin`](https://github.com/NNNtrance/nccl-mesh-plugin), branch
+`gb10-dual-link-ptrcuda` on top of `19924dcc`, and offered as
+[pull request #59](https://github.com/autoscriptlabs/nccl-mesh-plugin/pull/59) against the plugin,
+referencing the issue thread the findings were first reported on. Patch 0007 (§10) is deliberately
+**not** in that branch. If you want the patched plugin and would rather not apply three patch files,
+build that branch.
+
 ---
 
-## 9. What is NOT the cause
+## 9. The ceiling is PCIe, not the cable
+
+**This section retracts a number this page published yesterday** `[retracted]`. §6 said the pair of
+cables between two nodes is worth **50 GB/s** and that the collective was therefore running at about
+28 % of the fabric. The cable arithmetic was right and the ceiling was wrong, because it counted the
+wire and not the slot the card sits in.
+
+Two commands settle it, and both should be run before anyone quotes a fabric roofline
+`[measured-here]`:
+
+```
+lspci -vv | grep -A2 ConnectX
+```
+
+```
+ibv_devinfo | grep -E "active_width|active_speed|state"
+```
+
+Each ConnectX-7 reports `LnkSta: Speed 32GT/s, Width x4` — PCIe Gen5 by four lanes — and each of its
+two ports reports `4X` at `50.0 Gbps` per lane, which is the 200 Gb/s the port advertises.
+
+| | arithmetic | result |
+|---|---|---|
+| wire, per card (2 ports × 200 Gb/s) | 2 × 25 GB/s | 50 GB/s |
+| **PCIe Gen5 x4, per card** | 32 GT/s × 4 lanes ÷ 8 × 128/130 | **≈ 15.75 GB/s raw, ~14.5–15 GB/s usable** |
+| **per node** (two cards) | 2 × ~15 | **≈ 30 GB/s total** |
+
+A card's two ports can offer three times more traffic than the card's own slot can carry. The wire
+was never the binding constraint on this hardware.
+
+**What that re-explains, without changing a single measurement:**
+
+- The **13 GB/s** we spent a day reasoning against was not "half a link" and not "a 25 GB/s link at
+  half efficiency". It was **one card's PCIe limit**, at about 87 % of it — a perfectly healthy
+  number that looked like a defect only because it was being compared against the wrong roof.
+- The second cable of each pair lives on the **second card**, so patch 0005 did not open a second
+  cable so much as a **second PCIe path**. That is why the ceiling moved to ~20 GB/s and stopped
+  there rather than approaching 50.
+- The remaining fabric headroom is therefore at most about **30 %** (≈20 GB/s of bus bandwidth
+  against a ~30 GB/s per-node ceiling), not the 2.5× the 50 GB/s figure implied. With the collective
+  at 16.5 % of a prefill chunk ([10](10-results-and-roofline.md) §5), perfect use of the remaining
+  headroom is worth **2–4 % of prefill** — not the 12–17 % an earlier estimate of ours carried
+  `[estimate]`.
+- And it predicts the result in §10 before §10 was run: a transport change that removes flow-control
+  stalls cannot move a number that is bounded by a bus.
+
+The lesson is the one this repository keeps re-learning in different clothes: **measure the ruler,
+not the brochure.** The same day, the memory roofline moved from a vendor 273 GB/s to a measured
+225 GB/s ([10](10-results-and-roofline.md) §4), and every efficiency percentage written before that
+was ~22 % optimistic. A fabric ceiling assembled from port speeds is exactly the same mistake.
+
+---
+
+## 10. One-sided RDMA_WRITE (patch 0007): built, measured, not adopted
+
+The plugin's data path is **two-sided**: `mesh_isend` posts an `IBV_WR_SEND`, `mesh_irecv` posts an
+`ibv_post_recv`, and there is not one `IBV_WR_RDMA_WRITE` in the source. Its only flow control is the
+RNR NAK — if the sender posts before the receiver has re-armed, the hardware makes the sender wait.
+NCCL's own IB transport never has that problem, because it is one-sided: the receiver advertises the
+address and rkey of its destination buffer into a FIFO slot in the sender's memory, and the sender
+writes only into an advertised slot.
+
+§14 of this page used to call that "the real fix" and price it at 650–850 lines of somebody else's
+work. We wrote it instead: `patches/kernel/0007-one-sided-fifo-rdma-write.patch`, +977/−16 lines over
+0004–0006.
+
+### 10.1 The design, in one paragraph
+
+The FIFO lives in the **sender's** host memory, one per comm — which after 0005 means **one per
+cable** — as 32-byte slots (`addr`, `rkey`, `size`, `tag`, `seq_head`, `seq`), small enough to be
+advertised `IBV_SEND_INLINE`. The receiver posts a **zero-byte** `ibv_post_recv` first and advertises
+the slot second, so by the time the sender's `RDMA_WRITE_WITH_IMM` arrives the receive is always
+armed and **RNR becomes structurally impossible**. `seq` is written last and read with acquire
+ordering; `NCCL_MESH_FIFO_STRICT=1` re-checks a duplicate of it at another offset, so a torn slot
+cannot be mistaken for a ready one. A ring overrun and an oversized send are both `MESH_WARN` +
+`ncclInternalError` rather than a silent write into the wrong memory. The path does **not** rely on
+NCCL's "you may return `*request = NULL`" contract: `mesh_isend` always returns a request and queues
+it if no slot is ready. Mixed versions fail closed — `mesh_qp_info` stays 32 bytes, its two reserved
+bytes become a magic and a wire version, and a `write`-mode node refuses a peer that does not speak
+the extension rather than writing into an address it guessed. Everything is behind
+`NCCL_MESH_TRANSPORT=send|write`, default `send`, which is byte-for-byte the old path.
+
+### 10.2 Model-free: the mechanism works and the bandwidth does not move
+
+Six arms, two repetitions each, engine down, `NCCL_MAX_NCHANNELS=8`, `ALGO=Ring`, all four ports in
+use. Means of the two repetitions; all-reduce GB/s (NCCL bus bandwidth) with RNR retries per
+operation beside it `[measured-here]`:
+
+| arm | 1 MB | 16 MB | 64 MB | RNR/op | out-of-buffer/op | one C8 decode step (90 × 512 KB) |
+|---|---|---|---|---|---|---|
+| `p2best` — production, two-sided (**control**) | 5.5 | 17.8 | 20.1 | 1.1–9.2 | 0.3–7.7 | 9.12 ms |
+| `p3send` — 0007 binary, `TRANSPORT=send` | 5.2 | 19.0 | 19.3 | 0.2–11.6 | 0.1–4.7 | 9.14 ms |
+| `p3w64` — write, FIFO depth 64 | 6.4 | 21.2 | 22.1 | **0.0** | **0.0** | 9.13 ms |
+| `p3w128` — write, depth 128 (default) | 6.7 | 16.9 | 17.4 | **0.0** | **0.0** | 9.14 ms |
+| `p3w256` — write, depth 256 | 4.7 | 15.4 | 16.2 | **0.0** | **0.0** | 9.08 ms |
+| `p3w128nf` — write, `FLUSH=0` | 6.3 | 16.7 | 20.1 | **0.0** | **0.0** | 9.25 ms |
+
+Two readings, and they point opposite ways.
+
+**The mechanism does exactly what it was designed to do.** Every write arm reports **zero** RNR
+retries and **zero** out-of-buffer events, at every size, in both repetitions — against 1–9 per
+operation on the control. That is not a bandwidth argument, it is a correctness-of-design argument,
+and it is the one thing in this experiment that is unambiguous. The `p3send` arm also lands on the
+control at every size, which is the gate that says the patch did not break the old path.
+
+**And the bandwidth does not care.** The pre-registered gate was **≥ 1.3× the control at ≥ 16 MB**.
+The default-depth arm is *below* control at 16 and 64 MB; the depth-64 arm is above it; the spread
+between two repetitions of the *same* arm reaches 30 %. On the message the engine actually decodes
+with, all six arms sit within 0.17 ms of each other — under 2 %. The gate was not met, and the
+honest description of the result is **no effect on throughput, at any depth, with or without the
+flush**.
+
+§9 says why, and said it before the arm was run: at ~20 GB/s of bus bandwidth the transfer is
+against a **PCIe** wall, not against a flow-control stall. Removing RNR from a path that was not
+waiting on RNR buys nothing.
+
+Full tables: [`../results/mesh/rdma-write-sweep.md`](../results/mesh/rdma-write-sweep.md).
+
+### 10.3 The engine arm, and the decision
+
+One boot on the write transport (FIFO depth 128, flush on), three sweep rounds, gates cold and warm,
+against production configuration 6 `[measured-here]`:
+
+| | production 6 (two-sided) | 0007, `TRANSPORT=write` |
+|---|---|---|
+| C1 aggregate | **56.9** | 56.4 |
+| C8 aggregate | **168.9** | 171.1 |
+| prefill-fresh, 3 unseen ~8.3K prompts (median) | **1,792** | 1,763 |
+| prefill, warm 7K prompt | 1,506 | 1,457 |
+| draft acceptance | 61–65 % | 60–65 % |
+| KV pool | 4,449,035 | 4,462,809 |
+| gates, cold and warm | 10/10 · 12/12 | 10/10 · 12/12 |
+| free RAM, worst node / swap | 11.3 G / 0.11 G | 11.1 G / 0.11 G |
+
+The differences run in **both directions** and every one of them is inside this stack's boot-to-boot
+spread ([09](09-measurement-protocol.md) §2). **Not adopted.** Production stays on the two-sided
+path with `nccl-mesh-patched2`.
+
+**What it cost, and what it did not.** The engine arm cost one boot; the sweep cost fifteen minutes;
+the patch cost a day of somebody's design attention. It cost the stack **nothing** — the production
+plugin binary, `.env.tp3` and the NVFP4 stack's own copy of the plugin were never written, and the
+rollback was never needed because the arm was run from a separate environment file against a separate
+plugin directory. What we did **not** get is the thing it was built for.
+
+**It is kept, not deleted.** The patch is in `patches/kernel/`, it compiles warning-free under
+`-Wall -Wextra`, its unit tests match the 0004–0006 baseline exactly, and a dry `dlopen` on all three
+nodes resolves every NCCL entry point without calling `init()`. If a future part puts a wider slot
+under these cards — or if somebody runs this plugin on hardware where RNR really is the binding
+constraint — it is written and measured. On this hardware it is an option, not a recommendation.
+
+### 10.4 Upstream
+
+Patch 0007 is **not** offered upstream and is not in the fork's PR branch. Reporting a transport
+rewrite as a win when our own measurement says it changes nothing here would waste the maintainer's
+time; if it goes upstream one day it should go with a machine where it pays. The three patches that
+*did* pay are in [PR #59](https://github.com/autoscriptlabs/nccl-mesh-plugin/pull/59) (§8.3).
+
+---
+
+## 11. What is NOT the cause
 
 | hypothesis | test | result |
 |---|---|---|
 | link, MTU, driver | point-to-point over the same queue pairs | 13.3 GB/s, clean through the cliff `[measured-here]` |
 | packet loss, congestion | `packet_seq_err`, `local_ack_timeout_err` | 0 everywhere, every size, every arm `[measured-here]` |
-| protocol choice (LL / LL128 / Simple) | `NCCL_PROTO` forced | no protocol fixes it — §10 `[measured-here]` |
+| protocol choice (LL / LL128 / Simple) | `NCCL_PROTO` forced | no protocol fixes it — §12 `[measured-here]` |
 | NCCL buffer too small | `NCCL_BUFFSIZE=8388608` | no change; the 32 KiB chunk floor is absolute, not a fraction of the buffer `[measured-here]` |
 | per-peer channel sharing | `NCCL_NCHANNELS_PER_NET_PEER=1` | no change `[measured-here]` |
-| missing GPUDirect RDMA (`ptrSupport = NCCL_PTR_HOST`) | debug log: GPU Direct RDMA disabled on all four HCAs | real, and it holds the ceiling down — but it is size-independent and cannot produce a cliff `[measured-here]`. **Since fixed: §7.** The "~13 GB/s against a 25 GB/s link" framing in an earlier version of this row was itself wrong — the pair is two cables, 50 GB/s, and one of them was idle (§6) |
+| missing GPUDirect RDMA (`ptrSupport = NCCL_PTR_HOST`) | debug log: GPU Direct RDMA disabled on all four HCAs | real, and it holds the ceiling down — but it is size-independent and cannot produce a cliff `[measured-here]`. **Since fixed: §7.** The "~13 GB/s against a 25 GB/s link" framing in an earlier version of this row was itself wrong twice over: the pair is two cables and one of them was idle (§6), and the number itself is a **PCIe** limit, not a link limit (§9) |
 
 **Retraction** `[retracted]`. An earlier report of ours read the profiler kernel name
 `ncclDevKernel_AllReduce_Sum_bf16_RING_LL` as "NCCL is using LL even at 16 MB, so half the link is on the table", and
@@ -457,7 +637,7 @@ proposed forcing `Simple` as the largest prefill lead open. Forcing LL at 16 MB 
 mesh delivers at that size anyway, since `Simple` — no flag words at all — reaches 12.2 GB/s. There is no half link to
 recover. What replaced it is the finding on this page: the loss is mid-range, and the mechanism is RNR.
 
-## 10. `NCCL_PROTO` — rejected
+## 12. `NCCL_PROTO` — rejected
 
 You will reach for this first; it does not work. Model-free, engine down, `bench/ar_bench.py` with the engine's exact
 NCCL environment; every protocol measured twice, `ALGO=Ring` unless noted; µs per all-reduce, world = 3
@@ -478,7 +658,7 @@ forced `Ring` (3.90 against 3.96 ms per decode step), so the launcher's `Ring` s
 carrying `NCCL_MAX_NCHANNELS=8` *alongside* `NCCL_PROTO=LL` is not evidence that 8 channels was tried and rejected —
 the `LL` in it costs 11× at 16 MB and buries the channel gain. That combination was never tried cleanly.
 
-## 11. What this cost
+## 13. What this cost
 
 A rare thing in this stack: a gain we looked hard for a price on and did not find one `[measured-here]`.
 
@@ -496,7 +676,7 @@ matters is the difference between arms, which is boot noise. Nothing is allocate
 fewer queue pairs, which are not on the budget that binds this stack. The one thing the cap takes away is parallelism
 for very large messages: at 2 and 4 channels the 64 MB column suffers, at 8 it does not (7,072 against 8,275 µs).
 
-## 12. What is left open
+## 14. What is left open
 
 1. **12 channels has never been taken to the engine** `[not tested]`. Model-free it was indistinguishable from 8 on a
    single cable and slightly better at 3.4 MB. It has **not** been re-measured over two cables, where the channel
@@ -508,21 +688,30 @@ for very large messages: at 2 and 4 channels the 64 MB column suffers, at 8 it d
 3. **RNR in the engine has not been re-read since the patches.** On the single-cable 8-channel engine a live counter
    read across one full sweep plus prefill plus mixed load showed **~42,000 `rnr_nak_retry_err` and 24,000–42,000
    `out_of_buffer` per node over about five minutes** — 1–3 % of wall clock in back-off `[measured-here]`. The
-   model-free sweep says retries per operation fell from ~15 to ~3 with `PTR_CUDA` `[measured-here]`, but the
-   engine-side counter read was not repeated `[not tested]`.
-4. **The receiver-advertised FIFO is still the real fix.** NCCL's own IB plugin has the sender write only into a slot
-   the receiver has advertised, which removes RNR from the steady state rather than making it cheap. That is a
-   wire-format change (a version field in `mesh_qp_info` that does not exist, so mixed-version nodes would corrupt
-   silently) and ~650–850 lines — the plugin author's work, not ours. With the channel cap and both patches in place
-   the remaining prize is small.
-5. **The collective's share of a decode step has still not been re-profiled** `[not tested]`. It has been the open
-   item through three separate changes now: the 24 % figure everything is reasoned against was profiled at 64
-   channels on a single cable, before any of §4, §6 or §7. One profiling boot on the current arm would replace three
-   inferences with a measurement, and it is the cheapest unspent measurement in this repository.
+   model-free sweep says retries per operation fell from ~15 to ~3 with `PTR_CUDA` and to **exactly 0** on the
+   one-sided transport (§10.2) `[measured-here]`, but the engine-side counter read was not repeated `[not tested]`.
+   §10 makes this item much less interesting than it looked: zero retries bought zero throughput.
+4. **The receiver-advertised FIFO — closed, and it was not the fix** `[measured-here]`. This item used to say the
+   one-sided path was "the real fix" and price it at 650–850 lines of the plugin author's time. We wrote it
+   (`patches/kernel/0007`, +977/−16), it works exactly as designed — RNR and out-of-buffer counters go to **zero** —
+   and it changes throughput by nothing on this hardware, because the binding constraint is the cards' PCIe slots
+   (§9), not the flow control. Not adopted; kept as an option; not offered upstream. Full account in §10.
+5. **The collective's share of a step — closed** `[measured-here]`. Re-derived without a profiling boot (the running
+   engine had no profiler endpoint) by re-segmenting the earlier trace per chunk, re-measuring the two classes that
+   changed model-free, and checking the total against live wall-clock: the all-reduce is **16.5 % of a prefill chunk**
+   and **10–15 % of a C1 decode step**, down from 20.1 % and 17.5 %. The residual on that reconciliation is 2.8 % and
+   the most likely owner of it is NCCL, so read the prefill share as a 14–17 % band. See
+   [10](10-results-and-roofline.md) §5. What is still `[not tested]` is the C8 decode split, which does need a
+   profiling boot.
 6. **DMA-BUF registration is measured and rejected, not understood** `[measured-here]`. It works and it is slower;
    we did not investigate why beyond the reasoning in §7.2.
+7. **The ~30 % of fabric headroom that is left** `[not tested]`. §9 puts it at ~20 GB/s of bus bandwidth against a
+   ~30 GB/s per-node PCIe ceiling. Nothing in this repository has tried to close it, and at 2–4 % of prefill nothing
+   should before the two larger levers ([11](11-open-issues.md) §2.12, §2.1) are spent. If you want to try: the
+   remaining candidates are channel count over two cables (item 1), and getting NCCL to keep both cards busy on the
+   *same* collective rather than alternating channels between them, which nobody here has looked at.
 
-## 13. The same fix applies to the NVFP4 sibling
+## 15. The same fix applies to the NVFP4 sibling
 
 Our NVFP4 recipe runs the **same plugin binary at the same commit** over the **same fabric** at the **same TP=3**,
 with the same 4096-wide hidden state and so the same 512 KB decode all-reduce. Same cliff, same fix: one environment

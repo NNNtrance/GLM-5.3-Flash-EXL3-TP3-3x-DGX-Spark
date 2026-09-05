@@ -1,0 +1,1310 @@
+0007-one-sided-fifo-rdma-write.patch
+===================================================================
+nccl-mesh-plugin @ 19924dcc, on top of 0004, 0005 and 0006.
+Files: include/mesh_plugin.h, src/mesh_plugin.c.  +977 / -16 lines.
+
+BUILT AND MEASURED, NOT ADOPTED.  On this hardware it removes RNR retries
+completely and changes throughput by nothing, because the ceiling is the
+cards' PCIe Gen5 x4 slots and not the flow control -- see docs/06 sections 9
+and 10.  It is kept here as an option for a machine where RNR really is the
+binding constraint, and it is deliberately NOT part of the upstream pull
+request.  Default behaviour is byte-for-byte the two-sided path.
+
+
+NCCL_MESH_TRANSPORT=send|write (default send = the two-sided SEND/RECV path
+this plugin has always used, so the library stays a drop-in). write switches
+the data path to the one NCCL's own IB transport uses: the sender owns a small
+ring of slots in registered host memory and advertises it in the handshake;
+mesh_irecv arms a zero-length RECV and then publishes the receive buffer's
+address, rkey and size into that ring with an inline RDMA_WRITE; mesh_isend
+waits for a published slot and issues one IBV_WR_RDMA_WRITE_WITH_IMM straight
+into the receiver's buffer. Because the sender cannot write before the slot
+appears, and the slot is not published before the RECV is armed, an RNR NAK is
+unreachable in the steady state instead of merely being made cheap by 0004.
+
+A send whose slot has not arrived is parked on a per-comm FIFO queue and posted
+by mesh_send_drain(), which every mesh_test() on that comm runs first. isend
+therefore never returns *request = NULL: NCCL's net API allows that and its own
+IB plugin relies on it, but the behaviour has not been measured on this stack
+and getting it wrong would be a silent hang.
+
+Version handshake, fail-closed. struct mesh_qp_info stays 32 bytes (growing it
+would hang an old peer's MSG_WAITALL recv); its two spare bytes now carry a
+magic and a wire version, and a fixed 64-byte struct mesh_qp_ext is exchanged
+after the base struct only when BOTH ends set the magic. A missing extension in
+write mode, a version mismatch, a layout mismatch or a transport-mode mismatch
+all refuse the connection with an explicit line rather than writing the wrong
+memory later. Against a pre-0007 peer in send mode no extra byte is exchanged
+at all.
+
+Connection pooling and async connect are bypassed on the write path: a pool hit
+returns without a handshake, so the peer would never learn the FIFO address.
+
+New knobs: NCCL_MESH_TRANSPORT (send), NCCL_MESH_FIFO_DEPTH (128, clamped to
+[32,4096] and rounded to a power of two), NCCL_MESH_FIFO_STRICT (1, torn-slot
+double check). NCCL_MESH_MIN_RNR_TIMER stays meaningful for the send path.
+
+The RDMA_READ iflush from 0006 is unchanged and still required: the immediate
+proves the data reached the receiver's memory, not that the GPU's read path
+sees it.
+
+---
+ include/mesh_plugin.h | 144 ++++++-
+ src/mesh_plugin.c     | 849 +++++++++++++++++++++++++++++++++++++++++-
+ 2 files changed, 977 insertions(+), 16 deletions(-)
+
+diff --git a/include/mesh_plugin.h b/include/mesh_plugin.h
+index 9bfc2cc..6959b5f 100644
+--- a/include/mesh_plugin.h
++++ b/include/mesh_plugin.h
+@@ -135,11 +135,96 @@ struct mesh_qp_info {
+     uint32_t ip;           // Network byte order
+     uint8_t gid_index;
+     uint8_t nic_idx;       // Which NIC on the listener
+-    uint8_t reserved[2];
++    /*
++     * patch 0007: these two bytes were reserved[2] and always zero. A plugin
++     * that predates the one-sided transport therefore sends 0 here, which is
++     * exactly how an old peer is detected -- see mesh_qp_ext below.
++     */
++    uint8_t ext_magic;     // MESH_EXT_MAGIC if this peer speaks mesh_qp_ext
++    uint8_t ext_ver;       // MESH_WIRE_VERSION
++};
++
++/*
++ * ============================================================================
++ * patch 0007 -- one-sided data path: receiver-advertised FIFO + RDMA_WRITE
++ * ============================================================================
++ *
++ * The two-sided SEND/RECV path stays and is still the default. With
++ * NCCL_MESH_TRANSPORT=write the data path becomes the one NCCL's own IB
++ * transport uses:
++ *
++ *   - the SENDER owns a small ring of mesh_fifo_slot in host memory, registered
++ *     with IBV_ACCESS_REMOTE_WRITE, and advertises its address + rkey in the
++ *     handshake;
++ *   - mesh_irecv posts a zero-length RECV (to catch the immediate) and then
++ *     publishes one slot -- the receive buffer's address, rkey and size --
++ *     into the sender's ring with an inline RDMA_WRITE;
++ *   - mesh_isend waits for a published slot and issues one
++ *     IBV_WR_RDMA_WRITE_WITH_IMM straight into the receiver's buffer.
++ *
++ * Because the sender cannot write before the receiver has published, and the
++ * receiver publishes only after its zero-length RECV is armed, an RNR NAK is
++ * not reachable in the steady state at all -- instead of being made cheap by
++ * patch 0004's min_rnr_timer.
++ */
++#define MESH_TRANSPORT_SEND     0
++#define MESH_TRANSPORT_WRITE    1
++
++#define MESH_EXT_MAGIC          0x4D            /* 'M' -- mesh_qp_info.ext_magic */
++#define MESH_WIRE_VERSION       1               /* bump on ANY wire change      */
++#define MESH_EXT_STRUCT_MAGIC   0x4D583037u     /* "MX07"                       */
++
++#define MESH_FIFO_DEPTH_MIN     32              /* >= NCCL_NET_MAX_REQUESTS     */
++#define MESH_FIFO_DEPTH_MAX     4096
++#define MESH_FIFO_DEPTH_DEFAULT 128
++#define MESH_FIFO_SIGNAL_PERIOD 16              /* signal 1 in N slot publishes */
++
++/*
++ * One FIFO slot. 32 bytes, so it fits the QP's max_inline_data = 64 and the
++ * publish costs the NIC no extra DMA read.
++ *
++ * seq is written LAST on purpose: the sender treats the slot as ready when seq
++ * reaches the value it is waiting for. That relies on a single RDMA_WRITE
++ * landing in ascending address order, which is the same assumption NCCL's IB
++ * plugin ships with. NCCL_MESH_FIFO_STRICT=1 (the default) additionally checks
++ * seq_head, so a torn slot is detected and simply retried instead of used.
++ */
++struct mesh_fifo_slot {
++    uint64_t addr;          /*  0  receiver's buffer virtual address */
++    uint32_t rkey;          /*  8  receiver's rkey for that buffer   */
++    uint32_t size;          /* 12  bytes the receiver will accept    */
++    uint32_t tag;           /* 16  NCCL tag, echoed back             */
++    uint32_t seq_head;      /* 20  low half of seq, for STRICT mode  */
++    uint64_t seq;           /* 24  ready stamp -- WRITTEN LAST       */
+ };
+ 
++/*
++ * Handshake extension, exchanged over the same TCP socket immediately after
++ * struct mesh_qp_info, and only when BOTH sides set ext_magic. Fixed size and
++ * self-describing (magic, version, struct_bytes, slot_bytes) so a mismatched
++ * pair fails loudly at connect instead of writing the wrong memory later.
++ * All multi-byte fields are in network byte order.
++ */
++struct mesh_qp_ext {
++    uint32_t magic;         /* MESH_EXT_STRUCT_MAGIC                 */
++    uint16_t version;       /* MESH_WIRE_VERSION                     */
++    uint8_t  transport;     /* MESH_TRANSPORT_SEND / _WRITE          */
++    uint8_t  slot_bytes;    /* sizeof(struct mesh_fifo_slot)         */
++    uint32_t fifo_depth;    /* slots in the sender's ring            */
++    uint32_t fifo_rkey;     /* rkey of the sender's ring             */
++    uint64_t fifo_addr;     /* address of the sender's ring          */
++    uint32_t struct_bytes;  /* sizeof(struct mesh_qp_ext)            */
++    uint8_t  reserved[36];
++};
++
++_Static_assert(sizeof(struct mesh_fifo_slot) == 32, "mesh_fifo_slot must stay 32 bytes");
++_Static_assert(sizeof(struct mesh_qp_ext) == 64, "mesh_qp_ext must stay 64 bytes");
++_Static_assert(sizeof(struct mesh_qp_info) == 32, "mesh_qp_info must stay 32 bytes");
++
+ struct handshake_entry {
+     struct mesh_qp_info remote_info;
++    struct mesh_qp_ext remote_ext;  /* patch 0007: valid only if have_ext */
++    int have_ext;
+     struct ibv_qp *local_qp;
+     struct ibv_cq *local_cq;
+     struct mesh_nic *nic;
+@@ -201,6 +286,22 @@ struct mesh_send_comm {
+     struct mesh_async_connect_req *async_req; // Pending async connect request
+     int connect_pending;        // 1 if waiting for async connect to complete
+ 
++    /*
++     * patch 0007: one-sided transport. The FIFO ring lives here, on the
++     * sender, and the peer's mesh_irecv writes into it. write_mode is decided
++     * once at connect time by the version handshake and never changes.
++     */
++    int write_mode;                     /* 1 = FIFO + RDMA_WRITE data path */
++    struct mesh_fifo_slot *fifo;        /* ring, host memory               */
++    struct ibv_mr *fifo_mr;             /* MR over fifo (REMOTE_WRITE)     */
++    uint32_t fifo_depth;                /* power of two                    */
++    uint32_t fifo_mask;                 /* fifo_depth - 1                  */
++    uint64_t fifo_tail;                 /* slots consumed so far           */
++    struct mesh_request *pend_head;     /* sends waiting for a slot, FIFO  */
++    struct mesh_request *pend_tail;
++    pthread_mutex_t pend_lock;
++    int pend_lock_init;
++
+     // Request tracking
+     struct mesh_request *requests[MESH_MAX_QPS];
+     int num_requests;
+@@ -221,6 +322,19 @@ struct mesh_recv_comm {
+     struct timespec conn_established_time;  // When QP reached RTS
+     uint32_t peer_ip;           // Peer IP for error logging
+ 
++    /*
++     * patch 0007: the peer's FIFO ring, learned in the handshake. mesh_irecv
++     * publishes one slot per receive into it.
++     */
++    int write_mode;
++    uint64_t remote_fifo_addr;
++    uint32_t remote_fifo_rkey;
++    uint32_t remote_fifo_depth;
++    uint32_t remote_fifo_mask;
++    uint64_t fifo_head;                 /* slots published so far */
++    struct mesh_fifo_slot pub_slot;     /* staging for the inline publish  */
++    struct ibv_mr *pub_mr;              /* its lkey (inline copies at post) */
++
+     // Request tracking
+     struct mesh_request *requests[MESH_MAX_QPS];
+     int num_requests;
+@@ -380,6 +494,9 @@ struct mesh_async_connect_state {
+ /*
+  * Async request state
+  */
++#define MESH_REQ_POSTED     0   /* on the wire, waiting for a completion */
++#define MESH_REQ_WAIT_SLOT  1   /* patch 0007: waiting for a FIFO slot    */
++
+ struct mesh_request {
+     int used;
+     int done;
+@@ -390,6 +507,22 @@ struct mesh_request {
+     int is_send;                // 1 if send request, 0 if recv
+     int is_flush;               // 1 if this is an iflush RDMA_READ (patch 0006)
+     struct timespec start_time; // NCCL-001: Monotonic clock at request creation for timeout
++
++    /*
++     * patch 0007. A write-mode send may arrive before the receiver has
++     * published a slot for it. Rather than returning *request = NULL and
++     * relying on NCCL calling isend again -- a contract this plugin has never
++     * measured on this stack -- the request is parked on the comm's pending
++     * queue and posted by mesh_send_drain(), which every mesh_test() call on
++     * that comm runs first. The queue is strictly FIFO, so slot i is always
++     * consumed by the i-th send.
++     */
++    int is_write;               // 1 if this request rides the one-sided path
++    int state;                  // MESH_REQ_POSTED / MESH_REQ_WAIT_SLOT
++    void *wdata;                // buffer to RDMA_WRITE from (send, deferred)
++    uint32_t wlkey;             // its lkey
++    int wtag;                   // NCCL tag, checked against the slot
++    struct mesh_request *next;  // pending-queue link
+ };
+ 
+ /*
+@@ -412,6 +545,9 @@ struct mesh_plugin_state {
+     int ptr_cuda;               // NCCL_MESH_PTR_CUDA: advertise NCCL_PTR_CUDA (default: 1)
+     int dmabuf_enable;          // NCCL_MESH_DMABUF: advertise NCCL_PTR_DMABUF (default: 0)
+     int flush_enable;           // NCCL_MESH_FLUSH: real RDMA_READ flush in iflush (default: 1)
++    int transport;              // NCCL_MESH_TRANSPORT: 0 = send (default), 1 = write (patch 0007)
++    int fifo_depth;             // NCCL_MESH_FIFO_DEPTH: slots per send comm (default: 128)
++    int fifo_strict;            // NCCL_MESH_FIFO_STRICT: torn-slot double check (default: 1)
+     int disable_rdma;           // NCCL_MESH_DISABLE_RDMA: force TCP fallback
+ 
+     // Connection pooling config (TICKET-6)
+@@ -451,6 +587,12 @@ struct mesh_plugin_state {
+     uint64_t tcp_requests_freed;        // TCP requests freed
+     uint64_t ops_completed;             // Total send/recv operations completed
+ 
++    // patch 0007 counters (write transport)
++    uint64_t write_posts;               // RDMA_WRITE_WITH_IMM posted
++    uint64_t write_slot_waits;          // isend that had to park on the pending queue
++    uint64_t fifo_publishes;            // slots advertised by irecv
++    uint64_t fifo_torn;                 // torn slots caught by STRICT mode
++
+     // Server metrics logging configuration
+     int metrics_enabled;                // NCCL_MESH_METRICS: enable periodic metrics (default: 1)
+     int metrics_interval_sec;           // NCCL_MESH_METRICS_INTERVAL_SEC: log interval (default: 10)
+diff --git a/src/mesh_plugin.c b/src/mesh_plugin.c
+index 8e1867b..f7ebd98 100644
+--- a/src/mesh_plugin.c
++++ b/src/mesh_plugin.c
+@@ -714,6 +714,146 @@ int mesh_create_handshake_socket(uint32_t bind_ip, uint16_t *port_out) {
+     return sock;
+ }
+ 
++/*
++ * ============================================================================
++ * patch 0007 -- handshake extension for the one-sided (FIFO + RDMA_WRITE) path
++ * ============================================================================
++ *
++ * struct mesh_qp_info stays 32 bytes on purpose: growing it would make an
++ * unpatched peer's MSG_WAITALL recv wait forever for bytes that never come.
++ * Instead its two spare bytes carry a magic and a wire version, and a fixed
++ * 64-byte struct mesh_qp_ext is exchanged afterwards -- but only when BOTH
++ * ends set the magic, so against a pre-0007 peer the wire is byte-identical
++ * to the unpatched plugin.
++ */
++
++/* Byte order for the 64-bit FIFO address on the wire. */
++static uint64_t mesh_hton64(uint64_t v) {
++    uint32_t probe = 1;
++    if (*(const uint8_t *)&probe == 0) return v;   /* already big-endian */
++    return ((uint64_t)htonl((uint32_t)(v & 0xffffffffULL)) << 32) |
++           (uint64_t)htonl((uint32_t)(v >> 32));
++}
++#define mesh_ntoh64(v) mesh_hton64(v)
++
++/* Clamp a requested FIFO depth into [MIN, MAX] and round up to a power of two
++ * so the ring index is a mask instead of a modulo. */
++static uint32_t mesh_fifo_pow2(int requested) {
++    uint32_t d = 1;
++    int want = requested;
++    if (want < MESH_FIFO_DEPTH_MIN) want = MESH_FIFO_DEPTH_MIN;
++    if (want > MESH_FIFO_DEPTH_MAX) want = MESH_FIFO_DEPTH_MAX;
++    while (d < (uint32_t)want) d <<= 1;
++    return d;
++}
++
++/* Fixed-size blocking helpers for the handshake socket. Both ends already set
++ * SO_SNDTIMEO/SO_RCVTIMEO, so a peer that speaks a different protocol produces
++ * a timeout and an error line -- never a silent hang. */
++static int mesh_sock_send_all(int sock, const void *buf, size_t len) {
++    const uint8_t *p = (const uint8_t *)buf;
++    size_t off = 0;
++    while (off < len) {
++        ssize_t n = send(sock, p + off, len - off, 0);
++        if (n <= 0) return -1;
++        off += (size_t)n;
++    }
++    return 0;
++}
++
++static int mesh_sock_recv_all(int sock, void *buf, size_t len) {
++    uint8_t *p = (uint8_t *)buf;
++    size_t off = 0;
++    while (off < len) {
++        ssize_t n = recv(sock, p + off, len - off, 0);
++        if (n <= 0) return -1;
++        off += (size_t)n;
++    }
++    return 0;
++}
++
++/* Fill the extension this node advertises. The accept side owns no ring, so
++ * it passes zeroes for the FIFO fields. */
++static void mesh_ext_fill(struct mesh_qp_ext *ext, uint64_t fifo_addr,
++                          uint32_t fifo_rkey, uint32_t fifo_depth) {
++    memset(ext, 0, sizeof(*ext));
++    ext->magic        = htonl(MESH_EXT_STRUCT_MAGIC);
++    ext->version      = htons(MESH_WIRE_VERSION);
++    ext->transport    = (uint8_t)g_mesh_state.transport;
++    ext->slot_bytes   = (uint8_t)sizeof(struct mesh_fifo_slot);
++    ext->fifo_depth   = htonl(fifo_depth);
++    ext->fifo_rkey    = htonl(fifo_rkey);
++    ext->fifo_addr    = mesh_hton64(fifo_addr);
++    ext->struct_bytes = htonl((uint32_t)sizeof(struct mesh_qp_ext));
++}
++
++/*
++ * Validate a peer's extension. Fail-closed: anything that does not match
++ * exactly is refused here, at connect time, instead of being discovered later
++ * as a write into the wrong memory.
++ *
++ * have_ext == 0 means the peer never set ext_magic, i.e. it predates patch
++ * 0007. That is fine in send mode -- the data path is then the old two-sided
++ * one and the wire is identical -- and fatal in write mode.
++ *
++ * need_fifo is 1 only where the peer is the sender and must therefore have
++ * advertised a ring (the accept side of the handshake).
++ */
++static int mesh_ext_validate(const struct mesh_qp_ext *ext, int have_ext,
++                             int need_fifo, const char *who) {
++    if (!have_ext) {
++        if (g_mesh_state.transport == MESH_TRANSPORT_WRITE) {
++            MESH_WARN("%s: peer does not speak the MESH write transport (no "
++                      "handshake extension). Every node must run a plugin with "
++                      "patch 0007 and the same NCCL_MESH_TRANSPORT. Refusing.", who);
++            return -1;
++        }
++        return 0;
++    }
++    if (ntohl(ext->magic) != MESH_EXT_STRUCT_MAGIC) {
++        MESH_WARN("%s: handshake extension magic 0x%08x, expected 0x%08x - refusing",
++                  who, ntohl(ext->magic), MESH_EXT_STRUCT_MAGIC);
++        return -1;
++    }
++    if (ntohs(ext->version) != MESH_WIRE_VERSION) {
++        MESH_WARN("%s: peer speaks MESH wire version %u, this node speaks %u - "
++                  "refusing (mixed plugin versions)", who,
++                  (unsigned)ntohs(ext->version), (unsigned)MESH_WIRE_VERSION);
++        return -1;
++    }
++    if (ntohl(ext->struct_bytes) != (uint32_t)sizeof(struct mesh_qp_ext) ||
++        ext->slot_bytes != (uint8_t)sizeof(struct mesh_fifo_slot)) {
++        MESH_WARN("%s: handshake extension layout mismatch (ext %u vs %zu, slot %u "
++                  "vs %zu) - refusing", who, ntohl(ext->struct_bytes),
++                  sizeof(struct mesh_qp_ext), (unsigned)ext->slot_bytes,
++                  sizeof(struct mesh_fifo_slot));
++        return -1;
++    }
++    if (ext->transport != (uint8_t)g_mesh_state.transport) {
++        MESH_WARN("%s: peer runs NCCL_MESH_TRANSPORT=%s, this node runs %s - "
++                  "refusing (both ends must agree)", who,
++                  ext->transport == MESH_TRANSPORT_WRITE ? "write" : "send",
++                  g_mesh_state.transport == MESH_TRANSPORT_WRITE ? "write" : "send");
++        return -1;
++    }
++    if (need_fifo && g_mesh_state.transport == MESH_TRANSPORT_WRITE) {
++        uint32_t d = ntohl(ext->fifo_depth);
++        if (d < MESH_FIFO_DEPTH_MIN || d > MESH_FIFO_DEPTH_MAX || (d & (d - 1)) ||
++            ext->fifo_addr == 0) {
++            MESH_WARN("%s: peer advertised an unusable FIFO (depth %u, addr %s) - "
++                      "refusing", who, d, ext->fifo_addr ? "set" : "null");
++            return -1;
++        }
++    }
++    return 0;
++}
++
++/* Defined with the rest of the one-sided data path, below mesh_regMr. */
++static int  mesh_send_fifo_setup(struct mesh_send_comm *comm);
++static void mesh_send_fifo_teardown(struct mesh_send_comm *comm);
++static int  mesh_send_drain(struct mesh_send_comm *comm);
++static void mesh_untrack_request(struct mesh_request *req);
++
+ /*
+  * Accept a handshake connection, receive remote QP info, and send ours back
+  */
+@@ -772,8 +912,11 @@ int mesh_accept_handshake(int listen_sock, struct mesh_qp_info *remote_info, str
+  * Uses non-blocking connect with select() to avoid deadlock
+  * Retry timing controlled by NCCL_MESH_TIMEOUT_MS and NCCL_MESH_RETRY_COUNT
+  */
+-int mesh_send_handshake(uint32_t remote_ip, uint16_t remote_port,
+-                        struct mesh_qp_info *local_info, struct mesh_qp_info *remote_info) {
++int mesh_send_handshake_ext(uint32_t remote_ip, uint16_t remote_port,
++                            struct mesh_qp_info *local_info,
++                            struct mesh_qp_info *remote_info,
++                            const struct mesh_qp_ext *local_ext,
++                            struct mesh_qp_ext *remote_ext, int *have_ext) {
+     int sock;
+     struct sockaddr_in addr;
+     int connected = 0;
+@@ -877,12 +1020,58 @@ int mesh_send_handshake(uint32_t remote_ip, uint16_t remote_port,
+         close(sock);
+         return -1;
+     }
+-    
+-    
++
++    /*
++     * patch 0007: exchange the extension only when BOTH ends advertise it.
++     * Doing it after the base exchange (rather than piggybacked on the first
++     * send) means a pre-0007 peer never sees an unexpected byte, so send mode
++     * against an old plugin is bit-identical to the unpatched wire.
++     */
++    if (have_ext) *have_ext = 0;
++    if (local_info->ext_magic == MESH_EXT_MAGIC &&
++        remote_info->ext_magic == MESH_EXT_MAGIC) {
++        if (remote_info->ext_ver != MESH_WIRE_VERSION) {
++            MESH_WARN("connect: peer speaks MESH wire version %u, this node speaks %u "
++                      "- refusing (mixed plugin versions)",
++                      (unsigned)remote_info->ext_ver, (unsigned)MESH_WIRE_VERSION);
++            close(sock);
++            return -1;
++        }
++        if (!local_ext || !remote_ext || !have_ext) {
++            MESH_WARN("connect: peer offered a handshake extension but this call "
++                      "cannot carry one - refusing");
++            close(sock);
++            return -1;
++        }
++        if (mesh_sock_send_all(sock, local_ext, sizeof(*local_ext)) != 0 ||
++            mesh_sock_recv_all(sock, remote_ext, sizeof(*remote_ext)) != 0) {
++            MESH_WARN("connect: handshake extension exchange failed: %s", strerror(errno));
++            close(sock);
++            return -1;
++        }
++        *have_ext = 1;
++    }
++
+     close(sock);
+     return 0;
+ }
+ 
++/*
++ * Extension-free entry point, kept for the async connect path (TICKET-7).
++ * local_info->ext_magic is zero there, so no extension is exchanged and the
++ * wire is exactly what it was before patch 0007.
++ */
++int mesh_send_handshake(uint32_t remote_ip, uint16_t remote_port,
++                        struct mesh_qp_info *local_info, struct mesh_qp_info *remote_info) {
++    if (g_mesh_state.transport == MESH_TRANSPORT_WRITE) {
++        MESH_WARN("async connect is not supported by the write transport "
++                  "(it never exchanges a FIFO advertisement) - refusing");
++        return -1;
++    }
++    return mesh_send_handshake_ext(remote_ip, remote_port, local_info, remote_info,
++                                   NULL, NULL, NULL);
++}
++
+ /*
+  * Background handshake thread
+  * Handles incoming TCP connections, creates QPs, and queues for accept()
+@@ -980,16 +1169,61 @@ static void *handshake_thread_func(void *arg) {
+         local_info.psn = htonl(0);
+         local_info.ip = htonl(nic->ip_addr);
+         local_info.nic_idx = nic_idx;
+-        
++        /* patch 0007: always advertise that we speak the extension. Whether it
++         * is actually exchanged depends on the peer setting the same byte. */
++        local_info.ext_magic = MESH_EXT_MAGIC;
++        local_info.ext_ver = MESH_WIRE_VERSION;
++
+         n = send(conn_sock, &local_info, sizeof(local_info), 0);
+-        close(conn_sock);
+-        
++
+         if (n != sizeof(local_info)) {
++            close(conn_sock);
+             ibv_destroy_qp(new_qp);
+             ibv_destroy_cq(new_cq);
+             continue;
+         }
+-        
++
++        /*
++         * patch 0007: the extension, mirroring mesh_send_handshake_ext -- the
++         * connector sends first, we reply. The accept side owns no FIFO ring,
++         * so ours carries only the version and the transport mode.
++         */
++        struct mesh_qp_ext remote_ext, local_ext;
++        int have_ext = 0;
++        memset(&remote_ext, 0, sizeof(remote_ext));
++        if (local_info.ext_magic == MESH_EXT_MAGIC &&
++            remote_info.ext_magic == MESH_EXT_MAGIC) {
++            if (remote_info.ext_ver != MESH_WIRE_VERSION) {
++                MESH_WARN("handshake: peer %s speaks MESH wire version %u, this node "
++                          "speaks %u - refusing (mixed plugin versions)",
++                          ip_str, (unsigned)remote_info.ext_ver,
++                          (unsigned)MESH_WIRE_VERSION);
++                close(conn_sock);
++                ibv_destroy_qp(new_qp);
++                ibv_destroy_cq(new_cq);
++                continue;
++            }
++            mesh_ext_fill(&local_ext, 0, 0, 0);
++            if (mesh_sock_recv_all(conn_sock, &remote_ext, sizeof(remote_ext)) != 0 ||
++                mesh_sock_send_all(conn_sock, &local_ext, sizeof(local_ext)) != 0) {
++                MESH_WARN("handshake: extension exchange with %s failed: %s",
++                          ip_str, strerror(errno));
++                close(conn_sock);
++                ibv_destroy_qp(new_qp);
++                ibv_destroy_cq(new_cq);
++                continue;
++            }
++            have_ext = 1;
++        }
++
++        close(conn_sock);
++
++        if (mesh_ext_validate(&remote_ext, have_ext, 1, "accept") != 0) {
++            ibv_destroy_qp(new_qp);
++            ibv_destroy_cq(new_cq);
++            continue;
++        }
++
+         MESH_DEBUG("Handshake thread: sent QP %d back, queueing for accept", new_qp->qp_num);
+ 
+         // Queue this handshake for accept() to consume
+@@ -998,6 +1232,8 @@ static void *handshake_thread_func(void *arg) {
+         if (next_tail != lcomm->queue_head) {
+             struct handshake_entry *entry = &lcomm->handshake_queue[lcomm->queue_tail];
+             entry->remote_info = remote_info;
++            entry->remote_ext = remote_ext;      /* patch 0007 */
++            entry->have_ext = have_ext;
+             entry->local_qp = new_qp;
+             entry->local_cq = new_cq;
+             entry->nic = nic;
+@@ -3006,6 +3242,53 @@ static ncclResult_t mesh_init(ncclDebugLogger_t logFunction) {
+     env_val = getenv("NCCL_MESH_FLUSH");
+     g_mesh_state.flush_enable = env_val ? atoi(env_val) : 1;
+ 
++    /*
++     * patch 0007 -- NCCL_MESH_TRANSPORT: "send" (the default) keeps the
++     * two-sided SEND/RECV data path this plugin has always used, so the
++     * library stays a drop-in replacement. "write" switches to the
++     * receiver-advertised FIFO + RDMA_WRITE_WITH_IMM path, which takes RNR out
++     * of the steady state instead of making each miss cheap. Every node in the
++     * job must agree; the handshake refuses a mixed pair rather than running.
++     */
++    env_val = getenv("NCCL_MESH_TRANSPORT");
++    g_mesh_state.transport = MESH_TRANSPORT_SEND;
++    if (env_val && env_val[0]) {
++        char c0 = env_val[0];
++        if (c0 >= 'A' && c0 <= 'Z') c0 = (char)(c0 - 'A' + 'a');
++        if (c0 == 'w' || c0 == '1') {
++            g_mesh_state.transport = MESH_TRANSPORT_WRITE;
++        } else if (c0 != 's' && c0 != '0') {
++            MESH_WARN("NCCL_MESH_TRANSPORT=%s not understood - staying on \"send\"",
++                      env_val);
++        }
++    }
++
++    /*
++     * NCCL_MESH_FIFO_DEPTH: slots in each send comm's ring, clamped to
++     * [32, 4096] and rounded up to a power of two. 32 is the floor because
++     * NCCL never leaves more than NCCL_NET_MAX_REQUESTS = 32 sends outstanding
++     * on one connection, so at or above that the ring cannot be overrun.
++     */
++    env_val = getenv("NCCL_MESH_FIFO_DEPTH");
++    g_mesh_state.fifo_depth = (int)mesh_fifo_pow2(env_val ? atoi(env_val)
++                                                          : MESH_FIFO_DEPTH_DEFAULT);
++
++    /*
++     * NCCL_MESH_FIFO_STRICT: also check the slot's head stamp before using it,
++     * so a slot that landed torn is retried on the next poll instead of read.
++     * One compare per poll; on by default.
++     */
++    env_val = getenv("NCCL_MESH_FIFO_STRICT");
++    g_mesh_state.fifo_strict = env_val ? atoi(env_val) : 1;
++
++    if (g_mesh_state.transport == MESH_TRANSPORT_WRITE) {
++        MESH_INFO("transport=write (patch 0007): receiver-advertised FIFO + "
++                  "RDMA_WRITE_WITH_IMM, fifo_depth=%d strict=%d. Connection "
++                  "pooling and async connect are bypassed on this path - a "
++                  "pooled connection has no handshake and therefore no FIFO.",
++                  g_mesh_state.fifo_depth, g_mesh_state.fifo_strict);
++    }
++
+     // NCCL_MESH_DISABLE_RDMA: Force TCP fallback (default: 0)
+     env_val = getenv("NCCL_MESH_DISABLE_RDMA");
+     g_mesh_state.disable_rdma = env_val ? atoi(env_val) : 0;
+@@ -3468,8 +3751,16 @@ static ncclResult_t mesh_connect(int dev, void *opaqueHandle, void **sendComm,
+     comm->nic = nic;
+     comm->peer_ip = peer_ip;
+ 
+-    // TICKET-6: Check connection pool for existing connection to this peer
+-    if (g_mesh_state.enable_conn_pool) {
++    /*
++     * TICKET-6: Check connection pool for existing connection to this peer.
++     *
++     * patch 0007: never on the write path. A pool hit returns without doing a
++     * handshake at all, so the peer would never learn this comm's FIFO address
++     * and the one-sided path would have nowhere to publish into. The pool is a
++     * QP cache, not a correctness feature, so bypassing it is the fail-closed
++     * choice.
++     */
++    if (g_mesh_state.enable_conn_pool && g_mesh_state.transport != MESH_TRANSPORT_WRITE) {
+         struct mesh_conn_pool_entry *pool_entry = mesh_conn_pool_acquire(peer_ip, nic);
+         if (pool_entry) {
+             // Pool hit - reuse existing connection
+@@ -3495,10 +3786,24 @@ static ncclResult_t mesh_connect(int dev, void *opaqueHandle, void **sendComm,
+         return ncclSystemError;
+     }
+ 
++    /*
++     * patch 0007: on the write path the FIFO ring has to exist before the
++     * handshake, because its address and rkey are what the handshake carries.
++     */
++    if (g_mesh_state.transport == MESH_TRANSPORT_WRITE &&
++        mesh_send_fifo_setup(comm) != 0) {
++        ibv_destroy_qp(comm->qp);
++        ibv_destroy_cq(comm->cq);
++        free(comm);
++        return ncclSystemError;
++    }
+ 
+     // Do handshake FIRST to get accept's QP number
+     struct mesh_qp_info remote_qp_info;
++    struct mesh_qp_ext local_ext, remote_ext;
++    int have_ext = 0;
+     memset(&remote_qp_info, 0, sizeof(remote_qp_info));
++    memset(&remote_ext, 0, sizeof(remote_ext));
+ 
+     if (handle->handshake_port > 0) {
+ 
+@@ -3509,6 +3814,14 @@ static ncclResult_t mesh_connect(int dev, void *opaqueHandle, void **sendComm,
+         local_info.ip = htonl(nic->ip_addr);
+         local_info.gid_index = nic->gid_index;
+         local_info.nic_idx = selected_addr->nic_idx;  // Which of listener's NICs we want
++        /* patch 0007: advertise that we speak the extension. Whether it is
++         * actually exchanged depends on the peer setting the same byte. */
++        local_info.ext_magic = MESH_EXT_MAGIC;
++        local_info.ext_ver = MESH_WIRE_VERSION;
++        mesh_ext_fill(&local_ext,
++                      comm->fifo ? (uint64_t)(uintptr_t)comm->fifo : 0ULL,
++                      comm->fifo_mr ? comm->fifo_mr->rkey : 0u,
++                      comm->fifo ? comm->fifo_depth : 0u);
+ 
+         // Copy our GID (TICKET-5: use cached GID)
+         union ibv_gid our_gid;
+@@ -3522,8 +3835,21 @@ static ncclResult_t mesh_connect(int dev, void *opaqueHandle, void **sendComm,
+         char hs_ip_str[INET_ADDRSTRLEN];
+         mesh_uint_to_ip(handshake_ip, hs_ip_str, sizeof(hs_ip_str));
+ 
+-        if (mesh_send_handshake(handshake_ip, handle->handshake_port, &local_info, &remote_qp_info) != 0) {
++        if (mesh_send_handshake_ext(handshake_ip, handle->handshake_port, &local_info,
++                                    &remote_qp_info, &local_ext, &remote_ext,
++                                    &have_ext) != 0) {
+             MESH_WARN("connect: Bidirectional handshake failed");
++            mesh_send_fifo_teardown(comm);
++            ibv_destroy_qp(comm->qp);
++            ibv_destroy_cq(comm->cq);
++            free(comm);
++            return ncclSystemError;
++        }
++
++        /* patch 0007: fail closed on a mixed pair. need_fifo = 0 here: the
++         * accept side owns no ring, only we do. */
++        if (mesh_ext_validate(&remote_ext, have_ext, 0, "connect") != 0) {
++            mesh_send_fifo_teardown(comm);
+             ibv_destroy_qp(comm->qp);
+             ibv_destroy_cq(comm->cq);
+             free(comm);
+@@ -3535,6 +3861,16 @@ static ncclResult_t mesh_connect(int dev, void *opaqueHandle, void **sendComm,
+         // window where the QP state may not be fully visible to us yet
+         usleep(1000);  // 1ms
+ 
++    } else if (g_mesh_state.transport == MESH_TRANSPORT_WRITE) {
++        /* patch 0007: without a handshake there is no FIFO advertisement, so
++         * the one-sided path has nothing to write into. Refuse loudly. */
++        MESH_WARN("connect: peer advertised no handshake port; the write transport "
++                  "cannot run without the FIFO advertisement - refusing");
++        mesh_send_fifo_teardown(comm);
++        ibv_destroy_qp(comm->qp);
++        ibv_destroy_cq(comm->cq);
++        free(comm);
++        return ncclSystemError;
+     } else {
+         MESH_WARN("connect: No handshake port - using listen QP (will likely fail)");
+         remote_qp_info.qp_num = htonl(selected_addr->qp_num);
+@@ -3569,6 +3905,7 @@ static ncclResult_t mesh_connect(int dev, void *opaqueHandle, void **sendComm,
+     // Connect QP to remote
+     if (mesh_connect_qp(comm->qp, nic, &connect_handle) != 0) {
+         MESH_WARN("connect: Failed to connect QP to peer");
++        mesh_send_fifo_teardown(comm);
+         ibv_destroy_qp(comm->qp);
+         ibv_destroy_cq(comm->cq);
+         free(comm);
+@@ -3579,8 +3916,17 @@ static ncclResult_t mesh_connect(int dev, void *opaqueHandle, void **sendComm,
+     comm->remote_qp_num = connect_handle.qp_num;
+     clock_gettime(CLOCK_MONOTONIC, &comm->conn_established_time);  // NCCL-001
+ 
++    /* patch 0007: only now, with the version handshake validated, does this
++     * comm start using the one-sided path. */
++    if (g_mesh_state.transport == MESH_TRANSPORT_WRITE) {
++        comm->write_mode = 1;
++        MESH_INFO("connect: write transport armed on QP %d (FIFO %u slots at %p, "
++                  "rkey 0x%x)", comm->qp->qp_num, comm->fifo_depth,
++                  (void *)comm->fifo, comm->fifo_mr ? comm->fifo_mr->rkey : 0u);
++    }
++
+     // TICKET-6: Add new connection to pool
+-    if (g_mesh_state.enable_conn_pool) {
++    if (g_mesh_state.enable_conn_pool && !comm->write_mode) {
+         if (mesh_conn_pool_add(peer_ip, nic, comm->qp, comm->cq, comm->remote_qp_num) == 0) {
+             // Find the entry we just added
+             comm->pool_entry = mesh_conn_pool_find(peer_ip, nic);
+@@ -3644,15 +3990,49 @@ static ncclResult_t mesh_accept(void *listenComm, void **recvComm,
+     rcomm->qp = entry->local_qp;
+     rcomm->cq = entry->local_cq;
+     rcomm->nic = entry->nic;
++    /* patch 0007: the peer's FIFO advertisement, already validated by the
++     * handshake thread. Copied inside the lock with everything else. */
++    struct mesh_qp_ext remote_ext = entry->remote_ext;
++    int have_ext = entry->have_ext;
++    uint32_t entry_peer_ip = entry->remote_info.ip;
+     entry->valid = 0;
+-    
++
+     pthread_mutex_unlock(&lcomm->queue_mutex);
++
++    if (have_ext && g_mesh_state.transport == MESH_TRANSPORT_WRITE) {
++        rcomm->remote_fifo_addr  = mesh_ntoh64(remote_ext.fifo_addr);
++        rcomm->remote_fifo_rkey  = ntohl(remote_ext.fifo_rkey);
++        rcomm->remote_fifo_depth = ntohl(remote_ext.fifo_depth);
++        rcomm->remote_fifo_mask  = rcomm->remote_fifo_depth - 1;
++        rcomm->fifo_head = 0;
++
++        /*
++         * A 32-byte staging slot with its own MR. The publish is always
++         * IBV_SEND_INLINE (32 <= max_inline_data = 64), so the driver copies
++         * it into the WQE at post time and reusing one buffer is safe; the MR
++         * is there so the sge carries a real lkey rather than zero.
++         */
++        rcomm->pub_mr = ibv_reg_mr(rcomm->nic->pd, &rcomm->pub_slot,
++                                   sizeof(rcomm->pub_slot), IBV_ACCESS_LOCAL_WRITE);
++        if (!rcomm->pub_mr) {
++            MESH_WARN("accept: cannot register the FIFO staging slot on %s: %s",
++                      rcomm->nic->dev_name, strerror(errno));
++            if (rcomm->qp) ibv_destroy_qp(rcomm->qp);
++            if (rcomm->cq) ibv_destroy_cq(rcomm->cq);
++            free(rcomm);
++            return ncclSystemError;
++        }
++        rcomm->write_mode = 1;
++        MESH_INFO("accept: write transport armed on QP %d (peer FIFO %u slots at "
++                  "0x%llx, rkey 0x%x)", rcomm->qp->qp_num, rcomm->remote_fifo_depth,
++                  (unsigned long long)rcomm->remote_fifo_addr, rcomm->remote_fifo_rkey);
++    }
+     
+     
+     rcomm->connected = 1;
+     clock_gettime(CLOCK_MONOTONIC, &rcomm->conn_established_time);  // NCCL-001
+     // Extract peer IP from handshake info for error logging
+-    rcomm->peer_ip = ntohl(entry->remote_info.ip);
++    rcomm->peer_ip = ntohl(entry_peer_ip);
+ 
+     MESH_INFO("accept: Ready on %s (QP %d)", rcomm->nic->dev_name, rcomm->qp->qp_num);
+     
+@@ -3803,6 +4183,184 @@ static ncclResult_t mesh_deregMr(void *comm, void *mhandle) {
+     return ncclSuccess;
+ }
+ 
++/*
++ * ============================================================================
++ * patch 0007 -- one-sided data path: sender-side FIFO ring
++ * ============================================================================
++ */
++
++/*
++ * Allocate and register the sender's ring. Called from mesh_connect BEFORE the
++ * handshake, because its address and rkey are what the handshake advertises.
++ */
++static int mesh_send_fifo_setup(struct mesh_send_comm *comm) {
++    size_t bytes;
++
++    comm->fifo_depth = mesh_fifo_pow2(g_mesh_state.fifo_depth);
++    comm->fifo_mask = comm->fifo_depth - 1;
++    comm->fifo_tail = 0;
++    bytes = (size_t)comm->fifo_depth * sizeof(struct mesh_fifo_slot);
++
++    comm->fifo = calloc(1, bytes);
++    if (!comm->fifo) {
++        MESH_WARN("write transport: cannot allocate a %zu byte FIFO", bytes);
++        return -1;
++    }
++
++    comm->fifo_mr = ibv_reg_mr(comm->nic->pd, comm->fifo, bytes,
++                               IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
++    if (!comm->fifo_mr) {
++        MESH_WARN("write transport: cannot register the FIFO on %s: %s",
++                  comm->nic->dev_name, strerror(errno));
++        free(comm->fifo);
++        comm->fifo = NULL;
++        return -1;
++    }
++
++    if (pthread_mutex_init(&comm->pend_lock, NULL) != 0) {
++        ibv_dereg_mr(comm->fifo_mr);
++        comm->fifo_mr = NULL;
++        free(comm->fifo);
++        comm->fifo = NULL;
++        return -1;
++    }
++    comm->pend_lock_init = 1;
++    return 0;
++}
++
++static void mesh_send_fifo_teardown(struct mesh_send_comm *comm) {
++    if (comm->fifo_mr) { ibv_dereg_mr(comm->fifo_mr); comm->fifo_mr = NULL; }
++    if (comm->fifo)    { free(comm->fifo); comm->fifo = NULL; }
++    if (comm->pend_lock_init) {
++        pthread_mutex_destroy(&comm->pend_lock);
++        comm->pend_lock_init = 0;
++    }
++}
++
++/*
++ * Has the receiver published the slot this connection is waiting for?
++ *
++ * 1 = yes (slot copied out), 0 = not yet, -1 = the ring has been overrun,
++ * which cannot happen while depth >= NCCL_NET_MAX_REQUESTS and is therefore
++ * reported as an error rather than papered over.
++ *
++ * seq is the last field of the slot, so a write that lands in ascending
++ * address order makes it the readiness stamp. NCCL_MESH_FIFO_STRICT adds a
++ * check of seq_head (which sits before seq) so a torn landing is caught.
++ */
++static int mesh_fifo_ready(struct mesh_send_comm *comm, struct mesh_fifo_slot *out) {
++    struct mesh_fifo_slot *slot = &comm->fifo[comm->fifo_tail & comm->fifo_mask];
++    uint64_t want = comm->fifo_tail + 1;
++    uint64_t seq = __atomic_load_n(&slot->seq, __ATOMIC_ACQUIRE);
++
++    if (seq != want) {
++        if (seq > want) {
++            MESH_WARN("write transport: FIFO overrun on QP %d - slot %u holds seq %llu, "
++                      "expected %llu. Raise NCCL_MESH_FIFO_DEPTH (currently %u).",
++                      comm->qp ? comm->qp->qp_num : 0,
++                      (unsigned)(comm->fifo_tail & comm->fifo_mask),
++                      (unsigned long long)seq, (unsigned long long)want,
++                      comm->fifo_depth);
++            return -1;
++        }
++        return 0;
++    }
++
++    if (g_mesh_state.fifo_strict &&
++        __atomic_load_n(&slot->seq_head, __ATOMIC_RELAXED) != (uint32_t)want) {
++        /* seq is in but its head stamp is not: the slot landed torn. Retry. */
++        __atomic_fetch_add(&g_mesh_state.fifo_torn, 1, __ATOMIC_RELAXED);
++        return 0;
++    }
++
++    __atomic_thread_fence(__ATOMIC_ACQUIRE);
++    out->addr = slot->addr;
++    out->rkey = slot->rkey;
++    out->size = slot->size;
++    out->tag  = slot->tag;
++    out->seq  = seq;
++    return 1;
++}
++
++/* Post one RDMA_WRITE_WITH_IMM for a request whose slot has arrived. */
++static int mesh_send_post_write(struct mesh_send_comm *comm, struct mesh_request *req,
++                                const struct mesh_fifo_slot *slot) {
++    struct ibv_send_wr wr, *bad_wr = NULL;
++    struct ibv_sge sge;
++
++    if (req->size > (size_t)slot->size) {
++        MESH_WARN("write transport: send of %zu B into a slot advertised for %u B "
++                  "on QP %d - refusing rather than overrunning remote memory",
++                  req->size, slot->size, comm->qp ? comm->qp->qp_num : 0);
++        return -1;
++    }
++
++    sge.addr = (uintptr_t)req->wdata;
++    sge.length = (uint32_t)req->size;
++    sge.lkey = req->wlkey;
++
++    memset(&wr, 0, sizeof(wr));
++    wr.wr_id = (uintptr_t)req;
++    wr.next = NULL;
++    wr.sg_list = req->size ? &sge : NULL;
++    wr.num_sge = req->size ? 1 : 0;   /* a zero-length write still carries the imm */
++    wr.opcode = IBV_WR_RDMA_WRITE_WITH_IMM;
++    wr.send_flags = IBV_SEND_SIGNALED;
++    wr.imm_data = htonl((uint32_t)(slot->seq & 0xffffffffULL));  /* diagnostics only */
++    wr.wr.rdma.remote_addr = slot->addr;
++    wr.wr.rdma.rkey = slot->rkey;
++
++    if (ibv_post_send(comm->qp, &wr, &bad_wr)) {
++        MESH_WARN("write transport: ibv_post_send failed on QP %d: %s",
++                  comm->qp ? comm->qp->qp_num : 0, strerror(errno));
++        return -1;
++    }
++
++    comm->fifo_tail++;
++    req->state = MESH_REQ_POSTED;
++    __atomic_fetch_add(&g_mesh_state.write_posts, 1, __ATOMIC_RELAXED);
++    if (comm->nic) {
++        __atomic_fetch_add(&comm->nic->send_ops, 1, __ATOMIC_RELAXED);
++        __atomic_fetch_add(&comm->nic->bytes_sent, req->size, __ATOMIC_RELAXED);
++        __atomic_fetch_add(&comm->nic->active_sends, 1, __ATOMIC_RELAXED);
++    }
++    return 0;
++}
++
++/*
++ * Post every parked send whose slot has arrived, oldest first.
++ *
++ * Called from mesh_isend (so a send whose slot is already there goes straight
++ * out) and from the top of every mesh_test on a write comm (so the queue keeps
++ * moving even when NCCL is only polling one request). Strictly FIFO: the i-th
++ * send on a connection always consumes the i-th published slot.
++ */
++static int mesh_send_drain(struct mesh_send_comm *comm) {
++    int rc = 0;
++
++    if (!comm || !comm->write_mode || !comm->pend_lock_init) return 0;
++
++    pthread_mutex_lock(&comm->pend_lock);
++    while (comm->pend_head) {
++        struct mesh_fifo_slot slot;
++        struct mesh_request *req = comm->pend_head;
++        int ready = mesh_fifo_ready(comm, &slot);
++
++        if (ready == 0) break;
++        if (ready < 0 || mesh_send_post_write(comm, req, &slot) != 0) {
++            __atomic_store_n(&comm->peer_failed, 1, __ATOMIC_RELEASE);
++            rc = -1;
++            break;
++        }
++
++        comm->pend_head = req->next;
++        if (!comm->pend_head) comm->pend_tail = NULL;
++        req->next = NULL;
++    }
++    pthread_mutex_unlock(&comm->pend_lock);
++    return rc;
++}
++
+ static ncclResult_t mesh_isend(void *sendComm, void *data, int size, int tag,
+                               void *mhandle, void **request) {
+     // Dispatch to TCP if in fallback mode (TICKET-4)
+@@ -3856,6 +4414,47 @@ static ncclResult_t mesh_isend(void *sendComm, void *data, int size, int tag,
+     req->is_send = 1;
+     clock_gettime(CLOCK_MONOTONIC, &req->start_time);  // NCCL-001: Record creation time
+ 
++    /*
++     * patch 0007 -- one-sided path.
++     *
++     * The request ALWAYS comes back to NCCL. NCCL's net API does allow
++     * *request = NULL for "cannot post yet", and NCCL's own IB plugin relies on
++     * it, but that behaviour has never been measured on this stack and getting
++     * it wrong would be a silent hang. So a send whose slot has not been
++     * published yet is parked on the comm's pending queue instead, and
++     * mesh_test drains the queue on every poll.
++     */
++    if (comm->write_mode) {
++        int drained;
++
++        req->is_write = 1;
++        req->state = MESH_REQ_WAIT_SLOT;
++        req->wdata = data;
++        req->wlkey = mrh->mr->lkey;
++        req->wtag = tag;
++        req->next = NULL;
++
++        pthread_mutex_lock(&comm->pend_lock);
++        if (comm->pend_tail) comm->pend_tail->next = req;
++        else comm->pend_head = req;
++        comm->pend_tail = req;
++        pthread_mutex_unlock(&comm->pend_lock);
++
++        /* TICKET-9: track for cleanup on close, exactly as the send path does */
++        if (comm->num_requests < MESH_MAX_QPS) {
++            comm->requests[comm->num_requests++] = req;
++        }
++
++        drained = mesh_send_drain(comm);
++        if (__atomic_load_n(&req->state, __ATOMIC_RELAXED) == MESH_REQ_WAIT_SLOT) {
++            __atomic_fetch_add(&g_mesh_state.write_slot_waits, 1, __ATOMIC_RELAXED);
++        }
++        (void)drained;   /* the failure is on the comm; mesh_test reports it */
++
++        *request = req;
++        return ncclSuccess;
++    }
++
+     // Setup scatter/gather entry
+     sge.addr = (uintptr_t)data;
+     sge.length = size;
+@@ -3958,6 +4557,105 @@ static ncclResult_t mesh_irecv(void *recvComm, int n, void **data, int *sizes,
+     req->is_send = 0;
+     clock_gettime(CLOCK_MONOTONIC, &req->start_time);  // NCCL-001: Record creation time
+ 
++    /*
++     * patch 0007 -- one-sided path.
++     *
++     * Two steps, and the ORDER is the whole point:
++     *   1. arm a zero-length RECV. No data lands in it; it exists only to
++     *      catch the sender's RDMA_WRITE_WITH_IMM completion.
++     *   2. publish the slot -- this buffer's address, rkey and size -- into
++     *      the sender's ring with an inline RDMA_WRITE.
++     * The sender cannot write before it sees the slot, and the slot is not
++     * published before the RECV is armed, so an RNR NAK is unreachable.
++     */
++    if (comm->write_mode) {
++        struct ibv_send_wr fwr, *fbad = NULL;
++        struct ibv_sge fsge;
++        uint64_t seq = comm->fifo_head + 1;
++        uint32_t idx = (uint32_t)(comm->fifo_head & comm->remote_fifo_mask);
++
++        req->is_write = 1;
++        req->state = MESH_REQ_POSTED;
++
++        /*
++         * TICKET-9 tracking goes BEFORE the posts. Once the zero-length RECV is
++         * on the queue its wr_id is live, so the request must not be freed on a
++         * later error -- a completion would dereference freed memory in
++         * mesh_test. Tracked here, it is torn down by closeRecv instead.
++         */
++        if (comm->num_requests < MESH_MAX_QPS) {
++            comm->requests[comm->num_requests++] = req;
++        }
++
++        memset(&wr, 0, sizeof(wr));
++        wr.wr_id = (uintptr_t)req;
++        wr.next = NULL;
++        wr.sg_list = NULL;
++        wr.num_sge = 0;
++
++        if (ibv_post_recv(comm->qp, &wr, &bad_wr)) {
++            MESH_WARN("write transport: failed to arm the immediate RECV: %s",
++                      strerror(errno));
++            mesh_untrack_request(req);   /* nothing posted yet: safe to free */
++            __atomic_fetch_add(&g_mesh_state.requests_freed, 1, __ATOMIC_RELAXED);
++            free(req);
++            return ncclSystemError;
++        }
++
++        comm->pub_slot.addr     = (uint64_t)(uintptr_t)data[0];
++        comm->pub_slot.rkey     = mrh->mr->rkey;
++        comm->pub_slot.size     = (uint32_t)sizes[0];
++        comm->pub_slot.tag      = tags ? tags[0] : 0;
++        comm->pub_slot.seq_head = (uint32_t)seq;
++        comm->pub_slot.seq      = seq;   /* last field: the readiness stamp */
++
++        fsge.addr = (uintptr_t)&comm->pub_slot;
++        fsge.length = (uint32_t)sizeof(comm->pub_slot);
++        fsge.lkey = comm->pub_mr->lkey;
++
++        memset(&fwr, 0, sizeof(fwr));
++        /*
++         * wr_id 0 marks a housekeeping WR. mesh_test already tolerates a
++         * completion whose wr_id is not a request pointer -- every dereference
++         * there is guarded -- so it is polled and dropped.
++         */
++        fwr.wr_id = 0;
++        fwr.next = NULL;
++        fwr.sg_list = &fsge;
++        fwr.num_sge = 1;
++        fwr.opcode = IBV_WR_RDMA_WRITE;
++        fwr.send_flags = IBV_SEND_INLINE;
++        /* One in MESH_FIFO_SIGNAL_PERIOD publishes is signalled so the send
++         * queue can retire; max_send_wr is 64, the period is 16. */
++        if ((comm->fifo_head % MESH_FIFO_SIGNAL_PERIOD) == 0) {
++            fwr.send_flags |= IBV_SEND_SIGNALED;
++        }
++        fwr.wr.rdma.remote_addr = comm->remote_fifo_addr +
++                                  (uint64_t)idx * sizeof(struct mesh_fifo_slot);
++        fwr.wr.rdma.rkey = comm->remote_fifo_rkey;
++
++        if (ibv_post_send(comm->qp, &fwr, &fbad)) {
++            MESH_WARN("write transport: failed to publish FIFO slot %u on QP %d: %s",
++                      idx, comm->qp->qp_num, strerror(errno));
++            /* The RECV WR above is live and carries this pointer. Mark the peer
++             * dead and leave the request to closeRecv rather than freeing it. */
++            __atomic_store_n(&comm->peer_failed, 1, __ATOMIC_RELEASE);
++            return ncclSystemError;
++        }
++
++        comm->fifo_head++;
++        __atomic_fetch_add(&g_mesh_state.fifo_publishes, 1, __ATOMIC_RELAXED);
++
++        if (comm->nic) {
++            __atomic_fetch_add(&comm->nic->recv_ops, 1, __ATOMIC_RELAXED);
++            __atomic_fetch_add(&comm->nic->bytes_recv, sizes[0], __ATOMIC_RELAXED);
++            __atomic_fetch_add(&comm->nic->active_recvs, 1, __ATOMIC_RELAXED);
++        }
++
++        *request = req;
++        return ncclSuccess;
++    }
++
+     // Setup scatter/gather entry
+     sge.addr = (uintptr_t)data[0];
+     sge.length = sizes[0];
+@@ -4301,6 +4999,27 @@ static void mesh_untrack_request(struct mesh_request *req) {
+ 
+     if (req->is_send) {
+         struct mesh_send_comm *comm = (struct mesh_send_comm *)req->comm;
++        /*
++         * patch 0007: also unlink from the one-sided pending queue, so a
++         * request freed while still waiting for a slot cannot leave a dangling
++         * link behind.
++         */
++        if (comm->write_mode && comm->pend_lock_init) {
++            struct mesh_request **pp = &comm->pend_head;
++            struct mesh_request *prev = NULL;
++            pthread_mutex_lock(&comm->pend_lock);
++            while (*pp) {
++                if (*pp == req) {
++                    *pp = req->next;
++                    if (comm->pend_tail == req) comm->pend_tail = prev;
++                    req->next = NULL;
++                    break;
++                }
++                prev = *pp;
++                pp = &(*pp)->next;
++            }
++            pthread_mutex_unlock(&comm->pend_lock);
++        }
+         for (int i = 0; i < comm->num_requests; i++) {
+             if (comm->requests[i] == req) {
+                 comm->requests[i] = NULL;
+@@ -4343,6 +5062,64 @@ static ncclResult_t mesh_test(void *request, int *done, int *sizes) {
+         return ncclInternalError;
+     }
+ 
++    /*
++     * patch 0007: keep the one-sided send queue moving. Every poll on a write
++     * comm first posts whatever the receiver has published since the last
++     * call, oldest first, so a request NCCL is not currently polling still
++     * makes progress. Then, if THIS request is still waiting for a slot,
++     * report "not done" -- or fail it, on a dead peer or a timeout.
++     */
++    if (req->is_write && req->is_send && req->comm) {
++        struct mesh_send_comm *sc = (struct mesh_send_comm *)req->comm;
++
++        mesh_send_drain(sc);
++
++        if (__atomic_load_n(&req->state, __ATOMIC_RELAXED) == MESH_REQ_WAIT_SLOT) {
++            struct timespec now;
++            long elapsed_sec;
++
++            if (__atomic_load_n(&sc->peer_failed, __ATOMIC_ACQUIRE)) {
++                MESH_ERROR_STRUCTURED(sc->peer_ip, sc->qp ? sc->qp->qp_num : 0,
++                    "SEND", "PEER_FAILED",
++                    mesh_conn_age_sec(&sc->conn_established_time),
++                    "write transport: connection is dead while waiting for a FIFO "
++                    "slot (bytes=%zu)", req->size);
++                *done = 1;
++                mesh_untrack_request(req);
++                __atomic_fetch_add(&g_mesh_state.requests_freed, 1, __ATOMIC_RELAXED);
++                free(req);
++                return ncclInternalError;
++            }
++
++            clock_gettime(CLOCK_MONOTONIC, &now);
++            elapsed_sec = now.tv_sec - req->start_time.tv_sec;
++            if (elapsed_sec >= g_mesh_state.op_timeout_sec) {
++                MESH_ERROR_STRUCTURED(sc->peer_ip, sc->qp ? sc->qp->qp_num : 0,
++                    "SEND", "FIFO_SLOT_TIMEOUT",
++                    mesh_conn_age_sec(&sc->conn_established_time),
++                    "no FIFO slot published in %lds - the peer never posted the "
++                    "matching irecv (bytes=%zu, depth=%u, timeout=%ds)",
++                    elapsed_sec, req->size, sc->fifo_depth,
++                    g_mesh_state.op_timeout_sec);
++                __atomic_store_n(&sc->peer_failed, 1, __ATOMIC_RELEASE);
++                if (sc->nic) {
++                    __atomic_fetch_add(&sc->nic->completion_timeouts, 1, __ATOMIC_RELAXED);
++                    __atomic_fetch_add(&sc->nic->send_errors, 1, __ATOMIC_RELAXED);
++                }
++                if (g_mesh_state.fatal_on_timeout) {
++                    *done = 1;
++                    mesh_untrack_request(req);
++                    __atomic_fetch_add(&g_mesh_state.requests_freed, 1, __ATOMIC_RELAXED);
++                    free(req);
++                    return ncclInternalError;
++                }
++            }
++
++            *done = 0;
++            return ncclSuccess;
++        }
++    }
++
+     if (__atomic_load_n(&req->done, __ATOMIC_ACQUIRE)) {
+         *done = 1;
+         if (sizes) *sizes = req->size;
+@@ -4473,7 +5250,10 @@ static ncclResult_t mesh_test(void *request, int *done, int *sizes) {
+ 
+             // Check if this indicates peer failure (includes WR_FLUSH_ERR)
+             if (mesh_is_peer_failure(wc.status) || wc.status == IBV_WC_WR_FLUSH_ERR) {
+-                mesh_mark_peer_failed(completed_req, wc.status);
++                /* patch 0007: wr_id 0 is a FIFO publish, which carries no
++                 * request. The CQ belongs to one comm, so attribute it to the
++                 * comm of the request being polled instead of dropping it. */
++                mesh_mark_peer_failed(completed_req ? completed_req : req, wc.status);
+             }
+ 
+             // Mark the request as done (with error)
+@@ -4499,6 +5279,16 @@ static ncclResult_t mesh_test(void *request, int *done, int *sizes) {
+ 
+         // Success - mark the request as done
+         if (completed_req) {
++            /*
++             * patch 0007: on the one-sided path the receiver learns the real
++             * transfer size from the completion, not from what it posted. The
++             * two-sided path is left reporting the posted size, so send mode
++             * stays byte-for-byte the old behaviour.
++             */
++            if (completed_req->is_write && !completed_req->is_send &&
++                wc.opcode == IBV_WC_RECV_RDMA_WITH_IMM) {
++                completed_req->size = wc.byte_len;
++            }
+             completed_req->wc = wc;
+             __atomic_store_n(&completed_req->done, 1, __ATOMIC_RELEASE);
+         }
+@@ -4518,6 +5308,13 @@ static ncclResult_t mesh_test(void *request, int *done, int *sizes) {
+                 MESH_INFO("Stats: ops=%lu alloc=%lu freed=%lu outstanding=%lu pool_hits=%lu pool_misses=%lu",
+                           ops, alloc, freed, alloc - freed,
+                           g_mesh_state.conn_pool.hits, g_mesh_state.conn_pool.misses);
++                if (g_mesh_state.transport == MESH_TRANSPORT_WRITE) {
++                    MESH_INFO("Stats(write): posts=%lu slot_waits=%lu publishes=%lu torn=%lu",
++                              (unsigned long)__atomic_load_n(&g_mesh_state.write_posts, __ATOMIC_RELAXED),
++                              (unsigned long)__atomic_load_n(&g_mesh_state.write_slot_waits, __ATOMIC_RELAXED),
++                              (unsigned long)__atomic_load_n(&g_mesh_state.fifo_publishes, __ATOMIC_RELAXED),
++                              (unsigned long)__atomic_load_n(&g_mesh_state.fifo_torn, __ATOMIC_RELAXED));
++                }
+             }
+             free(req);  // TICKET-8: Free request on success completion
+             return ncclSuccess;
+@@ -4543,6 +5340,18 @@ static ncclResult_t mesh_closeSend(void *sendComm) {
+         // This handles the case where operations hang and comm is closed
+         // before all operations complete (e.g., FSDP timeout during all-gather)
+         int outstanding = 0;
++        /*
++         * patch 0007: drop the one-sided pending queue first. Every request on
++         * it is also in comm->requests[], which the loop below frees, so
++         * clearing the list here is what keeps that from leaving dangling
++         * links behind.
++         */
++        if (comm->pend_lock_init) {
++            pthread_mutex_lock(&comm->pend_lock);
++            comm->pend_head = NULL;
++            comm->pend_tail = NULL;
++            pthread_mutex_unlock(&comm->pend_lock);
++        }
+         for (int i = 0; i < comm->num_requests; i++) {
+             struct mesh_request *req = comm->requests[i];
+             if (req && !__atomic_load_n(&req->done, __ATOMIC_ACQUIRE)) {
+@@ -4560,6 +5369,10 @@ static ncclResult_t mesh_closeSend(void *sendComm) {
+         }
+         comm->num_requests = 0;
+ 
++        /* patch 0007: the FIFO ring goes away with the comm. Deregistered
++         * before the QP is destroyed so the NIC can no longer reach it. */
++        mesh_send_fifo_teardown(comm);
++
+         // TICKET-6: Release pooled connection instead of destroying
+         if (comm->pool_entry) {
+             mesh_conn_pool_release(comm->pool_entry);
+@@ -4629,6 +5442,12 @@ static ncclResult_t mesh_closeRecv(void *recvComm) {
+         }
+         comm->num_requests = 0;
+ 
++        /* patch 0007: the FIFO staging slot's MR */
++        if (comm->pub_mr) {
++            ibv_dereg_mr(comm->pub_mr);
++            comm->pub_mr = NULL;
++        }
++
+         /* patch 0006: tear down the iflush loopback, if one was built */
+         if (comm->flush_qp) {
+             if (ibv_destroy_qp(comm->flush_qp) != 0) {
+-- 
+2.43.0
+

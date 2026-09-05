@@ -96,6 +96,9 @@ Commits this recipe built, measured or depends on:
 | `e24f059` | `e24f059793c01b26418fee054484bcec4316567e` | Always skip the MoE padding rows | the follow-up; equivalent on this hardware, where the gate is always open. Rides along in the `9bf594c` checkout, still unmeasured on its own `[not tested]` |
 | `5814c7f` | `5814c7fb09e8d1ffaef19506ef38ff02cd279f18` | Let the down projection finish the MoE | not built here |
 | **`9bf594c`** | `9bf594cd8b43a2a53db9c7d1d629794aa9365f1a` | **Persist the MLA tuner cache across processes** | **the production commit.** Written by the author in answer to a measurement of ours; built, wired up and measured here — tune events before serving 18 → 0, and our sweep protocol dropped from five rounds to three ([docs/12](docs/12-tuner-cache.md)) |
+| `3cad1d2` | `3cad1d2` | Document the environment variables that exist | not built here; read while preparing the bench below |
+| `9b17ea9` | `9b17ea9` | Add the expert-reread bench, and close the duplicate-read question here | **the author's answer to our profile.** We ran his script unmodified on GB10 against the production build; it closed our own open item ([docs/10](docs/10-results-and-roofline.md) §5.4, [docs/11](docs/11-open-issues.md) §2.12) |
+| `a47da6e` | `a47da6e` | Remove the 64-bit division in `had_in`, deriving the index from the grid | the follow-up to the same profile: **−10 to −18 %** on `exl3_moe_had_in`, roofline 57 % → 63 % `[reported]`. Worth ~0.2–0.3 % of prefill here — real, and not worth an image rebuild alone. **Not in the production image**; queued for the next build ([docs/11](docs/11-open-issues.md) §2.19) |
 
 Four things we reported to that project and their outcome:
 
@@ -114,6 +117,23 @@ Four things we reported to that project and their outcome:
   sharing across the tensor-parallel ranks with no lock, and a runtime fallback for unseen keys. The
   code is theirs; ours was the evidence and the request. It removed the largest measurement tax on
   this stack ([docs/12](docs/12-tuner-cache.md)).
+
+A fifth exchange, and the most useful one to record because **the author was right and we were
+wrong**: we sent a full step-time breakdown of a 3× GB10 prefill and decode step, with the rulers
+measured on the device, ranking what a change to `cuda-exl3` could still be worth
+([issue #5](https://github.com/Zeuss5/cuda-exl3/issues/5), and the same content is
+[docs/10](docs/10-results-and-roofline.md) §5). Two things came back within the hour. The author
+pointed out that our largest proposed item — duplicate expert reads in the large-M trellis GEMM,
+which we had priced at 14–27 % of the weight traffic — rests on a traffic model that a trace cannot
+verify, wrote **`9b17ea9`, a bench that settles it**, and reported 1.16× on his own 188-SM card. We
+ran that bench unmodified on GB10 and measured 1.11×: the trellis stays resident, the item is closed,
+and our estimate was wrong because the model behind it was wrong. He then took the item that
+*was* real — `exl3_moe_had_in` at 37–57 % of the ruler — in **`a47da6e`**.
+
+Two notes we owe that thread rather than the other way round: `_zero_kv_blocks_kernel` costs 14.7 ms
+per prefill chunk and belongs to vLLM, not to the kernel library; and a 128-token prefill chunk costs
+403 ms because 128 tokens at top-8 already touch every expert, which is a batched-token-budget fact
+worth knowing on any Spark.
 
 Our one surviving kernel change, `patches/kernel/0003-combine-smem-staging-on-a95e809.patch`, is
 offered upstream with its description in `patches/kernel/0003-PR-DESCRIPTION.md`.
@@ -171,10 +191,24 @@ offered upstream with its description in `patches/kernel/0003-PR-DESCRIPTION.md`
      RDMA_READ and `regMrDmaBuf` a real DMA-BUF registration.
 
   Findings 2 and 3 went upstream together as a follow-up on the plugin's issue thread (issue #58),
-  with the sweep numbers, the port-counter evidence and the patches offered as a PR on top of
-  `19924dcc`. Both changes are env-gated (`NCCL_MESH_LINKS_PER_PEER`, `NCCL_MESH_PTR_CUDA`,
-  `NCCL_MESH_FLUSH`) and default to today's behaviour when a peer has one cable. Details and numbers
-  in [docs/06](docs/06-nccl-mesh.md) §6–§8. We do not ship the built `.so`.
+  with the sweep numbers and the port-counter evidence. All three patches now live on a public fork,
+  [`NNNtrance/nccl-mesh-plugin`](https://github.com/NNNtrance/nccl-mesh-plugin), branch
+  `gb10-dual-link-ptrcuda` on top of `19924dcc`, and are offered as
+  [**pull request #59**](https://github.com/autoscriptlabs/nccl-mesh-plugin/pull/59). All three are
+  env-gated (`NCCL_MESH_LINKS_PER_PEER`, `NCCL_MESH_PTR_CUDA`, `NCCL_MESH_FLUSH`,
+  `NCCL_MESH_MIN_RNR_TIMER`) and default to today's behaviour when a peer has one cable. Details and
+  numbers in [docs/06](docs/06-nccl-mesh.md) §6–§8. We do not ship the built `.so`.
+
+- **A fourth patch, deliberately not offered** — `patches/kernel/0007-one-sided-fifo-rdma-write.patch`
+  replaces the two-sided SEND/RECV data path with the receiver-advertised FIFO plus
+  `RDMA_WRITE_WITH_IMM` that NCCL's own IB transport uses, which is the design the plugin's own
+  roadmap names. It works: RNR retries and out-of-buffer events go to **exactly zero**. It is also
+  worth **nothing** on this hardware, because the ceiling is the cards' PCIe Gen5 x4 slots and not the
+  flow control. Sending a 977-line transport rewrite upstream on the strength of a mechanism that
+  changes no number would cost the maintainer time we have no evidence is worth spending; it is kept
+  in this repository as an option and described honestly in
+  [docs/06](docs/06-nccl-mesh.md) §10. Credit where it belongs: the design is NCCL's, and the
+  plugin's README had already named it as future work.
 
 ### NCCL 2.30.7 (inside the base image)
 
@@ -231,10 +265,22 @@ We vendor no files from either of these. What we took is practice and arithmetic
 
 - **`bench/` in this repository** — the model-free harness (expert-parallel geometry, per-stage MoE
   timing, expert-map placement, mesh all-reduce with hardware counters, top-k comparison, fresh
-  prefill, profiler driver and analyser). Written by us; Apache-2.0.
+  prefill, profiler driver and analyser). Written by us; Apache-2.0. The step-breakdown work added
+  seven more, also ours: `bw.py` and `gemmpeak.py` (the two rulers — run them in the same process as
+  whatever you are measuring), `live-step.py` and `live-decode.py` (prefill ladder, chunk-boundary
+  probe and exact ms-per-engine-step against a running server, via its own metrics), `mhc_bench.py`
+  (the hyper-connection kernels, three routes, graph on and off), `zerokv_bench.py` (vLLM's KV-zeroing
+  kernel at the live engine's grid geometry) and `prof-analyze3.py` (the kernel taxonomy and pass
+  segmentation the breakdown in [docs/10](docs/10-results-and-roofline.md) §5 is built from; the older
+  `prof-analyze.py` is kept).
+- **`bench_moe_expert_reread.py`** — **not ours**. Written by the `cuda-exl3` author in `9b17ea9` to
+  settle a question we had raised the wrong way round; we ran it unmodified and it closed the item
+  ([docs/11](docs/11-open-issues.md) §2.12). Under that project's MIT licence.
 - **PyTorch profiler**, via vLLM's `--profiler-config`. Note that on this vLLM the environment
   variable form does nothing and the endpoint returns 404 — the flag is the only way in
-  ([docs/05](docs/05-expert-parallel-and-cuda-exl3-fixes.md)).
+  ([docs/05](docs/05-expert-parallel-and-cuda-exl3-fixes.md)). Set it on the launcher **before** you
+  need it: an engine already serving production cannot be profiled and should not be restarted to
+  try ([docs/10](docs/10-results-and-roofline.md) §5).
 
 ---
 
@@ -251,6 +297,12 @@ Two of them are not ours to keep:
   that in writing rather than deleting it quietly.
 - `patches/kernel/0004-min-rnr-timer.patch`, `0005-device-aware-link-selection.patch` and
   `0006-ptr-cuda-dmabuf-and-flush.patch` are patches against someone else's project
-  (`autoscriptlabs/nccl-mesh-plugin`), offered upstream, and carried here so the findings are
-  reproducible. If they land upstream we will retire our copies in writing, the way
+  (`autoscriptlabs/nccl-mesh-plugin`), offered upstream as
+  [PR #59](https://github.com/autoscriptlabs/nccl-mesh-plugin/pull/59) from the fork
+  [`NNNtrance/nccl-mesh-plugin`](https://github.com/NNNtrance/nccl-mesh-plugin), and carried here so
+  the findings are reproducible. If they land upstream we will retire our copies in writing, the way
   `0002-RETIRED.md` retires ours.
+- `patches/kernel/0007-one-sided-fifo-rdma-write.patch` is against the same project and is **not**
+  offered upstream and **not** in that PR branch, because our own measurement says it changes nothing
+  on this hardware. It is kept, with the measurement that rejected it, rather than deleted
+  ([docs/06](docs/06-nccl-mesh.md) §10).

@@ -9,8 +9,9 @@ build. Environment identical to production except for `NCCL_ALGO`: `NCCL_MAX_NCH
 operations, **two repetitions per arm**, 5 September 2026. Tool: `bench/mesh_sweep.py` driven per arm.
 Fabric checked before the run: 4 of 4 neighbours resolved on every node. `[measured-here]`
 
-Narrative and the verdict: [`../../docs/06-nccl-mesh.md`](../../docs/06-nccl-mesh.md) §12.2; the open
-item it half-closes, §14 item 8.
+Narrative and the verdict: [`../../docs/06-nccl-mesh.md`](../../docs/06-nccl-mesh.md) §12.2, and
+§12.3 for the five-round **engine** arm that finally settled `Ring,Tree` — also at the foot of this
+file.
 
 Both repetitions are printed for every cell. That is the point of this file: at the small end the two
 repetitions of one arm differ by more than the arms differ from each other, and any reading that
@@ -101,11 +102,43 @@ tree — root, one internal node, one leaf — landing on a topology that has no
 - **`Tree`: rejected.** 4–6× slower than Ring at 16 and 64 MB all-reduce, 23–96 % worse on the step
   proxy, and its RNR counters climb by an order of magnitude. Three nodes of paired PCIe Gen5 x4
   cards do not pay for a tree's lower step count.
-- **`Ring,Tree`: unresolved, deferred.** Better than Ring on the step proxy by 3.6 % and at 4 MB,
-  worse on `sendrecv` at 64 MB, and the arms swap places at 1 MB. The effect is smaller than the
-  instrument's own repeat-to-repeat spread, so the sweep cannot settle it; a five-round engine arm
-  can, at an expected −1…3 % of a decode step. Not run `[not tested]`.
+- **`Ring,Tree`: model-free could not settle it, and the engine arm did.** Better than Ring on the
+  step proxy by 3.6 % and at 4 MB, worse on `sendrecv` at 64 MB, arms swapping places at 1 MB — all of
+  it smaller than the instrument's own repeat-to-repeat spread. See the engine arm below.
 - **`Ring` stays in the launcher.**
+
+## The five-round engine arm — `Ring,Tree` is equal
+
+Run on production configuration 10 against the same-day `Ring` production boot, everything else
+identical (image `754421f`, full scope, TP=3 + EP, DFlash2 k=7, fp8 KV and fp8 draft cache,
+`NCCL_MAX_NCHANNELS=8`, MNBT 2048, 8 sequences, `gpu-memory-utilization 0.83`, temperature 0, effort
+low, realistic prompts). Five rounds on the `Ring,Tree` arm, three on the `Ring` boot (warm tuner
+cache), medians of rounds 3–5 `[measured-here]`:
+
+| | `Ring` (production 10) | `Ring,Tree` | delta |
+|---|---|---|---|
+| C1 aggregate tok/s | 70.5 | 70.6 | +0.1 % |
+| C2 | 99.0 | 99.9 | +0.9 % |
+| C4 | 144.6 | 143.4 | −0.8 % |
+| C6 | 175.4 | 175.2 | −0.1 % |
+| C8 | 194.0 | 195.6 | +0.8 % |
+| TTFT C1 / C8 | 0.282 / 0.811 s | 0.282 / 0.809 s | identical |
+| Draft acceptance C1 / C8 | 62.5 / 61.8 % | 63.2 / 62.0 % | +0.7 / +0.2 pt |
+| Prefill, fresh unseen ~8K (median of 3) | 1,769 tok/s | 1,747 | −1.2 % |
+| Quality gates cold / warm | 10/10 · 12/12 | 10/10 · 12/12 | — |
+| **KV pool** | 5,619,834 | **5,702,479** | **+1.5 %** |
+
+Every speed row is inside ±1 %, against a noise floor that is larger than that in every column —
+C1 boot medians span 1.1 %, C8 2.5 % and C4 7.4 % on this configuration
+([`../../docs/10-results-and-roofline.md`](../../docs/10-results-and-roofline.md) §1.1). The proxy's
+−3.6 % did not appear, which is what should happen when a proxy times 90 collectives in isolation and
+the real step overlaps none of them with compute.
+
+The only real difference is the pool: NCCL sizes channel buffers per algorithm, and whatever it does
+not take, the profile run leaves to KV. **Not adopted.** 84k tokens against a 5.6M pool does not buy
+pinning production to an algorithm list whose sole measured engine effect is that.
+
+**`Ring,Tree` is closed** ([`../../docs/06-nccl-mesh.md`](../../docs/06-nccl-mesh.md) §12.3).
 
 ## What is not here
 

@@ -660,7 +660,7 @@ forced `Ring` (3.90 against 3.96 ms per decode step), so the launcher's `Ring` s
 carrying `NCCL_MAX_NCHANNELS=8` *alongside* `NCCL_PROTO=LL` is not evidence that 8 channels was tried and rejected —
 the `LL` in it costs 11× at 16 MB and buries the channel gain. That combination was never tried cleanly.
 
-### 12.2 `NCCL_ALGO`: `Tree` is dead here, `Ring,Tree` is unresolved
+### 12.2 `NCCL_ALGO`: `Tree` is dead here, and the model-free sweep could not settle `Ring,Tree`
 
 The launcher **forces** `NCCL_ALGO=Ring`, which for a long time was an inherited default and not a measured choice —
 it sat on the open list as the cheapest untried thing in this repository. It has now been swept, model-free, engine
@@ -693,14 +693,41 @@ proxy. The mechanism is not mysterious: a tree wants a bandwidth-shaped topology
 this is three nodes, each a pair of PCIe Gen5 x4 cards (§9). The step-count arithmetic that made it attractive —
 `2(w−1) = 4` ring steps against `~2·log₂3 ≈ 3.2` — was never worth what it costs per step here.
 
-**`Ring,Tree` is not decided, and this sweep cannot decide it.** It is 3.6 % better than Ring on the step proxy and
+**`Ring,Tree` was not decided by this sweep, and it could not be.** It is 3.6 % better than Ring on the step proxy and
 better at 4 MB; it is worse than Ring on `sendrecv` at 64 MB (17.27 / 15.43 against 21.62 / 20.79) and the two arms
 swap places at 1 MB. The reason none of that is conclusive is visible in the table: **two repetitions of the same arm
 differ by up to 1.7× at 1 MB and by 22 % at 64 MB**, so an effect of a few percent is well under the instrument's own
-spread. Giving the tuner the list rather than pinning `Tree` is still the right shape for the arm — but settling it
-needs a five-round engine measurement ([09](09-measurement-protocol.md) §1), not another model-free sweep, and at an
-expected −1…3 % of a decode step that arm has not earned its slot yet. **Deferred; `Ring` stays in production**
-`[not tested]` for the engine half.
+spread. Giving the tuner the list rather than pinning `Tree` is the right shape for the arm — but settling it needed a
+five-round engine measurement ([09](09-measurement-protocol.md) §1), not another model-free sweep.
+
+### 12.3 `Ring,Tree`: the five-round engine arm — equal, and `Ring` stays
+
+**Closed** `[measured-here]`. The arm was run properly: production configuration 10, five sweep rounds against the
+three-round `Ring` production boot on the same configuration and the same day, medians of rounds 3–5, everything else
+identical (image `754421f`, full scope, TP=3 + EP, DFlash2 k=7, fp8 KV and fp8 draft cache, `NCCL_MAX_NCHANNELS=8`,
+MNBT 2048, 8 sequences, `gpu-memory-utilization 0.83`, temperature 0, effort low).
+
+| | `Ring` (production 10) | `Ring,Tree` | delta |
+|---|---|---|---|
+| C1 / C2 / C4 / C6 / C8 aggregate tok/s | 70.5 / 99.0 / 144.6 / 175.4 / 194.0 | 70.6 / 99.9 / 143.4 / 175.2 / 195.6 | **+0.1 / +0.9 / −0.8 / −0.1 / +0.8 %** |
+| TTFT, C1 / C8 | 0.282 / 0.811 s | 0.282 / 0.809 s | identical |
+| Draft acceptance, C1 / C8 | 62.5 / 61.8 % | 63.2 / 62.0 % | +0.7 / +0.2 pt, inside the arm's own spread |
+| Prefill, fresh unseen ~8K (median of 3) | 1,769 tok/s | 1,747 | −1.2 % |
+| Quality gates, cold and warm | 10/10 · 12/12 | 10/10 · 12/12 | — |
+| KV pool | 5,619,834 | **5,702,479** | **+1.5 %** |
+
+**Every speed row is inside ±1 %, and the noise floor on this stack is larger than that in all five columns**
+([10](10-results-and-roofline.md) §1.1): C1 boot medians span 1.1 %, C8 2.5 % and C4 **7.4 %**. The model-free sweep's
+−3.6 % on the step proxy did not turn into anything an engine can see, which is the expected outcome when a proxy
+measures 90 collectives in isolation and the real step overlaps none of them with anything
+([10](10-results-and-roofline.md) §5.7). **`Ring` stays in production**, on the ordinary rule that an equal arm does
+not displace the incumbent.
+
+The one real difference is not a speed one: **`Ring,Tree` leaves 1.5 % more KV pool**, 5,702,479 against 5,619,834.
+That is a buffer-allocation difference — NCCL sizes its channel buffers per algorithm, and the pool is whatever the
+profile run finds left over ([07](07-kv-and-draft-page.md) §1.1). It is real, it is reproducible in the sense that it
+is structural rather than noise, and it is **not worth taking**: 1.5 % of pool is about 84k tokens against a 5.6M pool,
+and it would cost pinning production to an algorithm list whose only measured engine effect is that.
 
 Raw logs, port counters and the JSON per arm: [`../results/mesh/algo-sweep.md`](../results/mesh/algo-sweep.md).
 
@@ -756,12 +783,13 @@ for very large messages: at 2 and 4 channels the 64 MB column suffers, at 8 it d
    should before the two larger levers ([11](11-open-issues.md) §2.12, §2.1) are spent. If you want to try: the
    remaining candidates are channel count over two cables (item 1), and getting NCCL to keep both cards busy on the
    *same* collective rather than alternating channels between them, which nobody here has looked at.
-8. **`NCCL_ALGO` — half closed** `[measured-here]`. The model-free sweep has been run (§12.2): **`Tree` is dead
-   here**, 4–6× slower at 16 and 64 MB and 23–96 % worse on the decode-step proxy, so the step-count arithmetic that
-   made it attractive is decisively outweighed on this fabric. **`Ring,Tree` is unresolved**: 3.6 % better on the
-   step proxy, worse on `sendrecv` at 64 MB, and the sweep's own repeat-to-repeat spread is larger than the effect.
-   Settling it needs a five-round engine arm at an expected −1…3 % of a decode step, and it has been **deferred**
-   rather than run `[not tested]`. `Ring` stays in the launcher.
+8. **`NCCL_ALGO` — CLOSED** `[measured-here]`. Both halves are done. The model-free sweep (§12.2) killed **`Tree`**:
+   4–6× slower at 16 and 64 MB and 23–96 % worse on the decode-step proxy, so the step-count arithmetic that made it
+   attractive is decisively outweighed on this fabric. It could not settle **`Ring,Tree`**, whose 3.6 % on the step
+   proxy sat under the sweep's own repeat-to-repeat spread — so that one got the five-round engine arm (§12.3), and
+   the answer is **equal**: every concurrency level within ±1 % of `Ring`, TTFT identical, gates full. The proxy's
+   advantage did not survive a real step. `Ring,Tree` does leave **1.5 % more KV pool** through NCCL's per-algorithm
+   buffer sizing, and that is not worth pinning production to an algorithm list. **`Ring` stays in the launcher.**
 
 ## 15. The same fix applies to the NVFP4 sibling
 

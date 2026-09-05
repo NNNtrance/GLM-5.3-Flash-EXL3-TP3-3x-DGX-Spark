@@ -13,7 +13,8 @@ of its target table put together.
 This page is what happened when we removed it: the three independent reasons a full-scope checkpoint
 would not load at all (§2), the loader patch (§3), the dress rehearsal at TP=2 (§4–§6), and the TP=3
 port that put it in production (§7) — **+22.9 % total and +21.7 % per stream at C1, +12.5 % at C8,
-KV pool +10.0 %, 3.4 GiB lighter per node, quality unchanged, for 2.4 points of draft acceptance**.
+KV pool +10.0 %, 3.4 GiB lighter per node, quality unchanged, and a draft-acceptance cost that we
+published and then had to withdraw** (§7.4).
 
 **Two reframings are worth reading even if you never load this checkpoint.**
 
@@ -444,6 +445,79 @@ From the two-rank meta-device dump, per rank, TP=2 `[measured-here]`. Quant-meth
 On the control checkpoint the same dump gives EXL3 for the 42 routed-expert layers and nothing else,
 which is what `scope: glm53_routed_experts_only` means.
 
+### 4.4 The 113 that stayed BF16 — and why we are not going to quantize them
+
+The right-hand column above is **113 linears per rank** and, once production 9 was serving, the
+obvious next arm was to quantize them ourselves: the shapes are legal, the FP16 weights are already
+inside the checkpoint, and a surgical pass over four families is hours rather than the 30–70 hours a
+full requantization would take. **It was closed by measurement before any of that was spent, and the
+answer is that it would make the engine slower** `[measured-here]`.
+
+**First, the author's decision, which is in the source rather than inferred.** `exllamav3` builds the
+five KDA gating projections with `qmap = None` — excluded from quantization — and the comment gives
+the reason: the model author's own FP8 release lists those families in
+`modules_to_not_convert`, which it reads as a sensitivity signal. `kv_b_proj` goes further and is not
+a `Linear` at all: attention never applies it as that GEMM, its halves fold into the query and output
+path at decode, so it is carried unquantized by construction. And the exclusion was applied with
+judgement rather than copied — the same list also names KDA `qkv_proj` and `o_proj`, and those **are**
+quantized at 6 bit in this checkpoint, with no measurable quality cost (§5). What is left BF16 is the
+subset the author decided was not worth the risk for the size.
+
+**Second, the bench, model-free and on the real shapes.** `cuda-exl3` at `754421f` built for the
+workstation GPU, `exl3_linear` against `F.linear`, CUDA graphs on, median of 60 replays, at the TP=3
+per-rank widths. The ruler was verified first, and it caught itself: on a card with 101 MB of L2 a
+single-tensor read of the `kv_b` shape reports **3,488 GB/s — 210 % of the machine's own peak** — so
+every arm runs against a **~300 MB weight bank**, at which the same shape reads 1,526 GB/s, 92 % of
+peak. `ratio` is `exl3 / bf16`; **above 1 means EXL3 is slower**:
+
+| shape (TP=3 per rank) | k | n | M=8 ratio, 4 bit | M=1,792 ratio, 4 bit |
+|---|---:|---:|---:|---:|
+| `f_b_proj` | 128 | 2,816 | **1.596** | 0.896 |
+| `g_b_proj` | 128 | 2,816 | **1.580** | 0.900 |
+| `f_a_proj` / `g_a_proj` (replicated) | 4,096 | 128 | 1.171 | **3.534** |
+| `in_proj_fg_a` (fused) | 4,096 | 256 | 1.060 | 2.141 |
+| `kv_b_proj` (replicated) | 512 | 32,768 | **0.391** | 1.083 |
+
+Carried to the GB10 costs measured in the production-9 trace, the projection is a **loss**: the KDA
+gating families cost 0.851 ms of a 72.52 ms step today and would cost **1.435 ms** quantized,
+**−0.584 ms/step**. The `in_proj_bfg_a` fusion has to be split in two — `b_proj` is 22 columns per
+rank and cannot be a 128-aligned EXL3 shard — which adds a launch per layer that the projection above
+does not even charge.
+
+**Third, the arithmetic does not survive its own ceiling.** If every KDA gating linear took **zero**
+time the step would gain 0.851 ms, **+1.2 % of C1** — under the ±1 % to 3 % noise floor in
+[10](10-results-and-roofline.md) §1.1 and far under the 1.5 ms/step gate the arm was given. The one
+family that would genuinely gain, `kv_b_proj` at 0.391× and +1.13 ms/step, needs a **per-head batched
+EXL3 GEMM that does not exist**: a source scan of `754421f` finds none, and finds no `M`-threshold
+reconstruct path either, so the prefill mitigation `exllamav3` has (`AUTO_RECONSTRUCT_THRESHOLD = 144`)
+has no counterpart here.
+
+**One lever survived, and it is not a quantization lever.** The same trace shows the MLA
+strided-batched family running in **fp32** — 11 calls per step, 0.757 ms. Moving it to bf16 measures
+**0.684×**: **+0.24 ms/step, about +0.3 % of C1**, plus more than half of that family's prefill cost.
+No requantization, no checkpoint change, no new kernel — a dtype. It is filed as future and minor, and
+it is gated on `needle` at 1M rather than on speed, because this is the tensor that decodes the KV
+latent and an error in it touches the whole of history `[not tested]`.
+
+**Three transferable lessons, all about the instrument** — because none of the above needed the
+engine, and the whole study cost about an hour of a workstation GPU against the four to eight hours,
+two engine patches and blind quality risk it prevented:
+
+1. **Bench a GEMM without a weight bank on a large-L2 card and it will read faster than the machine
+   can physically fetch.** The number that gave it away was 210 % of peak; had the shapes been a
+   little larger it would have read 95 % of peak and lied quietly.
+2. **"Quantizing a small tensor makes it faster" is false whenever the call was never
+   bandwidth-bound.** A 0.72 MB arm is fixed-cost-bound on every machine we measured, and the smaller,
+   compute-poorer part is the one where the ratio is *worse*.
+3. **The EXL3 prefill penalty is a property of shape, not of format.** A narrow input (k=128) makes
+   EXL3 **faster** at M=1,792; a narrow output (n=128) makes it **3.5× slower**. "EXL3 is expensive in
+   prefill" is a sentence with a missing clause.
+
+Raw tables, the ruler checks and the projection:
+[`../results/kernels/kda-gate-bench.md`](../results/kernels/kda-gate-bench.md). Both scripts ship —
+`bench/ruler_check.py` and `bench/kda_gate_bench.py` — and neither needs a node or a checkpoint.
+Tracked as closed in [11](11-open-issues.md) §2.25.
+
 ---
 
 ## 5. Quality, at TP=2
@@ -770,17 +844,28 @@ warm again — same prompt, same script, both arms, an hour apart `[measured-her
 
 **This settles the TP=2 acceptance scare** (§4.1, [11](11-open-issues.md) §1.9 row 30). At TP=2 the
 same script showed acceptance falling 48 % → 34 % and it was reported upstream as "a new and real
-gate". At TP=3 it is flat on this script and 2.4 points lower on the sweep, while speed is up
-27–33 %. The 6-bit `lm_head` does perturb the drafter — but it costs far less than it earns.
+gate". At TP=3 it is flat on this script, and the 2.4 points the sweep's C1 median showed turned out
+to be the sweep's own prompt rotation rather than the checkpoint (§7.4). Speed is up 27–33 %.
 
-### 7.4 What it cost
+### 7.4 What it cost — and the two entries we had to withdraw
 
-No gain is published here without its price, and this one has six.
+No gain is published here without its price, and this one had six. **Two of them were not real, and
+finding that out cost nothing but re-reading data we already had** `[retracted]`. The C1 median does
+read 61.9 % against production 8's 64.4 %, but `bench-sweep.py` cycles `prompts[i % 12]`, so C1 and C2
+see only the first **eight** of the twelve prompts while C4–C8 see all twelve, and the two groups
+differ by about eight points of acceptance. Pooled by draft token across five concurrency levels and
+three independent boots, production 9 reads **62.27 %** against production 8's **62.09 %** — **+0.18
+points**, inside that arm's own ±1.4-point boot spread, with the sign reversing at C6 and the cold
+probe identical on both arms (42.53 % against 42.51 %). And because `accept_len = 1 + k × acceptance`
+holds on all 90 rows to ±0.005, the second entry was never a second cost. Net effect on throughput:
+**+0.24 %** ([11](11-open-issues.md) §2.26).
+
+The four costs that remain are the four that were never about the drafter.
 
 | cost | size | note |
 |---|---|---|
-| draft acceptance at C1 | **−2.4 points** (64.4 → 61.9 %) | real and small; the gate is ≥60 % and it passed. Flat on the cold script |
-| accepted tokens per step at C1 | **−3.0 %** (5.50 → 5.34) | same cause: a 6-bit `lm_head` perturbing a drafter trained against a BF16 one |
+| draft acceptance | **none** `[retracted]` | we published −2.4 points here and it was our harness. See below |
+| accepted tokens per step | **none** `[retracted]` | never a second cost: `accept_len = 1 + k × acceptance` holds on all 90 rows, so this was the same number written twice |
 | prefill, fresh | −2.2 % | inside the ±3 % equality band; not a real loss, and prefill-7k moved +2.5 % the other way |
 | maintenance | **a second patch tree**, `patches/tp3full/`, whose `patch-vllm-tp3.py` and `preflight-tp3.py` diverge from `patches/tp3/` on purpose | a fix in one does not reach the other. Merging them is technically possible today — the constants derive from `tp` and 128 and are no-ops at TP≤2 — and was not done, so production 8's fast-load identity would keep working. [11](11-open-issues.md) §2.24 |
 | disk | **53 GB × 3** for the second fast-load sidecar, on top of a second 154 GiB checkpoint × 3 | one node had 51 G free before this and needed the old sidecars cleared first |
@@ -806,7 +891,8 @@ and mark the TP=2 delta **not reproduced**, not explained `[retracted]`.
 
 **"Draft acceptance collapses on a quantized target."** That came from a cold single-prompt probe
 with a sample of one, and it was reported upstream before the sweep ran. It is flat on that same
-probe at TP=3 and 2.4 points down on the sweep ([11](11-open-issues.md) §1.9 row 30).
+probe at TP=3, and the sweep's 2.4 points went the same way as the rest of that scare — withdrawn
+(§7.4, [11](11-open-issues.md) §1.9 row 30, §2.26).
 
 **Also measured, and useful for planning:** the dump boot (no fast-load) consumed 60.44 / 60.54 /
 61.35 GiB and gave 4,840,220 KV tokens, so **fast-load itself is worth about 2 GiB and ~325k KV
@@ -843,7 +929,7 @@ Three levels, none of which needs an image rebuild:
 
 - **The largest item this stack carried is closed, and it is in production.** The dense stage is
   worth **+21.7 % per stream at TP=3** — 17.8 ms of an 88.2 ms decode step — with **no quality cost**,
-  a **larger** KV pool and a **faster** boot, against 2.4 points of draft acceptance
+  a **larger** KV pool and a **faster** boot, and the acceptance cost we billed it for was ours
   ([11](11-open-issues.md) §2.22).
 - **`routed_experts_only` was never a quality decision.** Two lines in a model file made it the only
   loadable scope, and they would have done so for any checkpoint in any format.

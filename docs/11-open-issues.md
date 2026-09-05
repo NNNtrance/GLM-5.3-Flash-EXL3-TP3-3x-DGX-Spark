@@ -210,7 +210,8 @@ The obvious answer — a checkpoint that also quantizes attention — used to be
 cannot run at TP=3", because with attention quantized there is no unquantized dimension left to split
 three ways ([01](01-model-and-license.md) §3.1). **It is now what production serves.** Production
 configuration 9, since 5 September evening: **+21.7 % per stream, +12.5 % at C8, KV pool +10.0 %,
-quality unchanged** `[measured-here]`, for 2.4 points of draft acceptance. None of the three blockers
+quality unchanged** `[measured-here]`, and the acceptance cost we first billed it for was our own
+harness (§2.26). None of the three blockers
 was about parallelism: the model class declares no `packed_modules_mapping`, the model file pins
 attention to BF16, and the KDA block is factorised differently. **This item is closed** — see §2.22
 for what it left behind, and [13](13-full-scope-checkpoint.md) for the whole account.
@@ -254,7 +255,7 @@ What is still genuinely open here is small and specific:
 4. **Nobody has tried to make one collective use both cards at once.** Channels alternate between the
    two NICs; whether a single large all-reduce can saturate both PCIe paths at the same time is
    unmeasured, and it is where the remaining ≤30 % would have to come from `[not tested]`.
-5. **`NCCL_ALGO` — swept model-free; `Tree` is dead, `Ring,Tree` is unresolved** `[measured-here]`.
+5. **`NCCL_ALGO` — CLOSED. `Tree` is dead, `Ring,Tree` is equal, `Ring` stays** `[measured-here]`.
    The sweep this item asked for has been run: three arms, two repetitions, production plugin and
    production environment ([06](06-nccl-mesh.md) §12.2, raw in
    [`../results/mesh/algo-sweep.md`](../results/mesh/algo-sweep.md)). **`Tree` is rejected** — 4–6×
@@ -262,10 +263,15 @@ What is still genuinely open here is small and specific:
    order of magnitude higher, and the port counters show it redistributing traffic asymmetrically
    across nodes that have no hierarchy to reward it. The step-count arithmetic that motivated the item
    (`2(w−1) = 4` ring steps against `~2·log₂3 ≈ 3.2`) is real and is outweighed by what a step costs
-   here. **`Ring,Tree` is not settled**: 3.6 % better on the step proxy and at 4 MB, worse on
-   `sendrecv` at 64 MB, arms swapping places at 1 MB — and the sweep's own repeat-to-repeat spread
-   (up to 1.7× at 1 MB) is larger than the effect. Model-free cannot answer it. A five-round engine arm
-   can, at an expected −1…3 % of a decode step; **deferred, not run** `[not tested]`. `Ring` stays.
+   here. **`Ring,Tree` needed the engine, and it has now had it.** Model-free it was 3.6 % better on
+   the step proxy and at 4 MB, worse on `sendrecv` at 64 MB, with arms swapping places at 1 MB and a
+   repeat-to-repeat spread (up to 1.7× at 1 MB) larger than the effect. The five-round engine arm was
+   run on production configuration 10 against the same-day `Ring` boot: **C1 70.6 / C4 143.4 / C8 195.6
+   against 70.5 / 144.6 / 194.0 — every level inside ±1 %**, with identical TTFT, acceptance inside its
+   own spread and full gates ([06](06-nccl-mesh.md) §12.3). The proxy's −3.6 % did not survive contact with a step
+   that overlaps none of its collectives. The one structural difference is **+1.5 % of KV pool**
+   (5,702,479 against 5,619,834) from NCCL's per-algorithm buffer sizing — real, and not worth pinning
+   production to an algorithm list for. **`Ring` stays; the item is closed.**
 
 `NCCL_BUFFSIZE` and `NCCL_P2P_NET_CHUNKSIZE` are **not** on this list, and were briefly put back on
 it by mistake: the first was measured and made no difference, the second only affects point-to-point
@@ -690,38 +696,49 @@ it waits for company. The rule the bundle exists to enforce is unchanged: **do n
 sub-1 % change**; accumulate them and spend one boot on the pile. The pile is also, as of production
 8, no longer growing from upstream.
 
-### 2.20 This stack has no autostart, and the sibling's unit will win a reboot
+### 2.20 Autostart — CLOSED: the unit is real, installed and reboot-tested. The watchdog is not
 
-There is no systemd unit for this engine. The container runs with `--restart no` — deliberately, since
-a half-started rank quietly retrying is exactly the "fluent and wrong" failure class this stack is
-built to refuse — and nothing supervises it, so an unattended reboot leaves the cluster down. That is
-a known, accepted gap.
+**Closed** `[measured-here]`. This item spent the life of the repository saying there was no systemd
+unit, that the template in [`systemd/`](../systemd/) had three things wrong with it, and that the
+sibling NVFP4 unit would win a reboot. All three are now false, and the honest half of the closure is
+listed below with them.
 
-**The hazard is the other half of it, and production 9 made it worse rather than better.** The NVFP4
-sibling stack's own unit, `harem-motor.service`, is `enabled` on all three nodes. A reboot today does
-not leave the cluster down — it brings up the **other engine**, on the same GPUs and the same memory,
-which is worse than nothing if you were expecting this one `[measured-here]`. The two must never both
-be enabled: whichever unit is installed needs `Conflicts=` against the other, and installing this one
-has to be paired with disabling that one.
+The unit is [`systemd/harem-exl3.service`](../systemd/harem-exl3.service), installed and `enabled` on
+all three nodes, and the preflight it calls is
+[`systemd/motor-onkosul-exl3.sh`](../systemd/motor-onkosul-exl3.sh) — seven checks: docker answering,
+`ibv_devinfo` 4/4, a ping to each fabric neighbour, `drop_caches`, then the env file, the image and
+this rank's fast-load sidecar manifest. `ExecStop` names `exl3-tp3` rather than the NVFP4 container the
+template named. `TimeoutStartSec` is **1200**, not 900, so a 620 s dump boot cannot time out mid-load.
+`harem-motor.service` is `disabled` on all three nodes and the unit carries
+`Conflicts=harem-motor.service` besides.
 
-What changed on 5 September evening is the **cost of that reboot**, not its likelihood. Production 9
-is now three env files, two sidecar sets and two patch trees deep ([13](13-full-scope-checkpoint.md),
-§2.24); coming back from an unattended reboot means starting three ranks in the right order, from the
-right tree, against the right env file, in an order systemd will not honour on its own — while the
-other stack is already holding the memory. The cheap mitigation is unchanged and still not written:
-**disable the sibling's unit on all three nodes**, which is one command and needs no unit of our own,
-and a 60-second `docker ps` plus `/health` watchdog that records `docker logs --tail 40` when a
-container exits. One outage during this work ran an hour purely because nothing was watching. **Not
-written** `[not tested]`.
+**Measured once, whole cluster, power-on to a served token.** `reboot` to all three; ssh and 4/4 at
++29 / +30 / +31 s; the units log `Finished` at +98 / +98 / +103 s, which is the preflight, the fabric
+wait and the settle gate together; `/health` 200 at 22:28:21 — printed by the harness as +242 s and by
+the log's own wall clock as **315 s**, both recorded because they disagree and the larger is the one to
+plan with. KV pool **5,652,892** against 5,619,834 from a settled `docker run`, **+0.6 %**; gates 10/10
+and 12/12 afterwards ([`results/boot/boot-ledger.md`](../results/boot/boot-ledger.md),
+[systemd](../systemd/README.md), [09](09-measurement-protocol.md) §11.4).
 
-A unit template is in [`systemd/`](../systemd/) with its three unfinished pieces named — the preflight
-script it calls does not exist, systemd will not honour the worker-2 → worker-1 → head start order on
-its own, and its `ExecStop` names the wrong container. It is **not installed anywhere** and is not
-recommended for installation as it stands.
+**Three things this does not close, and they are the reason the item is not deleted.**
 
-The cheaper half of the same problem is a watchdog rather than a unit: a 60-second `docker ps` plus
-`/health` poll that records `docker logs --tail 40` when the container exits. One outage during this
-work ran an hour purely because nothing was watching `[measured-here]`. Not written `[not tested]`.
+- **`--restart no` has not changed, and will not.** A half-started rank quietly retrying is exactly
+  the "fluent and wrong" failure class this stack refuses. Autostart and restart policy were always
+  two decisions and only one of them was a gap.
+- **systemd still does not honour the worker-2 → worker-1 → head order.** The three units start
+  independently. What carried the test is that the workers' rendezvous retries until rank 0 appears
+  and `TimeoutStartSec` is roughly five times a normal boot — margin, not a guarantee, demonstrated
+  **once**. A rank-dependent delay or a peer-port poll in `ExecStartPre` is the belt-and-braces
+  version and is **not written** `[not tested]`.
+- **The watchdog is still not written.** A unit solves reboots; it does not solve the failure we
+  actually hit, which was the engine exiting while nobody was looking. A 60-second `docker ps` plus
+  `/health` poll that records `docker logs --tail 40` when the container is gone is a few lines, needs
+  no root and is independent of any unit. One outage during this work ran an hour purely because the
+  only thing being watched was a benchmark log `[measured-here]`. **Not written** `[not tested]`.
+
+**Reboot all three nodes together, or none** ([00](00-hardware-and-os.md) §3.4). The unit makes an
+all-three reboot survivable. It does nothing for a single-node reboot except start an engine into half
+a fabric.
 
 ### 2.21 The fast-load identity gate is stricter than it needs to be
 
@@ -790,7 +807,8 @@ The whole account, including the loader work and the padded-load port, is
   codebooks, zero non-finite, bounded ranges `[reported]`.
 
 **Three things it left behind, each with its own item:** the two patch trees and the second sidecar
-(§2.24), the KDA gating arms that stay BF16 (§2.25), and the 2.4 points of draft acceptance (§2.26).
+(§2.24), the KDA gating arms that stay BF16 — now closed by measurement (§2.25) — and the 2.4 points
+of draft acceptance, which was ours rather than the checkpoint's (§2.26).
 
 ### 2.23 The remaining C1 idle: 3.75 %, and the four things inside it
 
@@ -854,22 +872,55 @@ that a sidecar may be deleted only after its env file has been retired, because
 `FASTLOAD_MODE=load` with the directory gone refuses the boot loudly and correctly
 ([08](08-fast-boot.md) §9 step 6). **Not written.**
 
-### 2.25 The 113 linears that are still BF16, and they are the checkpoint's decision
+### 2.25 The 113 linears that are still BF16 — CLOSED by measurement: quantizing them would be slower
 
 `CUDA_EXL3_DEBUG_NAMES` on the production boot reads **203 EXL3 / 113 bf16** per rank
 `[measured-here]`. The 113 are four families and nothing else: KDA `f_b_proj` (34), `g_b_proj` (34),
 `in_proj_bfg_a` (34) and MLA `kv_b_proj` (11). They are what makes the measured gain 17.8 ms rather
 than the ~32 ms the estimate implied ([13](13-full-scope-checkpoint.md) §4.2).
 
-**This one is not ours to fix, and that is the point of listing it.** It is not a loader limitation
-and not a kernel limitation: the checkpoint simply does not carry EXL3 tensors for those names, so
-`resolve()` returns `None` and the modules are built BF16 whatever the patch does. Closing it means a
-checkpoint quantized with those families included — a producer-side decision, with its own quality
-question, since the KDA gating arms are exactly the kind of small, sensitive projection a quantizer
-is normally conservative about. **We have not measured what they are worth** `[not tested]`. The
-cheap first step is arithmetic rather than a boot: their share of the remaining dense traffic is
-computable from the checkpoint's own tensor shapes, the same way
-[13](13-full-scope-checkpoint.md) §1.2 computed the whole table.
+This item used to ask what they were worth and note that we had not measured it. **We have now, on a
+model-free bench, and the answer is that quantizing them makes the engine slower** `[measured-here]`.
+The bench and the arithmetic are in [13](13-full-scope-checkpoint.md) §4.4, the raw tables in
+[`../results/kernels/kda-gate-bench.md`](../results/kernels/kda-gate-bench.md), and both scripts ship
+(`bench/ruler_check.py`, `bench/kda_gate_bench.py`). The four things that close the item:
+
+1. **The checkpoint author left them BF16 on purpose, and said so in code.** `exllamav3`'s
+   `gated_delta_net.py` builds the five KDA gating arms with `qmap = None` and the comment names the
+   reason — the model author's own FP8 release excludes those families from conversion, which it reads
+   as a sensitivity signal. `kv_b_proj` is not even a `Linear`: attention never applies it as that
+   GEMM, so it is carried unquantized by construction. **This is not an omission we can fix; it is a
+   decision, and the same author quantized `qkv_proj` and `o_proj` to 6 bit from the same exclusion
+   list, so it was a discriminating one.**
+2. **On the KDA shapes, EXL3 is slower than BF16 at decode.** Measured at the TP=3 per-rank widths,
+   M=8, CUDA graphs on, against a weight bank three times L2 so nothing reads out of cache: EXL3 4-bit
+   is **1.58–1.76×** the BF16 time on `f_b_proj`, `g_b_proj` and the `in_proj` split. These arms are
+   0.72 MB and are **not bandwidth-bound on any machine**, so four-bit weights buy bytes that were
+   never the cost while paying the Hadamard and trellis-decode fixed cost.
+3. **The arithmetic cannot be rescued even at zero cost.** The whole KDA gating family is
+   **0.851 ms of a 72.5 ms step**. If every one of those linears took no time at all it would be
+   +1.2 % of C1 — under the gate the arm was given, and far under the noise floor in
+   [10](10-results-and-roofline.md) §1.1.
+4. **The one family that would genuinely gain needs a kernel that does not exist.** `kv_b_proj` is
+   bandwidth-bound and measures **0.391×** at 4 bit, worth +1.13 ms/step — but `cuda-exl3` at `754421f`
+   has no per-head batched EXL3 GEMM (`exl3_linear` is a single `[M,k] → [M,n]`), and no `M`-threshold
+   reconstruct path either, both verified by source scan. Taking it means writing a kernel, and it
+   still would not clear the gate alone.
+
+**What survives is not a quantization item at all.** The same bench found that the MLA
+strided-batched family runs in **fp32** — 11 calls per step, 0.757 ms — and moving it to bf16 measures
+**0.684×**, worth **+0.24 ms/step, about +0.3 % of C1**, with more than half of that family's prefill
+cost as well. No quantization, no checkpoint change, no new kernel: a dtype. It is small, it is real,
+and it is gated on `needle` at 1M rather than on speed, because this is the tensor that decodes the KV
+latent and its error would touch the whole of history. **Filed as future and minor** `[not tested]`.
+
+**What the closure cost: about an hour of a workstation GPU, and it bought back four to eight hours of
+surgical requantization, two engine-side patches and a quality risk we would have taken blind.** Three
+lessons came with it, all instrument-shaped: on a card with 101 MB of L2, a GEMM bench without a
+weight bank reads **210 % of the machine's own peak read bandwidth** and every ratio in the table would
+have been wrong; "quantizing a small tensor makes it faster" is false whenever the call was never
+bandwidth-bound; and the EXL3 prefill penalty is a property of **shape**, not of format — a narrow
+input (k=128) makes EXL3 *faster* while a narrow output (n=128) makes it 3.5× slower.
 
 A second, smaller half of the same item survives from §2.1: whatever dense BF16 remains runs on
 Ampere-class `cutlass_80_*` kernels on an sm_121 part, at **79 %** of what `torch.matmul` reaches on
@@ -946,13 +997,13 @@ on its own; it is worth carrying into the next arm that touches the drafter.
 | **The mesh plugin patches on the NVFP4 stack** | The idle second cable and the host bounce buffer are properties of the fabric and the plugin, not of the quantization, so both should transfer and are worth more there than the channel cap. Not applied. |
 | **KDA linear attention's efficiency** | 8.1 % of a prefill chunk and 8.0 % of a C8 step, triton chunked scans, never measured against a ruler. It inherits the empty-denominator slot MLA prefill just vacated. |
 | **A profiler-off re-run of the same decode window** | The CUPTI subtraction that turns 5.45 ms of C1 idle into 3.47 ms is an inference from two walls (§1.10), not a direct measurement. Separating it cleanly needs the profiler off and the window re-opened: one boot, and the answer would move a 3.75 % figure by a fraction of itself. |
-| **A re-profiled step breakdown on production 9** | [10](10-results-and-roofline.md) §5 is production 7's trace, and production 9 exists specifically to delete its largest row. Costs a six-minute window and 7–8 GiB of host RAM per node. Until it is run, the *shares* in that section are historical and the *structural* findings are not. |
-| **What the four BF16 families left in the production checkpoint are worth** | KDA `f_b_proj`, `g_b_proj`, `in_proj_bfg_a` and MLA `kv_b_proj`: 113 linears per rank. The first step is arithmetic from the checkpoint's own shapes, not a boot. §2.25. |
-| **Why production 9 costs 2.4 points of draft acceptance** | Plausible mechanism (a 6-bit head against a drafter trained on a BF16 one), no measurement behind it, and worth about 3 % of single-stream if fully recovered. §2.26. |
+| **A watchdog on the running container** | A 60-second `docker ps` plus `/health` poll that dumps `docker logs --tail 40` when the container is gone. Few lines, no root, independent of the unit — and it would have caught the one-hour outage the autostart unit does nothing about. §2.20. |
+| **A rank-ordered start under systemd** | The unit starts all three ranks concurrently and the reboot test passed on the rendezvous retrying, not on ordering. One trial. A rank-dependent delay or peer-port poll in `ExecStartPre` is the guarantee; not written. §2.20. |
+| **Quantizing the four BF16 families ourselves** | Ruled out rather than untried: on a model-free bench at the TP=3 shapes, EXL3 is **1.6–1.8× slower** than BF16 on the KDA arms at M=8, the whole family is 0.851 ms of a 72.5 ms step, and the one family that would gain needs a batched EXL3 kernel that does not exist. §2.25, [13](13-full-scope-checkpoint.md) §4.4. |
+| **The MLA fp32 → bf16 dtype change** | The one lever that survived that bench: +0.24 ms/step, about +0.3 % of C1, no quantization and no new kernel. Small, and gated on `needle` at 1M rather than on speed. §2.25. |
 | **Whether the full-scope arm's TP=2 memory reading has a mechanism at all** | It said ~10 GiB heavier; TP=3 says 3.4 GiB lighter. The confound is named (different checkpoints *and* different `max_model_len`) and the `ops.reserve` hypothesis is still untested. Recorded as not reproduced, not explained. §1.9 row 32. |
 | **`mtp.safetensors`, the MIT-licensed MTP drafter that ships with that checkpoint** | 3.79 GB, not in the index, never read by vLLM. It is a candidate replacement for DFlash2 whose licence would transfer to a reader, unlike ours ([01](01-model-and-license.md) §4). Not evaluated. |
-| **`NCCL_ALGO=Ring,Tree` on the engine** | Swept model-free and unresolved there: better on the decode-step proxy, worse on `sendrecv` at 64 MB, and inside the sweep's own repeat spread. Settling it needs a five-round engine arm, at an expected −1…3 % of a decode step. `Tree` is measured and rejected; `Ring` stays. §2.2 item 5, [06](06-nccl-mesh.md) §12.2. |
-| **`gpu-memory-utilization 0.83`** | Designed, costed at ~+11.8 % of pool for ~3.7 GiB of host headroom, and reversible in one line — but it is a production memory change and it waits on the stack owner. §2.4. |
+| **`gpu-memory-utilization 0.85` on this stack** | The rung above production 10. It will not be attempted: 0.85 was measured once and rejected on swap growth, and at 0.83 `MemFree` already sits at 0.9–1.2 GiB. The next thing this stack needs at that end is a soak, not another rung. §2.4. |
 | **Whether a second-stream all-reduce overlaps a GEMM at all on this part** | The probe is written and has not been run. It gates every overlap variant in §2.17, and it costs one engine-down bench. |
 | **A long unattended run** | The longest continuous uptime on record is about an hour between arms. Leaks, KV fragmentation, fabric drift and acceptance drift over 6–12 hours of mixed load are all unmeasured. |
 | **`--max-num-seqs` above 8** | Chosen to match the TP=2 arrangement and never A/B'd, and C8 sits exactly on the cap. It does not enter the KV divisor, so the cost would be TTFT, not pool. |

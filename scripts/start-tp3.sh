@@ -86,6 +86,17 @@ CT_ARG=(); [ -n "${CHAT_TEMPLATE_HOST:-}" ] && { CT_ARG=(--chat-template /models
 MM_ARG=(); if [ "${LANGUAGE_MODEL_ONLY:-1}" = "1" ]; then MM_ARG=(--language-model-only); else MM_ARG=(--skip-mm-profiling --limit-mm-per-prompt '{"image": 4, "video": 1}'); fi
 EXTRA_ENV_ARG=(); for _kv in ${EXTRA_ENV:-}; do EXTRA_ENV_ARG+=(-e "$_kv"); done
 
+# Torch profiler, off unless PROFILER_DIR is set. This vLLM takes it as
+# --profiler-config and NOT as VLLM_TORCH_PROFILER_DIR (vllm/config/profiler.py):
+# with the environment variable alone the /start_profile route is never attached
+# and the endpoint answers 404, which is exactly how a step-time breakdown gets
+# postponed for a week. Set it before you need it -- an unset PROFILER_DIR costs
+# nothing at run time. docs/09 section 4.1.
+PROF_ARG=()
+if [ -n "${PROFILER_DIR:-}" ]; then
+  PROF_ARG=(--profiler-config "{\"profiler\":\"torch\",\"torch_profiler_dir\":\"${PROFILER_DIR}\",\"torch_profiler_with_stack\":false,\"ignore_frontend\":true}")
+fi
+
 # --- HAREM fastload sidecar (tp3/harem_fastload.py) -------------------------
 # FASTLOAD_MODE=dump  : normal load from the checkpoint, then write this rank's
 #                       post-load tensors to $FASTLOAD_DIR-r$NODE_RANK (rw mount)
@@ -155,7 +166,7 @@ DOCKER_ARGS=(run --gpus all -d --log-opt max-size=20m --log-opt max-file=3 --nam
   --kv-cache-dtype "${KV_CACHE_DTYPE:-fp8}" --enable-prefix-caching --enable-chunked-prefill --dtype bfloat16
   --tool-call-parser glm47 --enable-auto-tool-choice --reasoning-parser "${REASONING_PARSER:-deepseek_r1}"
   --distributed-executor-backend mp --nnodes "$NNODES" --node-rank "$NODE_RANK" --master-addr "$MASTER_ADDR" --master-port "$MASTER_PORT"
-  "${KV_MEM_ARG[@]}" "${SPEC_ARG[@]}" "${EP_ARG[@]}" "${EAGER_ARG[@]}" "${CT_ARG[@]}" "${MM_ARG[@]}" "${THINKING_ARG[@]}" )
+  "${KV_MEM_ARG[@]}" "${SPEC_ARG[@]}" "${EP_ARG[@]}" "${EAGER_ARG[@]}" "${CT_ARG[@]}" "${MM_ARG[@]}" "${THINKING_ARG[@]}" "${PROF_ARG[@]}" )
 [ -n "$HEADLESS" ] && DOCKER_ARGS+=("$HEADLESS")
 [ -n "${EXTRA_ARGS:-}" ] && DOCKER_ARGS+=(${EXTRA_ARGS})
 if [ "${DRY_RUN:-0}" = "1" ]; then printf 'docker'; printf ' %q' "${DOCKER_ARGS[@]}"; printf '\n'; exit 0; fi

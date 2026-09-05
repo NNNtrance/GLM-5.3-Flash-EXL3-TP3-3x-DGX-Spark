@@ -8,10 +8,11 @@ elsewhere.
 
 ## 1. Retracted
 
-Seven things we wrote down as findings and later measured properly, plus two smaller ones, plus a
-full audit of every claim of ours that a later measurement overturned (§1.9 — **24 of them**). Each
-was published — in a report, an upstream issue, or both — before it was corrected. Two of them (§1.6
-and §1.7) are the same number, corrected twice, in opposite directions.
+Seven things we wrote down as findings and later measured properly, plus two smaller ones, plus the
+step-time breakdown that a real profiler run corrected in three places (§1.10), plus a full audit of
+every claim of ours that a later measurement overturned (§1.9 — **28 of them**). Each was published —
+in a report, an upstream issue, or both — before it was corrected. Two of them (§1.6 and §1.7) are the
+same number, corrected twice, in opposite directions.
 
 ### 1.1 "The missing `n_rows` also costs the non-expert-parallel path"
 
@@ -84,12 +85,46 @@ computed a ceiling twice from a datasheet and never once from the machine.
   **3.5 s**: the autotune was also doing JIT and kernel warm-up, which simply moved into graph
   capture `[retracted]`. See [08](08-fast-boot.md).
 
+### 1.10 Three rows of the step-time breakdown, and the target list built on them
+
+The step-time breakdown in [10](10-results-and-roofline.md) §5 was, until 5 September, a
+**reconciliation**: per-class ratios from an older trace normalised onto a newer wall clock, with a
+2.8 % residual booked to NCCL. It was honest about being that. It was also wrong in three places,
+each of which had been published as a ranked target `[retracted]`:
+
+- **`exl3_moe_combine`, "1.5 % of a prefill chunk", ranked target #10.** The kernel **does not exist**
+  in this build — it is fused into the down-projection epilogue. The class is 0 %. What produced the
+  1.5 % was a model-free bench that still contains a `combine6` entry point, measured in isolation and
+  then assumed to be on the production path.
+- **`_zero_kv_blocks`, "14.7 ms per chunk, 1.3 %", ranked target #8.** Measured on the live production
+  configuration: **0.857 ms, 0.09 %**. A 16× overestimate. The model-free reconstruction reproduced a
+  *call's* geometry faithfully and was then priced against a pool and page mix the production
+  configuration does not run.
+- **The DFlash2 drafter, "18.5 ms, 19.5 % of a C1 step".** Measured: **10.78 ms, 11.4 %** — 1.7× too
+  high. The old figure came from segmenting a step by "the span of the MoE GEMM calls is the target";
+  the profiler's own step annotation excludes the drafter exactly, and the heuristic did not.
+
+A fourth correction is about a *lever* rather than a class, and it went upstream before it was
+checked. We reported **5.45 ms of GPU idle at C1 (5.8 %)** and estimated CUDA-graph coverage of the
+8-token verify batch at **+6 % single-stream**. Both numbers are wrong in the same direction:
+**~2.0 ms of that idle is CUPTI itself** (~1 µs per kernel boundary × ~1,873 boundaries), so the real
+budget is **3.47 ms = 3.75 %**; and **77 % of what remains is per-kernel dispatch**, not host latency,
+so "CPU gap" was a misnomer — the host runs 3.9 ms *ahead* of the GPU at C1. Graph capture is worth
+**1.4–1.9 ms, +1.5–2.1 %**, and it removes neither the step head's `prepare_inputs` nor the one
+blocking sync. The corrected figure was posted to the same thread the original went to
+([10](10-results-and-roofline.md) §5.8) `[retracted]`.
+
+**The lesson is a protocol one and it is now written down** ([09](09-measurement-protocol.md) §4.1):
+the profiler flag costs nothing when unset, so carry it in production; measure the profiler's own
+overhead in the same windows; and never read an idle figure straight out of a trace — take
+`busy(union)` from the trace and the wall from a profiler-off run.
+
 ### 1.9 The full audit: every claim of ours that a measurement overturned
 
 On 5 September the whole stack was re-read against its own raw data, and every published claim was
-checked against the evidence behind it. Twenty-five did not survive — the last of them the same day,
-and it had been the largest open item on this page for half a day before it was measured. The nine
-above are the ones with a story worth telling; this table is the complete list, so that nothing is
+checked against the evidence behind it. Twenty-eight did not survive — three of them to a single
+profiler run the same evening, after the step-time breakdown they came from had stood for a week. The
+ten above are the ones with a story worth telling; this table is the complete list, so that nothing is
 quietly dropped and so the shape of the mistakes is visible in one place `[retracted]`.
 
 | # | What we claimed | What the measurement says | Where |
@@ -119,12 +154,22 @@ quietly dropped and so the shape of the mistakes is visible in one place `[retra
 | 23 | The TP=2 KV collapse came from the draft's page layout | The dominant cause was memory scarcity at two nodes; the page layout was second-order | [07](07-kv-and-draft-page.md) §4 |
 | 24 | Overlapping the collective with compute is worth −10…13 % of prefill and −6…10 % of decode | That estimate counted the hideable collective and not the second MoE weight stream the split pays for. Corrected: prefill −6.3…+8.0 %, decode +6…+38 % (worse) | §2.17 |
 | 25 | 8.2 GiB per worker is stranded, and equalising the ranks would grow the pool 8–26 % | Not an allocation. vLLM's "non-torch memory" is a delta between two `MemAvailable` readings, and the last node started is the one the kernel has had least time to reclaim for. Acting on it would have over-committed the head by ~8 GiB | §2.3 |
+| 26 | `exl3_moe_combine` is 1.5 % of a prefill chunk, ranked target #10 | The kernel **does not exist** in this build; it is fused into the down-projection epilogue. 0 % | §1.10 |
+| 27 | `_zero_kv_blocks` costs 14.7 ms per chunk, ranked target #8 | **0.857 ms, 0.09 %** on the live production configuration — 16× over | §1.10 |
+| 28 | 5.45 ms of C1 GPU idle, and CUDA graphs would return ~6 % of single-stream | ~2.0 ms of it is the profiler; the real budget is 3.75 % and graphs are worth **1.5–2.1 %**. 77 % of the idle is per-kernel dispatch, not the host | §1.10 |
 
-Read the shape rather than the rows. **Seven of the twenty-five are a ruler we quoted instead of
+Read the shape rather than the rows. **Seven of the twenty-eight are a ruler we quoted instead of
 measured** (1, 2, 3, 4, 15, 25, and the roofline percentages that followed). **Four are a single pair
 of sweeps treated as a result** (9, 10, 16, 19). **Three are an arithmetic model that a bench refuted**
-(5, 6, 24). **Two are our own tooling disagreeing with our own documentation** (16, 18). Only one (17)
-is a provenance claim, and it is still open.
+(5, 6, 24). **Three are a model-free measurement carried onto the production path without checking
+that the path still had it** (26, 27, and the drafter row behind 28). **Two are our own tooling
+disagreeing with our own documentation** (16, 18). Only one (17) is a provenance claim, and it is
+still open.
+
+And row 28 adds a category of its own with exactly one member so far: **the instrument's own cost
+booked as a finding.** A profiler that charges 1 µs per kernel boundary, on a step with 1,873 of
+them, manufactures 2 ms of GPU idle out of nothing — and a stack that had just finished learning to
+verify its bandwidth ruler and its memory ruler published the number anyway.
 
 Row 25 is the one to read twice, because it is the largest class in a different disguise: the ruler
 there was not a bandwidth figure we had copied off a datasheet but **a number the engine itself
@@ -149,10 +194,13 @@ Ampere-class `cutlass_80_*` on an sm_121 part, and at the engine's own shapes th
 what `torch.matmul` gets on the same device (63.6 against 80.4 TFLOP/s). Closing that gap is
 somebody's cuBLAS/vLLM work and is worth ~3.1 % of prefill `[measured-here]`.
 
-The obvious answer — a checkpoint that also quantizes attention — is the one that cannot run at TP=3
-today, because with attention quantized there is no unquantized dimension left to split three ways
-([01](01-model-and-license.md) §3.1). Next step: nothing cheap. It is either a differently scoped
-quantization, or pipeline parallelism, which we have not evaluated at all `[not tested]`.
+The obvious answer — a checkpoint that also quantizes attention — used to be filed as "the one that
+cannot run at TP=3", because with attention quantized there is no unquantized dimension left to split
+three ways ([01](01-model-and-license.md) §3.1). **That is no longer the state of it.** The measured
+profile put a number on the prize (~+34 % single-stream), the kernel author supplied a mechanism that
+does not need a bespoke quantization run, and one of the two blockers turns out to be a single
+constant in our launcher. It is now a live experiment with an ordering, and it has its own item:
+**§2.22**, which is where the next work on this stack goes.
 
 ### 2.2 The fabric: what is actually left, now that the ceiling is right
 
@@ -404,6 +452,16 @@ erase on the cooperative arm, leaving the barrier itself as a **+0.2 to +0.3 µs
 at small and medium sizes; at 4M elements both arms are bandwidth-bound and equal. So the detail that
 decides it is not the SM count, it is the graph. Tool: [`bench/gridsync.cu`](../bench/gridsync.cu).
 
+**And the premise turned out not to hold here — the kernel author said so himself, unprompted.**
+Production does **not** run inside a CUDA graph: spec-decode plus the FlashInfer attention backend
+forces `cudagraph_mode=NONE` (§2.23, [10](10-results-and-roofline.md) §5.8), so the arm that wins by
+up to 1.37 µs per boundary is the one that is actually running. That reopens the item in principle and
+closes it again on size: 42 MoE layers × 3 phase boundaries is about **0.2 ms of a 94.65 ms C1 step**,
+0.2 %, behind every item in §2.23. **Reopened, re-priced, still last.** Worth recording because the
+advice we acted on ("a barrier is never worth paying for inside a graph") was true on the author's
+stack and false on ours, and neither of us checked which one we were reasoning about
+`[reported]`.
+
 ### 2.15 The fused MoE input transform — closed upstream
 
 **Closed.** Our A/B found the fusion worth +1–4 % end to end at small batch and a regression at large
@@ -552,9 +610,16 @@ this stack `[retracted]`. Tables in [10](10-results-and-roofline.md) §1 and
 `had_in` was the only sub-roofline kernel left in the MoE stage at 37–57 % of the ruler. Upstream took
 it in `a47da6e` by removing a 64-bit division in favour of deriving the index from the grid:
 **−10 to −18 %** on that kernel, roofline 57 % → 63 % `[reported]`. On this stack that is ~0.2–0.3 %
-of prefill wall, which does not justify an image rebuild on its own. Until then the production image
-does not have it, and [10](10-results-and-roofline.md) §6 row 7 still quotes the old number
-`[not tested]`.
+of prefill wall, which does not justify an image rebuild on its own.
+
+**It went in anyway, and the result is the honest kind of nothing.** Image `exl3-zeus:62f53e6` is
+**production configuration 8** since 5 September afternoon — not because 0.3 % was worth a boot, but
+because a build was being made and staying on upstream's head is cheaper than catching up later.
+Measured against production 7 on three sweep rounds: C1 56.8 against 57.0, C8 172.8 against 175.1,
+prefill-fresh 1,780 against 1,769, KV pool 4,674,931 against 4,699,724, gates full, acceptance 62–64 %
+`[measured-here]`. Four signs, every one inside its own band, exactly as a sub-noise change should
+read ([10](10-results-and-roofline.md) §1). **What the bundle rule bought here was the discipline not
+to claim any of it.**
 
 **And that is the end of the kernel-library item, not a pause in it.** The author has since bounded
 what is left in `62f53e6`: the remaining gap on `had_in` is a **half-ALU** limit — a 128-point Hadamard
@@ -565,12 +630,12 @@ things still worth a build are ours or vLLM's: the dense BF16 GEMM that the chec
 quantize (§2.1) and the hyper-connection mixing kernel (§2.16). What that means for this item is that
 the bundle will not grow further from upstream — whatever is in it when it is built is what it is.
 
-It is no longer alone, and that is the point of the item. **The bundle now holds two things**:
-`had_in` at −0.2…0.3 % and the hyper-connection fusion kernel at −1.0…1.1 % (§2.16). Together they
-are worth about **−1.3 % of prefill** for one build and one arm — still small, and now large enough
-that the arm is worth scheduling rather than deferring. If the pre-transpose arm in §2.16 lands first,
-the bundle is worth −2.4 % and the calculation is no longer marginal. The rule the bundle exists to
-enforce: **do not spend a boot on a sub-1 % change**; accumulate them and spend one boot on the pile.
+**What is left in the bundle is ours, not upstream's.** `had_in` has shipped; the hyper-connection
+fusion kernel at −1.0…1.1 % (§2.16) has not, and it is now the only thing in the pile. If the
+pre-transpose arm in §2.16 lands it is worth −2.2 %, at which point it earns its own arm; below that
+it waits for company. The rule the bundle exists to enforce is unchanged: **do not spend a boot on a
+sub-1 % change**; accumulate them and spend one boot on the pile. The pile is also, as of production
+8, no longer growing from upstream.
 
 ### 2.20 This stack has no autostart, and the sibling's unit will win a reboot
 
@@ -616,6 +681,93 @@ the directory during a boot" from a rule into a property.
 What must not change: the 32-tensor sha256 sample still runs on every boot. The identity gate is a
 cheap early warning, not the proof — which is why it can be narrowed and must not be removed.
 
+### 2.22 A full-scope checkpoint: the biggest number on the stack, and it is a quality question
+
+**This is the largest single item anyone has put on this stack, and it is not a kernel.** Dense BF16
+GEMM is **45.3 % of a C1 decode step** ([10](10-results-and-roofline.md) §5.3) because our checkpoint
+is `scope: glm53_routed_experts_only`: attention, the shared experts and `lm_head` stay in BF16, so at
+M=8 that stage streams 16-bit weights beside a 4-bit routed half. Nothing in the plugin restricts
+that — `Exl3LinearMethod` binds to any dense linear that has EXL3 tensors present, and the dense GEMM
+is the same kernel that measures 101–128 % of its roofline at m=16–32 (over 100 % because a whole
+projection's trellis fits L2) `[reported]`.
+
+The arithmetic, the kernel author's on our measured numbers: the stage is weight-bandwidth-bound at
+M=8, so 4 bpw instead of 16 is ~4× less traffic — **42.9 ms → ~11 ms, about 32 ms off a 94.65 ms step,
+roughly +34 % single-stream** `[estimate]`. For scale, the entire `cuda-exl3` column of our ranked
+target table comes to about 5 %, and this repository has spent two days on levers worth 1 %.
+
+**The question is quality, not speed, and we already own the instrument.** Attention and the head are
+more sensitive than routed experts, which is presumably why the checkpoint is scoped this way — though
+ExLlamaV3 quantizes everything by default, so full-scope is the ordinary case rather than an exotic
+one, and mixed per-layer bitrates exist precisely for this. The head at vocab 154,880 is where to look
+for damage first. Our MMLU sample (1,995 questions, **86.4 ±0.7** against the NVFP4 sibling's 86.7) is
+the gate, so this is measurable rather than arguable.
+
+**Two routes, and the ordering matters.**
+
+**Route 1 — TP=2 with an existing full-scope checkpoint. Runs first.** `turboderp/GLM-5.3-Flash-exl3`
+at 4.05 bpw quantizes attention and `lm_head` as well. At TP=2 nothing needs padding — 32 heads and
+77,440 vocab rows per rank — so it answers the only question that matters with **no new machinery**:
+C1 and the MMLU sample, with the routed-experts-only checkpoint at the same TP as control. Planned;
+the download was running when this was written `[not tested]`. Its licence has not been verified
+against the repository yet ([01](01-model-and-license.md) §1).
+
+**Route 2 — TP=3, via `svh = 0` padded loading. Only if route 1's gate holds.** Our TP=3 geometry is
+what forced the scoped checkpoint: 64 heads and a 154,880 vocab do not split three ways, the launcher
+pads heads 64 → 66 and the vocab by 192 at load time, and `Exl3LinearMethod.create_weights` **correctly
+refuses to zero-extend an EXL3 tensor** — a trellis is not a dense tensor and zero-extending one is
+meaningless. That refusal should stay.
+
+The way through is the 2,304 sidecar trick one level up, and it rests on a property we validated
+together with the author for the padded `w13` columns: in `had128_warp_out` the output Hadamard runs
+**first** and `svh` scales elementwise **afterwards**, so zeroing `svh` on a padded output column makes
+that column exactly zero whatever the trellis behind it holds — guarded upstream by
+`test_exl3_moe_pad.py::test_padded_columns_are_exactly_zero`. A padded *input* dimension is the mirror
+case (`test_output_ignores_w2_padded_row_codes`): the padded activations are exact zeros, so the
+trellis rows behind them are don't-care. **A full-scope checkpoint quantized unpadded, loaded into a
+padded parameter with `svh = 0` on the pad, is therefore bit-exact with no re-quantization**
+`[reported]`.
+
+**One condition decides it, and our two tensors are not alike.** The Hadamard mixes *across* each
+128-column block, so zeroing `svh` kills the padded columns but their pre-Hadamard values still reach
+the real columns sharing their block. The pad must occupy **whole 128-column blocks**:
+
+| tensor | pad | in 128-column blocks | verdict |
+|---|---|---|---|
+| attention heads 64 → 66 | 2 heads × head_dim 128 = **256 columns** | exactly 2 whole blocks | **works as it stands** |
+| vocab, vLLM `padding_size=192` | 192 columns = 1.5 blocks | straddles a block shared with real vocab rows | **corrupts them** |
+| vocab, **`padding_size=384`** | 154,880 → 155,136 = **51,712 = 404 × 128 per rank** | whole blocks on every rank | **works** |
+
+So route 2 is, on our side, **a one-number change in the launcher** (`192` → `384`, = 3 × 128) plus a
+padded-load path the kernel author has offered to add behind a flag: accept an EXL3 tensor narrower
+than the parameter, place it, zero `svh` on the remainder, and refuse unless the pad is 128-aligned.
+The invariant already has a test. Nothing here needs a bespoke quantization run, which is what made
+this item look expensive for a week.
+
+**Next step, in order:** route 1's two numbers (C1, MMLU sample), posted either way. If the gate holds,
+ask for the flag and change the constant. If it does not, that is worth knowing before anyone else
+tries it, and this item closes with the scoped checkpoint standing.
+
+### 2.23 The remaining C1 idle: 3.75 %, and the four things inside it
+
+Superseding the "+6 % from CUDA graphs" line this page used to carry (§1.10). The corrected budget at
+C1 is **3.477 ms of a 92.64 ms profiler-off step = 3.75 %**, and it is the *whole* ceiling — a perfect
+fix returns 57 → 59.1 tok/s. Ranked by expected value against that base
+([10](10-results-and-roofline.md) §5.8):
+
+| # | fix | C1 gain | C8 gain | notes |
+|---|---|---|---|---|
+| 1 | **Fuse the glue kernels** (717 of the boundaries sit in front of norm / elementwise / copy) | 0.6–1.0 ms (0.6–1.1 %) | 0.5–0.9 ms | `compilation mode NONE` today — torch.compile is off entirely, so nothing is fused. The blocker is that PIECEWISE silently disables spec-decode (vLLM #53030) and the drafter's own speculator declares PIECEWISE unsupported, so this is an **experiment** (compile the target model, keep `cudagraph_mode=NONE`), not a config change |
+| 2 | **De-serialise `prepare_inputs` at the step head** | 0.4–0.6 ms (0.45–0.65 %) | ~0 | **the cheapest.** The step's first 1.08 ms runs at **11.7 % GPU occupancy**: four rounds of eager `aten` ops with a pinned H2D each, then a `torch.compile` region that already operates on a deliberately *stale* confidence copy — so it has no dependency and can move into the previous step's shadow. No backend change, fp8 draft KV kept |
+| 3 | **Pinned/async the verify→draft D2H, drop the `nonzero`** | 0.15–0.25 ms | 0.20–0.30 ms | one `Memcpy DtoH (Device → Pageable)` — synchronous by definition — then `cudaStreamSynchronize` and host bookkeeping. It is the single structural gap left at C8 (8.2 % of that idle) |
+| 4 | **FULL CUDA graph for the 8-token verify batch** | 1.4–1.9 ms (1.5–2.1 %) | 1.0–1.6 ms | needs an attention backend declaring `UNIFORM_BATCH` **and** fp8 draft KV. Three routes: raise FlashInfer's fixed-`qo_len` paged-decode wrapper to `UNIFORM_BATCH` (upstream, unverified); give the drafter a Triton backend that supports fp8 KV and declares it (draft accuracy re-gated); or return to bf16 draft KV, which is ready, costs 5.6 % of pool, and **has already been tried — same 57 tok/s.** Comes *after* #1, since a graph replays whatever kernel count #1 leaves |
+| — | draft collective overlap | up to 1.4 ms | up to 2.6 ms | not an idle item at all; it is §2.17's lever seen from the drafter's side (11 all-reduce/step at 133 µs, latency-bound, overlap measured at 0.014 ms) |
+
+1–4 do not add cleanly (1 and 4 target the same boundaries). **Realistic total: 1.0–1.5 ms/step =
++1.1…1.6 % single-stream** `[estimate]`. Every one of them is vLLM-side work, and none is worth a boot
+on its own — this is a bundle item like §2.19, and the honest summary is that **single-stream on the
+current checkpoint scope is close to its floor**. The lever that is not close to its floor is §2.22.
+
 ---
 
 ## 3. Never run
@@ -628,8 +780,9 @@ cheap early warning, not the proof — which is why it can be narrowed and must 
 | **The newer checkpoint revision** (`aba59d21`, four days newer than the one we pinned) | Not tested. |
 | **`NCCL_MAX_NCHANNELS=8` on the NVFP4 stack** | Same plugin, same fabric, same TP=3, so it should transfer — one line per node, reversible. Not applied there. |
 | **The mesh plugin patches on the NVFP4 stack** | The idle second cable and the host bounce buffer are properties of the fabric and the plugin, not of the quantization, so both should transfer and are worth more there than the channel cap. Not applied. |
-| **A torch-profiler run on the production configuration** | The engine was launched without `--profiler-config`, `/start_profile` returns 404 and this `nsys` cannot attach, so the step breakdown in [10](10-results-and-roofline.md) §5 is a reconciliation with a 2.8 % residual rather than a direct profile. It would settle the NCCL band (14–17 % of prefill) and the C8 decode split. Cost: one boot, and a launcher flag set before you need it. |
-| **The MLA prefill kernel's efficiency** | 8.2 % of a prefill chunk, and the trace does not carry the selected-key count, so there is no denominator. Needs its own model-free measurement before anyone calls it a target. |
+| **KDA linear attention's efficiency** | 8.1 % of a prefill chunk and 8.0 % of a C8 step, triton chunked scans, never measured against a ruler. It inherits the empty-denominator slot MLA prefill just vacated. |
+| **A profiler-off re-run of the same decode window** | The CUPTI subtraction that turns 5.45 ms of C1 idle into 3.47 ms is an inference from two walls (§1.10), not a direct measurement. Separating it cleanly needs the profiler off and the window re-opened: one boot, and the answer would move a 3.75 % figure by a fraction of itself. |
+| **`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw, at any TP** | The full-scope checkpoint §2.22 is built on. Downloading, not yet loaded, licence not yet verified. Its C1 and MMLU numbers are the experiment that decides the largest item on this stack. |
 | **`NCCL_ALGO=Ring,Tree` on the engine** | Swept model-free and unresolved there: better on the decode-step proxy, worse on `sendrecv` at 64 MB, and inside the sweep's own repeat spread. Settling it needs a five-round engine arm, at an expected −1…3 % of a decode step. `Tree` is measured and rejected; `Ring` stays. §2.2 item 5, [06](06-nccl-mesh.md) §12.2. |
 | **`gpu-memory-utilization 0.83`** | Designed, costed at ~+11.8 % of pool for ~3.7 GiB of host headroom, and reversible in one line — but it is a production memory change and it waits on the stack owner. §2.4. |
 | **Whether a second-stream all-reduce overlaps a GEMM at all on this part** | The probe is written and has not been run. It gates every overlap variant in §2.17, and it costs one engine-down bench. |

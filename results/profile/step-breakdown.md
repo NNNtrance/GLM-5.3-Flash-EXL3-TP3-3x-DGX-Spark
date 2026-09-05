@@ -8,6 +8,15 @@ tokens, 5 September 2026. `[measured-here]`
 
 Narrative: [`../../docs/10-results-and-roofline.md`](../../docs/10-results-and-roofline.md) §4–§6.
 
+> **§3 and §4 of this file are superseded by
+> [`measured-prod7.md`](measured-prod7.md)**, which is a torch-profiler trace of the live server
+> rather than the reconciliation described below. Read that one for "where does a step go". Three of
+> the rows here are wrong by more than their stated ±3 %: `exl3_moe_combine` (1.5 % → the kernel does
+> not exist in this build), `_zero_kv_blocks` (1.3 % → 0.09 %), and the DFlash2 drafter's share of a
+> C1 step (19.5 % → 11.4 %). The prefill chunk is also **1,792 tokens, not 2,048**.
+> §1, §2 and §5–§8 are model-free or live-server measurements that stand on their own and are
+> unaffected.
+
 **Method, and its caveat.** The engine was launched without `--profiler-config`, so `/start_profile`
 returns 404 and this `nsys` cannot attach to a live process; a profiling boot was not available. The
 breakdown is therefore a reconciliation of three sources: structure from an earlier torch-profiler

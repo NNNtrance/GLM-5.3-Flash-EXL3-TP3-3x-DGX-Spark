@@ -489,4 +489,45 @@ so changing any one of these fourteen steps — including only editing a comment
 never set — invalidates the sidecar on every node ([09](09-measurement-protocol.md) §11,
 [11](11-open-issues.md) §2.21).
 
+## 12. One launcher, one copy — and the switch it was missing
+
+The prelude above is mounted from a directory; the launcher that mounts it is a single file, and for
+two days there were **two of it**. A working copy on the nodes had grown a `--profiler-config` arm; a
+second copy in the same tree, one day older, had not, and had never had the settle gate, the fast-load
+mounts or the conditional prelude arms either. Nothing pointed at the older one, nothing depended on
+it, and it stayed readable and plausible. The cost was not a wrong boot — it was that
+[10](10-results-and-roofline.md) §5 spent a week as a *reconciliation* with a 2.8 % residual, because
+`/start_profile` answered **404** on the running engine and reconfiguring it needed a boot nobody
+would spend. When the flag finally went in, the trace deleted two of that section's ranked targets in
+an afternoon.
+
+Two rules, both cheap:
+
+**One launcher, one copy.** Whatever machinery a stack keeps — patch directories, sidecar builders,
+env templates — the file that assembles the `docker run` is the one that must never be duplicated. It
+is the file most likely to be edited under time pressure, the one whose divergence is hardest to see
+(both copies run; both produce a server), and the one whose drift is silently inherited by every
+measurement afterwards. If a second copy exists, it is not a backup, it is a coin flip. The stale copy
+here was retired rather than merged, and the arm was ported forward.
+
+**Carry the profiler arm in production, off by default.** `scripts/start-tp3.sh` reads `PROFILER_DIR`
+and, when it is set, passes:
+
+```
+--profiler-config {"profiler":"torch","torch_profiler_dir":"<dir>",
+                   "torch_profiler_with_stack":false,"ignore_frontend":true}
+```
+
+Unset, it appends nothing and costs nothing. Set, `POST /start_profile` and `POST /stop_profile`
+answer 200 on a **running** engine and each rank drops its own trace — so the most informative
+measurement on this stack becomes a six-minute window rather than a boot. Note that this vLLM takes
+the setting **only** as `--profiler-config`; `VLLM_TORCH_PROFILER_DIR` alone leaves the route
+unattached and the endpoint answering 404, which is the exact failure that cost the week
+([09](09-measurement-protocol.md) §4.1).
+
+The general form is the same one the settle gate taught in §5.1 and the rulers taught in
+[10](10-results-and-roofline.md) §4.1: **the instrument has to be in place before the question is
+asked**, because by the time the question is interesting, the cost of installing the instrument is
+exactly what stops you answering it.
+
 Open items and retractions from this page are carried in [11](11-open-issues.md).

@@ -141,6 +141,61 @@ cost **five minutes between them** `[measured-here]`.
 
 The harness is in `bench/`; `bench/validate.sh <image-tag>` runs the whole battery.
 
+### 4.1 When the engine is the only place to look: profile it, and verify the profiler
+
+Some questions have no model-free form. "Where does a step go" is one: it needs real routing, real
+collectives and the real scheduler, and every attempt to answer it by carrying model-free ratios onto
+a wall-clock total produced numbers that a later trace corrected — two of them by more than 10×
+([10](10-results-and-roofline.md) §5). Four things make that measurement cheap and correct.
+
+**1. Set the flag before you need it.** This vLLM takes the profiler as `--profiler-config`, **not**
+as `VLLM_TORCH_PROFILER_DIR` (`vllm/config/profiler.py`). With the environment variable alone the
+`/start_profile` route is never attached and the endpoint answers **404** — and since the engine
+cannot be reconfigured without a boot, that 404 is what postponed this stack's step-time breakdown by
+a week. `scripts/start-tp3.sh` now carries the arm, off unless `PROFILER_DIR` is set:
+
+```bash
+PROFILER_DIR=/cache/prof ./start-tp3.sh 0
+# then, against the running server, with no restart:
+curl -X POST http://<head>:8001/start_profile      # -> 200
+#   ... drive the window: a fresh long prompt, or N seconds of steady decode ...
+curl -X POST http://<head>:8001/stop_profile       # -> 200
+```
+
+Each rank drops its own `*.pt.trace.json.gz` plus a `profiler_out_0.txt` under that directory. An
+unset `PROFILER_DIR` costs nothing at run time, so there is no reason for a production boot not to
+carry it. `torch_profiler_with_stack: false` keeps the traces to tens of MB and costs only the Python
+frame names, which the `cpu_op` names (`vllm::all_reduce`, `vllm::moe_forward_shared`,
+`Torch-Compiled Region`, `aten::pin_memory`) largely replace.
+
+**2. Measure the profiler's own cost, in the same windows.** Run each window twice, once with the
+profiler off. On this stack the overhead is **0 % on prefill, +2.5 % on C1, +1.3 % on C8**, which is
+what licenses carrying the *shares* onto a profiler-free engine.
+
+**3. Subtract CUPTI before you believe an idle number.** The overhead is not spread evenly — it lands
+on kernel boundaries, at roughly **1 µs per boundary**. A decode step here launches ~2,300 kernels
+across ~1,873 gaps, so the tracer alone manufactures ~2.0 ms of apparent GPU idle. Uncorrected, a
+3.75 % idle budget reads as 5.8 %, and a target that is worth +1.5–2 % reads as worth +6 %. **Take
+`busy(union)` from the trace, take the wall from the profiler-off run, and let the difference be the
+idle** — do not read the idle out of the trace directly. Both of this repository's published
+retractions about GPU idle come from skipping that step ([10](10-results-and-roofline.md) §5.8).
+
+**4. Two trace-reading traps, both of which produce confident nonsense.** In decode the per-step
+`gpu_user_annotation` arrives as an **overlapping pair** — merge them, or your step count doubles and
+you will report a 50 % GPU bubble. And when matching a gap to the launch that follows it, include
+**`cuda_driver`** launches, not only `cuda_runtime`: triton and inductor kernels are launched through
+the driver API, and filtering them mislabels the two largest gaps in a step as device-side waits.
+
+A useful accident on this stack: the drafter runs **outside** the step annotation, so the annotation
+boundary is an exact target-versus-draft split, free of charge. That is what corrected the k=7
+drafter's cost from 19.5 % of a C1 step to 11.4 %.
+
+**What it costs.** About six minutes of GPU time for a baseline plus three windows, ~120 MB of trace
+per node, and — measured, and unreturned until the container restarts — **7–8 GiB of host RAM per
+node**, most plausibly kineto's activity buffers inside the worker process. On a stack whose rule is
+never to go below 4 GiB free, plan the profile run when the host has room, and watch the free-RAM
+line afterwards `[measured-here]`.
+
 ---
 
 ## 5. The gates come before the numbers

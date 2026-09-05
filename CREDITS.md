@@ -381,10 +381,6 @@ offered upstream with its description in `patches/kernel/0003-PR-DESCRIPTION.md`
 
 We vendor no files from either of these. What we took is practice and arithmetic, and we say which.
 
-### See also
-
-- `MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks` (MIT) — a two-node EXL3 recipe for the same model. No code or numbers were taken from it; listed for readers comparing two-node setups. Its expert-sharding overlay does not apply at TP=3.
-
 ### `FlyCockpit/GLM-5.3-Flash-EXL3-3x-DGX-Sparks`
 
 - **Licence:** **MIT** — confirmed. 1 star.

@@ -10,7 +10,7 @@ elsewhere.
 
 Seven things we wrote down as findings and later measured properly, plus two smaller ones, plus the
 step-time breakdown that a real profiler run corrected in three places (§1.10), plus a full audit of
-every claim of ours that a later measurement overturned (§1.9 — **28 of them**). Each was published —
+every claim of ours that a later measurement overturned (§1.9 — **31 of them**). Each was published —
 in a report, an upstream issue, or both — before it was corrected. Two of them (§1.6 and §1.7) are the
 same number, corrected twice, in opposite directions.
 
@@ -122,10 +122,11 @@ overhead in the same windows; and never read an idle figure straight out of a tr
 ### 1.9 The full audit: every claim of ours that a measurement overturned
 
 On 5 September the whole stack was re-read against its own raw data, and every published claim was
-checked against the evidence behind it. Twenty-eight did not survive — three of them to a single
-profiler run the same evening, after the step-time breakdown they came from had stood for a week. The
-ten above are the ones with a story worth telling; this table is the complete list, so that nothing is
-quietly dropped and so the shape of the mistakes is visible in one place `[retracted]`.
+checked against the evidence behind it. Thirty-one did not survive — three of them to a single
+profiler run the same evening, after the step-time breakdown they came from had stood for a week, and
+three more to the full-scope arm that closed the same day. The ten above are the ones with a story
+worth telling; this table is the complete list, so that nothing is quietly dropped and so the shape of
+the mistakes is visible in one place `[retracted]`.
 
 | # | What we claimed | What the measurement says | Where |
 |---|---|---|---|
@@ -157,14 +158,23 @@ quietly dropped and so the shape of the mistakes is visible in one place `[retra
 | 26 | `exl3_moe_combine` is 1.5 % of a prefill chunk, ranked target #10 | The kernel **does not exist** in this build; it is fused into the down-projection epilogue. 0 % | §1.10 |
 | 27 | `_zero_kv_blocks` costs 14.7 ms per chunk, ranked target #8 | **0.857 ms, 0.09 %** on the live production configuration — 16× over | §1.10 |
 | 28 | 5.45 ms of C1 GPU idle, and CUDA graphs would return ~6 % of single-stream | ~2.0 ms of it is the profiler; the real budget is 3.75 % and graphs are worth **1.5–2.1 %**. 77 % of the idle is per-kernel dispatch, not the host | §1.10 |
+| 29 | The checkpoint is `routed_experts_only` because attention and the head are quality-sensitive, so the dense stage is a **quality choice** | It was a **loader limitation**. Two lines in vLLM's `glm5next` model file pin the attention stack to BF16 whatever the weights hold (`model.py:331`, `kda.py:171-174`), locking **72.8 %** of the dense traffic, so no checkpoint of any scope could have used it | §2.22, [13](13-full-scope-checkpoint.md) §2.2 |
+| 30 | Draft acceptance drops on a quantized target — an early full-scope probe read 45.5 → 39.2 % and 48.0 → 34.4 %, "which would eat part of the speed gain" | **It does not.** Over three sweep rounds acceptance is 61–65 % against the control's 62–63 %, and accepted length 5.3–5.6 against 5.3–5.4. The signal was a cold single-prompt probe with a sample of one; it was reported upstream before the sweep ran | §2.22, [13](13-full-scope-checkpoint.md) §4.1 |
+| 31 | Full scope is "+9.5 % aggregate / +25 % per stream" against a control C1 of "54.7 / 54.3" | Transcription, not measurement: 54.7 is the control's **per-stream** median and 54.3 its round-3 per-stream value; the aggregate median is **47.40**. Like for like it is **+26.4 % aggregate, +24.3 % per stream**. Posted upstream in the wrong form | [10](10-results-and-roofline.md) §2.2 |
 
-Read the shape rather than the rows. **Seven of the twenty-eight are a ruler we quoted instead of
-measured** (1, 2, 3, 4, 15, 25, and the roofline percentages that followed). **Four are a single pair
-of sweeps treated as a result** (9, 10, 16, 19). **Three are an arithmetic model that a bench refuted**
-(5, 6, 24). **Three are a model-free measurement carried onto the production path without checking
-that the path still had it** (26, 27, and the drafter row behind 28). **Two are our own tooling
-disagreeing with our own documentation** (16, 18). Only one (17) is a provenance claim, and it is
-still open.
+Read the shape rather than the rows. **Seven of the thirty-one are a ruler we quoted instead of
+measured** (1, 2, 3, 4, 15, 25, and the roofline percentages that followed). **Five are a single pair
+of sweeps, or a single probe, treated as a result** (9, 10, 16, 19, 30). **Three are an arithmetic
+model that a bench refuted** (5, 6, 24). **Three are a model-free measurement carried onto the
+production path without checking that the path still had it** (26, 27, and the drafter row behind 28).
+**Two are our own tooling disagreeing with our own documentation** (16, 18). One (29) is a mechanism
+we attributed to somebody else's judgement without checking whether the code would even allow the
+alternative. Only one (17) is a provenance claim, and it is still open.
+
+Row 31 is the only one in the table that is not a measurement error at all — the raw sweep was right
+and the summary was wrong. It is here because a number that leaves this repository is a published
+number whatever produced it, and because the failure it represents is common and cheap to avoid:
+**two columns of a table with the same unit in the header and different units in the cells.**
 
 And row 28 adds a category of its own with exactly one member so far: **the instrument's own cost
 booked as a finding.** A profiler that charges 1 µs per kernel boundary, on a step with 1,873 of
@@ -196,11 +206,13 @@ somebody's cuBLAS/vLLM work and is worth ~3.1 % of prefill `[measured-here]`.
 
 The obvious answer — a checkpoint that also quantizes attention — used to be filed as "the one that
 cannot run at TP=3", because with attention quantized there is no unquantized dimension left to split
-three ways ([01](01-model-and-license.md) §3.1). **That is no longer the state of it.** The measured
-profile put a number on the prize (~+34 % single-stream), the kernel author supplied a mechanism that
-does not need a bespoke quantization run, and one of the two blockers turns out to be a single
-constant in our launcher. It is now a live experiment with an ordering, and it has its own item:
-**§2.22**, which is where the next work on this stack goes.
+three ways ([01](01-model-and-license.md) §3.1). **That is no longer the state of it.** It has now
+been run at **TP=2** and it is worth **+24.3 % per stream with the quality gate passed and draft
+acceptance unchanged** `[measured-here]`. Two of the three blockers were never about parallelism at
+all — the model class declares no `packed_modules_mapping`, and the model file pins attention to
+BF16 — and the third, at TP=3, is a single constant in our launcher plus a padded-load path the
+plugin author has agreed to add. It has its own item, **§2.22**, and its own page,
+[13](13-full-scope-checkpoint.md); that is where the next work on this stack goes.
 
 ### 2.2 The fabric: what is actually left, now that the ceiling is right
 
@@ -681,72 +693,87 @@ the directory during a boot" from a rule into a property.
 What must not change: the 32-tensor sha256 sample still runs on every boot. The identity gate is a
 cheap early warning, not the proof — which is why it can be narrowed and must not be removed.
 
-### 2.22 A full-scope checkpoint: the biggest number on the stack, and it is a quality question
+### 2.22 A full-scope checkpoint: the quality gate passed, and the open item is now the TP=3 port
 
-**This is the largest single item anyone has put on this stack, and it is not a kernel.** Dense BF16
-GEMM is **45.3 % of a C1 decode step** ([10](10-results-and-roofline.md) §5.3) because our checkpoint
-is `scope: glm53_routed_experts_only`: attention, the shared experts and `lm_head` stay in BF16, so at
-M=8 that stage streams 16-bit weights beside a 4-bit routed half. Nothing in the plugin restricts
-that — `Exl3LinearMethod` binds to any dense linear that has EXL3 tensors present, and the dense GEMM
-is the same kernel that measures 101–128 % of its roofline at m=16–32 (over 100 % because a whole
-projection's trellis fits L2) `[reported]`.
+**Still the largest single item on this stack, but it is no longer an estimate and it is no longer a
+quality question.** Dense BF16 GEMM is **45.3 % of a C1 decode step**
+([10](10-results-and-roofline.md) §5.3) because our checkpoint is
+`scope: glm53_routed_experts_only`. On 5 September a full-scope checkpoint
+(`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw, MIT) was loaded at TP=2 and measured against the
+production checkpoint on the same stack `[measured-here]`:
 
-The arithmetic, the kernel author's on our measured numbers: the stage is weight-bandwidth-bound at
-M=8, so 4 bpw instead of 16 is ~4× less traffic — **42.9 ms → ~11 ms, about 32 ms off a 94.65 ms step,
-roughly +34 % single-stream** `[estimate]`. For scale, the entire `cuda-exl3` column of our ranked
-target table comes to about 5 %, and this repository has spent two days on levers worth 1 %.
+| | full scope | experts-only control | delta |
+|---|---|---|---|
+| C1 per stream | **68.00** tok/s | 54.69 | **+24.3 %** |
+| C1 aggregate | **59.93** tok/s | 47.40 | **+26.4 %** |
+| C2 / C4 aggregate | 83.02 / 111.05 | 68.03 / 90.66 | +22.0 / +22.5 % |
+| draft acceptance, accepted length | 63.14 %, 5.42 | 64.08 %, 5.49 | unchanged |
+| gates, cold and warm | 10/10 · 12/12 | 10/10 · 12/12 | equal |
+| MMLU sample (1,995 q) | **86.32 ±0.75** | 86.4 ±0.7 | inside the bar |
 
-**The question is quality, not speed, and we already own the instrument.** Attention and the head are
-more sensitive than routed experts, which is presumably why the checkpoint is scoped this way — though
-ExLlamaV3 quantizes everything by default, so full-scope is the ordinary case rather than an exotic
-one, and mixed per-layer bitrates exist precisely for this. The head at vocab 154,880 is where to look
-for damage first. Our MMLU sample (1,995 questions, **86.4 ±0.7** against the NVFP4 sibling's 86.7) is
-the gate, so this is measurable rather than arguable.
+Per step: 100.4 ms → **79.7 ms**. The estimate this item carried was 42.9 ms → ~11 ms, about +34 %;
+**65 % of it arrived**, and the difference is the part this checkpoint leaves in BF16 anyway (KDA
+`in_proj_bfg_a`, `f_b_proj`, `g_b_proj`, `kv_b_proj`, `indexer.wk_weights_proj`, three `conv1d`). The
++34 % is not refuted — it was an upper bound. Full story, including the loader work:
+[13](13-full-scope-checkpoint.md).
 
-**Two routes, and the ordering matters.**
+**Two things this closed, and one of them is a retraction.** The gate is passed: a **6-bit `lm_head`**
+at vocab 154,880, the one place we had flagged for damage, cost nothing measurable. And the premise of
+this item was wrong: it was never a quality decision by the publisher. Two lines in vLLM's `glm5next`
+model file pin the attention stack to BF16 whatever the weights hold, and they lock **72.8 %** of the
+dense traffic — so `routed_experts_only` was the only scope that could load at all (§1.9 row 29).
 
-**Route 1 — TP=2 with an existing full-scope checkpoint. Runs first.** `turboderp/GLM-5.3-Flash-exl3`
-at 4.05 bpw quantizes attention and `lm_head` as well. At TP=2 nothing needs padding — 32 heads and
-77,440 vocab rows per rank — so it answers the only question that matters with **no new machinery**:
-C1 and the MMLU sample, with the routed-experts-only checkpoint at the same TP as control. Planned;
-the download was running when this was written `[not tested]`. Its licence has not been verified
-against the repository yet ([01](01-model-and-license.md) §1).
+**What is now open is the TP=3 port, and it has four parts.**
 
-**Route 2 — TP=3, via `svh = 0` padded loading. Only if route 1's gate holds.** Our TP=3 geometry is
-what forced the scoped checkpoint: 64 heads and a 154,880 vocab do not split three ways, the launcher
-pads heads 64 → 66 and the vocab by 192 at load time, and `Exl3LinearMethod.create_weights` **correctly
-refuses to zero-extend an EXL3 tensor** — a trellis is not a dense tensor and zero-extending one is
-meaningless. That refusal should stay.
+**On our side, three of them, all arithmetic or one patch:**
 
-The way through is the 2,304 sidecar trick one level up, and it rests on a property we validated
-together with the author for the padded `w13` columns: in `had128_warp_out` the output Hadamard runs
-**first** and `svh` scales elementwise **afterwards**, so zeroing `svh` on a padded output column makes
-that column exactly zero whatever the trellis behind it holds — guarded upstream by
-`test_exl3_moe_pad.py::test_padded_columns_are_exactly_zero`. A padded *input* dimension is the mirror
-case (`test_output_ignores_w2_padded_row_codes`): the padded activations are exact zeros, so the
-trellis rows behind them are don't-care. **A full-scope checkpoint quantized unpadded, loaded into a
-padded parameter with `svh = 0` on the pad, is therefore bit-exact with no re-quantization**
-`[reported]`.
+| item | today | needed |
+|---|---|---|
+| vocab padding | `padding_size=192` → 51,648 = **403.5** × 128 per rank | **`padding_size=384`** → 155,136, 51,712 = 404 × 128. One launcher constant |
+| shared expert intermediate | 2048 → **2112** → 704 = **5.5** × 128 per rank | **2304** → 768 = 6 × 128. Note **2176 is wrong**: 128-aligned but not divisible by three; the width must be a multiple of `lcm(128, 3) = 384` |
+| KDA tuple-shard split (**A9**) | splits the checkpoint's single 24,576-wide `qkv_proj` by the module's **padded** width; segment 1 reads from the wrong offset and segment 2 overflows | split by the checkpoint's real per-shard width, let the existing zero-pad widen each rank's slice. **Not written, never run** `[not tested]` |
 
-**One condition decides it, and our two tensors are not alike.** The Hadamard mixes *across* each
-128-column block, so zeroing `svh` kills the padded columns but their pre-Hadamard values still reach
-the real columns sharing their block. The pad must occupy **whole 128-column blocks**:
+Today's 2112 fails in two different ways at once, which is why it is worth naming: `down_proj` at
+k=704 hits the plugin's explicit refusal (loud), and `gate_up_proj` gets a half-block output pad where
+there is only a warning (**silent**). One line fixes both.
+
+**On the plugin author's side, the padded-load path**, which is the actual blocker: `linear.py:89-94`
+hard-refuses a padded vocab for an EXL3 head, and this checkpoint has **no BF16 head** to fall back
+on. Three things were asked for and agreed — the padded-load path for the vocab-parallel head, a
+"refuse unless the pad is 128-aligned" gate, and coverage of the input-dim (row-parallel `suh`) case,
+which narrows on its own and would overrun on the last rank's `o_proj`. A fourth was asked and is
+**answered**: the author swept **all 65,536** trellis codes through the device decoder on all three
+codebooks — zero non-finite values, bounded ranges — so a zero pad trellis multiplied by `svh = 0`
+cannot produce NaN `[reported]`. He was waiting on the quality gate before building the rest; **the
+gate has passed and the word has been sent.**
+
+The mechanism itself is not new and it is not hypothetical: in `had128_warp_out` the output Hadamard
+runs **first** and `svh` scales elementwise **afterwards**, so zeroing `svh` on a padded output column
+makes that column exactly zero whatever the trellis holds — guarded upstream by
+`test_exl3_moe_pad.py::test_padded_columns_are_exactly_zero`, mirrored for padded input dims by
+`test_output_ignores_w2_padded_row_codes`. The condition is that the pad occupies **whole 128-column
+blocks**, because the Hadamard mixes across each block:
 
 | tensor | pad | in 128-column blocks | verdict |
 |---|---|---|---|
 | attention heads 64 → 66 | 2 heads × head_dim 128 = **256 columns** | exactly 2 whole blocks | **works as it stands** |
-| vocab, vLLM `padding_size=192` | 192 columns = 1.5 blocks | straddles a block shared with real vocab rows | **corrupts them** |
-| vocab, **`padding_size=384`** | 154,880 → 155,136 = **51,712 = 404 × 128 per rank** | whole blocks on every rank | **works** |
+| KDA `in_proj_qkv`, per shard | 256 columns | 2 blocks | **works as it stands** |
+| vocab, `padding_size=192` | 192 columns = 1.5 blocks | straddles a block shared with real vocab rows | **corrupts them** |
+| vocab, **`padding_size=384`** | 155,136 → 51,712 = 404 × 128 per rank | whole blocks on every rank | **works** |
 
-So route 2 is, on our side, **a one-number change in the launcher** (`192` → `384`, = 3 × 128) plus a
-padded-load path the kernel author has offered to add behind a flag: accept an EXL3 tensor narrower
-than the parameter, place it, zero `svh` on the remainder, and refuse unless the pad is 128-aligned.
-The invariant already has a test. Nothing here needs a bespoke quantization run, which is what made
-this item look expensive for a week.
+**And one open risk that is not about correctness at all: the KV pool.** At TP=2 the full-scope
+checkpoint consumed **~10 GiB more per node** than experts-only despite being 10 GiB smaller on disk,
+which is what forced that arm down to `max_model_len 65,536` and a 31k pool. If the same overhead is
+replicated rather than divided at TP=3, the pool goes from 4.70 M to roughly **3.4 M, −27 %**
+`[estimate]` — which would put the 1M-context claim in question. The leading suspect is the plugin's
+per-module `ops.reserve` workspace (EXL3 dense linears per rank go from 1 to 203), and **it has not
+been measured** `[not tested]`. That measurement comes before the boot, not after
+([13](13-full-scope-checkpoint.md) §6.2, §7.3).
 
-**Next step, in order:** route 1's two numbers (C1, MMLU sample), posted either way. If the gate holds,
-ask for the flag and change the constant. If it does not, that is worth knowing before anyone else
-tries it, and this item closes with the scoped checkpoint standing.
+**Next step, in order:** measure the memory arithmetic model-free; write A9; move the launcher
+constants; copy the checkpoint to the third node; re-dump the fast-load sidecar; then one TP=3 arm
+against the 19-point acceptance list in [13](13-full-scope-checkpoint.md) §7.3. The padded-load flag
+from the plugin gates the whole thing.
 
 ### 2.23 The remaining C1 idle: 3.75 %, and the four things inside it
 
@@ -782,7 +809,10 @@ current checkpoint scope is close to its floor**. The lever that is not close to
 | **The mesh plugin patches on the NVFP4 stack** | The idle second cable and the host bounce buffer are properties of the fabric and the plugin, not of the quantization, so both should transfer and are worth more there than the channel cap. Not applied. |
 | **KDA linear attention's efficiency** | 8.1 % of a prefill chunk and 8.0 % of a C8 step, triton chunked scans, never measured against a ruler. It inherits the empty-denominator slot MLA prefill just vacated. |
 | **A profiler-off re-run of the same decode window** | The CUPTI subtraction that turns 5.45 ms of C1 idle into 3.47 ms is an inference from two walls (§1.10), not a direct measurement. Separating it cleanly needs the profiler off and the window re-opened: one boot, and the answer would move a 3.75 % figure by a fraction of itself. |
-| **`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw, at any TP** | The full-scope checkpoint §2.22 is built on. Downloading, not yet loaded, licence not yet verified. Its C1 and MMLU numbers are the experiment that decides the largest item on this stack. |
+| **`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw, at TP=3** | Loaded and measured at **TP=2** on 5 September — C1, gates and MMLU all in ([13](13-full-scope-checkpoint.md)), licence verified as MIT. At TP=3 it needs a padded-load path for the head that does not exist yet, our A9 patch, two launcher constants and a copy of the checkpoint on the third node. §2.22. |
+| **The full-scope arm's prefill throughput and C6/C8, and its KV pool at a comparable `max_model_len`** | Not measurable in that arm: the pool came out at 31,343 tokens and prompts above ~2,000 tokens were never scheduled. Every prefill and high-concurrency figure for full scope is therefore absent rather than bad ([13](13-full-scope-checkpoint.md) §6.1). |
+| **Whether the full-scope checkpoint's ~10 GiB per node of extra memory is replicated or divided across ranks** | The single number that decides whether TP=3 keeps a 4.7 M pool or drops to ~3.4 M. Measurable model-free, and it has not been measured. §2.22, [13](13-full-scope-checkpoint.md) §6.2. |
+| **`mtp.safetensors`, the MIT-licensed MTP drafter that ships with that checkpoint** | 3.79 GB, not in the index, never read by vLLM. It is a candidate replacement for DFlash2 whose licence would transfer to a reader, unlike ours ([01](01-model-and-license.md) §4). Not evaluated. |
 | **`NCCL_ALGO=Ring,Tree` on the engine** | Swept model-free and unresolved there: better on the decode-step proxy, worse on `sendrecv` at 64 MB, and inside the sweep's own repeat spread. Settling it needs a five-round engine arm, at an expected −1…3 % of a decode step. `Tree` is measured and rejected; `Ring` stays. §2.2 item 5, [06](06-nccl-mesh.md) §12.2. |
 | **`gpu-memory-utilization 0.83`** | Designed, costed at ~+11.8 % of pool for ~3.7 GiB of host headroom, and reversible in one line — but it is a production memory change and it waits on the stack owner. §2.4. |
 | **Whether a second-stream all-reduce overlaps a GEMM at all on this part** | The probe is written and has not been run. It gates every overlap variant in §2.17, and it costs one engine-down bench. |

@@ -308,6 +308,12 @@ engine down; every conclusion drawn from two engine sweeps alone has since been 
 protocol setting we rejected without spending a boot, and the per-kernel comparison that retired one
 of our own patches, cost five minutes between them.
 
+Tier A is not only for kernels. **A change to the weight loader has its own tier-A test** — a
+meta-device instantiation of the real model class, walked through the real `load_weights` against the
+checkpoint's index, counting unmapped and unfilled tensors. It needs no GPU, no weights and no boot,
+and it is the only cheap test that catches the failure that loads cleanly and computes the wrong
+thing. §11.3.
+
 **Tier B is the workhorse, and it has a gap you must state.** It does not run the category probe or
 the mixed-load probe, so an arm measured at tier B has **no** prose/code/math/JSON numbers and **no**
 mixed-load numbers. Say `[not tested]` rather than carrying the previous arm's figures forward
@@ -393,6 +399,71 @@ The narrower gate this argues for — hashing only the patches that can affect a
 the prelude's ordered list of calls rather than its full text — is written up as an open item in
 [11](11-open-issues.md) §2.21. Until it exists, the rule is the one above: budget the dump boot, or
 do not touch the patches.
+
+### 11.2 Between a dump and a load, the patch directory is frozen — including additions
+
+§11 is about *editing* a patch. This is the case that caught us, and it is narrower and easier to
+walk into: **adding a file.**
+
+An experimental patch was written for a side arm and placed in the TP=3 patch directory, with an
+environment-gated call added to the prelude. Neither changes production behaviour by a byte — the
+hook does nothing with the flag unset, and the patch is never called at TP=3. Both change the
+**identity**. The next production restore was refused on all three nodes:
+
+```text
+preflight-fastload: sidecar stale - boot refused
+  patches.patch-fullscope-tp2.py: recorded='<none>' now='bca9a201...'
+  patches.tp3-prelude.sh:         recorded='e17d46a4...' now='5eba79f3...'
+```
+
+**That is the design working, and it should not be softened.** A sidecar is pre-processed weights
+belonging to a specific set of code; using one whose code has changed is exactly how a stack serves
+fluent wrong answers. But it cost a restore, at the end of an arm, when production was already down.
+
+The rule, in three lines:
+
+1. **Experimental patches live in their own directory**, not the one the prelude hashes. If two
+   places need the same file, **hard-link it** rather than copying it — one inode, no drift, and
+   removing one directory entry does not delete the file.
+2. **Nothing is added to, removed from or edited in the patch directory between a dump and a load.**
+   Not a file that is gated off. Not a file that is never called. The gate hashes the directory, not
+   the call graph.
+3. **Back up the prelude before you hook it** (`cp` to a `.bak-` name) and restore from that backup
+   rather than reversing the edit by hand — the hash has to match to the byte, and an edit that is
+   semantically identical is not.
+
+### 11.3 The cheapest acceptance test for a loader change is a meta-device name-set check
+
+A loader change — a new checkpoint layout, a packed-module mapping, a module split — has a failure
+mode that no speed or quality number catches quickly: **it loads without error and the numbers are
+subtly wrong.** The test that does catch it costs no GPU, no weights and no boot.
+
+Instantiate the real model class on `torch.device("meta")`, walk the checkpoint's
+`model.safetensors.index.json` weight map through the real `load_weights`, and count two things:
+
+- **unmapped** — checkpoint tensors with no parameter to receive them (a `KeyError` at boot);
+- **unfilled** — parameters no checkpoint tensor ever writes (the silent half, and the dangerous one).
+
+Both must be **0**, and the module census — which modules resolved to the quantized method and which
+stayed BF16 — must match the list you predicted before you looked. Three properties make this worth
+more than it looks:
+
+- **It is verifiable against a known-good case.** Run the same derivation against the checkpoint that
+  already serves; if it does not come back 0/0, the instrument is wrong and its reading about the new
+  checkpoint means nothing. That check is what turned this from an argument into a measurement
+  ([13](13-full-scope-checkpoint.md) §2).
+- **It must run at the real rank count.** A single-rank run cannot see a tensor-parallel bug. Our
+  two-rank run caught a replicated layer carrying the global TP rank, which would have overrun on
+  `narrow` on rank 1 and could not have appeared at TP=1 ([13](13-full-scope-checkpoint.md) §3.3).
+  For a padded TP=3 arrangement the *last* rank is mandatory: the pad lives there.
+- **It runs beside an idle engine** under §10's rules — a throwaway container, a memory cap, a cpuset
+  disjoint from the engine's, no GPU device, no weights read except safetensors headers.
+
+It is a tier-A test in §9's table, and on the full-scope arm it did the job the intended boot-time
+gate could not: the plugin's own `CUDA_EXL3_DEBUG_NAMES` diagnostic printed nothing, because it logs
+at `info` and this image configures only vLLM's logger. **An acceptance gate has to be verified before
+the arm, the same as any other instrument** — the flag was set, the container had it, and the output
+was silence that looked exactly like a clean run.
 
 ### 11.1 The profile-baseline rule: settle the host, then read the pool
 

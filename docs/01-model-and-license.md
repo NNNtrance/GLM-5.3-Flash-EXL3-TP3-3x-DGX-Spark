@@ -16,7 +16,7 @@ not any licence you have met before, and the speculative draft model is non-comm
 | Revision we ran | `b20c49ba9ecafb563099536e307d21c1310e1c49` (short `b20c49ba`, 30 August 2026) |
 | Size on disk | 175.6 GB (`175,642,157,752` bytes) across 120 safetensors shards `[measured-here]` |
 | Format | EXL3 trellis, 4 bits per weight, codebook `mcg` |
-| Scope | `quantization_config.scope: glm53_routed_experts_only` — the routed experts are EXL3; attention, KDA, the shared expert and `lm_head` stay BF16 |
+| Scope | `quantization_config.scope: glm53_routed_experts_only` — the routed experts are EXL3; attention, KDA, the shared expert and `lm_head` stay BF16. **Until 5 September this was the only scope that could be loaded at all** on the NVIDIA `glm5next` reader, for reasons that have nothing to do with the weights — see §3.2 and [13](13-full-scope-checkpoint.md) |
 | Base model, per its card | `zai-org/GLM-5.3-Flash-BF16` `[reported]` |
 | Quality, per its card | KL divergence against BF16 **0.0246 nats** over 51,175 positions `[reported]` |
 
@@ -42,15 +42,15 @@ Two other EXL3 packages of this model exist, and we tried the obvious one first.
 
 | Candidate | Verdict |
 |---|---|
-| `brandonmusic/GLM-5.3-Flash-tr3-4bpw` (routed experts only, `mcg` codebook) | **What we run.** Everything outside the routed experts is BF16, so ordinary tensor parallelism still applies to attention and KDA, and the experts can be distributed whole. TP=3 is possible. |
-| `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw — **full scope**, `mul1` codebook, attention and `lm_head` quantized too | **Rejected for TP=3 when this was written, and that rejection is now under active challenge.** With attention quantized there is no unquantized dimension left to split three ways (§3.1), so it left TP=2 or pipeline parallelism and a third idle node. What changed: the measured profile says the BF16 half is **45 % of a decode step** (§3.2), and there is a mechanism — `svh = 0` padded loading, plus one launcher constant — that would put a full-scope checkpoint on all three ranks with no re-quantization. A TP=2 trial of exactly this package is the next experiment on the stack: C1 and the MMLU sample, posted either way ([11](11-open-issues.md) §2.22) `[not tested]`. |
-| Higher-precision EXL3 packages, and mixed per-layer bitrates (higher on attention and the head, 4-bit on the experts) | Not evaluated `[not tested]`. If the full-scope gate above fails, this is the fallback rather than a return to routed-experts-only. |
+| `brandonmusic/GLM-5.3-Flash-tr3-4bpw` (routed experts only, `mcg` codebook) | **What we run in production**, at TP=3 on three nodes. Everything outside the routed experts is BF16, so ordinary tensor parallelism still applies to attention and KDA, and the experts can be distributed whole. Its module names are also the ones the NVIDIA `glm5next` reader expects, which — as it turns out — is a larger part of why it works than the scope is ([13](13-full-scope-checkpoint.md) §2.3). |
+| `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw — **full scope**, `mul1` codebook, attention, KDA, the shared experts and `lm_head` quantized too | **Loaded and measured on 5 September, at TP=2, and the dense-stage lever is real: +24.3 % per stream, +26.4 % aggregate at a single stream, MMLU 86.32 ±0.75 against the control's 86.4 ±0.7** `[measured-here]`. It needed a three-layer loader patch first, none of whose layers is about quantization (§3.2, [13](13-full-scope-checkpoint.md)). **Not a production candidate at TP=2** — it leaves a 31k-token KV pool, which closes the long-prompt path entirely. TP=3 needs a padded-load path for the head that does not exist yet ([13](13-full-scope-checkpoint.md) §7, [11](11-open-issues.md) §2.22). |
+| Higher-precision EXL3 packages, and mixed per-layer bitrates (higher on attention and the head, 4-bit on the experts) | Not evaluated `[not tested]`. The 4.05 bpw package above is already mixed — 4-bit routed experts, 5–6 bit dense and attention, 6-bit head — and its quality gate passed, so this is now a refinement rather than a fallback. |
 
-**Licence, for the full-scope candidate: `[to verify]`.** We have not read
-`turboderp/GLM-5.3-Flash-exl3`'s licence file against the repository, and nothing in this document
-should be taken as saying it is the same as the checkpoint we run (it is not the same publisher, and
-ours is the ShapleyMCG License 1.0 described in §2 — an unusual one). Read it before you download it,
-and expect this row to be filled in when we do.
+**Licence, for the full-scope candidate: MIT** `[reported]`. Verified on 5 September: the
+repository's `LICENSE` file is the MIT text, "Copyright (c) 2026 Z.AI Co., Ltd", and the model card
+carries `license: mit`. That is **more permissive than the checkpoint we run** — no attribution
+condition, no exclusion clause, and OSI-approved, none of which is true of the ShapleyMCG License 1.0
+in §2. Read it yourself before you download; different publisher, different terms.
 
 Independent panels put EXL3 at ~4 bits in the same KL band as FP8 for this model family, and well
 ahead of 4-bit NVFP4 and int4 AWQ `[reported]`. Our own comparison is narrower and honest about it:
@@ -116,20 +116,30 @@ are unquantized. Measured on the live server with a torch profiler, those BF16 d
 **21.1 % of a C8 step and 17.4 % of a prefill chunk** `[measured-here]`
 ([10](10-results-and-roofline.md) §5.3).
 
-Three consequences worth holding on to:
+Four consequences worth holding on to:
 
 - Kernel work inside `cuda-exl3` cannot touch the largest item in the decode profile. Everything in
-  that column of the ranked target table comes to about 5 %; this one item is priced at **~+34 %
-  single-stream** if the same layers were 4-bit `[estimate]`.
+  that column of the ranked target table comes to about 5 %; this one item was priced at **~+34 %
+  single-stream** if the same layers were 4-bit `[estimate]`, and **measured at +24.3 % per stream**
+  at TP=2 with a full-scope checkpoint `[measured-here]` — the estimate was an upper bound
+  ([13](13-full-scope-checkpoint.md) §4.2).
 - Each rank's share of those BF16 tensors is a *third* rather than a half, so they get **less**
   efficient per rank as ranks are added. Part of the single-stream gap against a two-node arrangement
   is exactly this, and it is not a bug.
-- The way out is a differently scoped checkpoint, and the TP=3 obstacle to one turns out to be
+- **The scope of our checkpoint was not a quality decision, and we were wrong to describe it as
+  one** `[retracted]`. Two lines in vLLM's `glm5next` model file pin the whole attention stack to
+  BF16 whatever the weights contain — `quant_config=None` for the MLA projections
+  (`model.py:331`) and a `quant_config` strip in the KDA constructor (`kda.py:171-174`) — and
+  between them they lock **72.8 %** of the dense traffic. Until those are conditional, no checkpoint
+  of any scope can put attention on EXL3, so `routed_experts_only` was the only thing that could
+  load ([11](11-open-issues.md) §1.9 row 29, [13](13-full-scope-checkpoint.md) §2.2).
+- The way out is a differently scoped checkpoint plus a loader patch, and the TP=3 obstacle is
   softer than §3.1 implies: an EXL3 tensor still cannot be *zero-extended*, but it can be loaded
   narrow into a padded parameter with `svh = 0` on the pad, provided the pad occupies whole
   128-column blocks. Our head pad already does (64 → 66 heads = 256 columns); our vocab pad does not
-  (192 = 1.5 blocks) and would at `padding_size=384`. The quality gate decides whether any of that is
-  worth building — [11](11-open-issues.md) §2.22 is the item, and the TP=2 trial is the experiment.
+  (192 = 1.5 blocks) and would at `padding_size=384`. The quality gate that decided whether this was
+  worth building has now **passed** — [13](13-full-scope-checkpoint.md) is the whole story and
+  [11](11-open-issues.md) §2.22 is what remains.
 
 ---
 
@@ -160,4 +170,5 @@ roughly the speed the draft buys.
 ## 5. What is next
 
 [02 — Image build](02-image-build.md), then [03 — TP=3 padding and sidecars](03-tp3-padding-and-sidecars.md),
-which turns §3.1 into a working configuration.
+which turns §3.1 into a working configuration. For §3.2 — the other checkpoint, why it would not load,
+and what it is worth — [13 — The full-scope checkpoint](13-full-scope-checkpoint.md).

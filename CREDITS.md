@@ -44,6 +44,28 @@ at `main`.
   against BF16 of **0.0246 nats** over 51,175 positions.
 - We do not mirror or redistribute these weights.
 
+### `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw — the full-scope checkpoint we measured
+
+- **What we use it for:** the measurement arm that put a number on this stack's largest open item —
+  what the unquantized dense stage is actually worth ([docs/13](docs/13-full-scope-checkpoint.md)).
+  Loaded at TP=2 on 5 September 2026: +24.3 % per stream, MMLU sample inside the control's error bar.
+  **Not in production**, and not yet loadable at TP=3.
+- **Revision:** branch `4.05bpw`, commit `2a30229e67012798ba9f0cd832bb78abf4c363d5` (28 August 2026).
+  165.2 GB / 153.8 GiB across 19 shards; exl3 v1.4.4, `mul1` codebook, full scope — routed experts at
+  4 bits, dense and attention at 5–6, `lm_head` at 6, calibrated on 250 rows × 2,048 columns. Verified
+  here with `sha256` 23/23 against the repository's own metadata, independently on two nodes.
+- **Link:** https://huggingface.co/turboderp/GLM-5.3-Flash-exl3
+- **Licence:** **MIT** — the `LICENSE` file is the MIT text, "Copyright (c) 2026 Z.AI Co., Ltd", and
+  the card carries `license: mit`. More permissive than the checkpoint we run in production: no
+  attribution condition and no exclusion clause. Read it yourself; different publisher, different
+  terms.
+- We do not modify it on disk and we do not redistribute it. Everything needed to serve it is a
+  runtime patch inside the container ([docs/13](docs/13-full-scope-checkpoint.md) §3), which is also
+  why we rejected rewriting its shards: it would have cost the `sha256` match against the publisher.
+- **Also in the repository and unused here:** `mtp.safetensors` (3.79 GB), an MTP drafter that is not
+  in the safetensors index and that vLLM never reads. Under this checkpoint's licence it would
+  transfer to a reader in a way our own draft model does not. Not evaluated `[not tested]`.
+
 ### `incoai/GLM-5.3-Flash-DFlash2` — the speculative draft model
 
 - **What we use it for:** speculative decoding at k=7. 2.3 GB, BF16, 5 draft layers over 45 target
@@ -102,6 +124,10 @@ Commits this recipe built, measured or depends on:
 | `9b17ea9` | `9b17ea9` | Add the expert-reread bench, and close the duplicate-read question here | **the author's answer to our profile.** We ran his script unmodified on GB10 against the production build; it closed our own open item ([docs/10](docs/10-results-and-roofline.md) §5.4, [docs/11](docs/11-open-issues.md) §2.12) |
 | `a47da6e` | `a47da6e` | Remove the 64-bit division in `had_in`, deriving the index from the grid | the follow-up to the same profile: **−10 to −18 %** on `exl3_moe_had_in`, roofline 57 % → 63 % `[reported]`. Worth ~0.2–0.3 % of prefill here. **In production since configuration 8**, and it read exactly as advertised: every serving column inside its own band ([docs/10](docs/10-results-and-roofline.md) §1) |
 | **`62f53e6`** | `62f53e676d3e416401c3a0716558e1454affa8ad` | **Bound what is left in `had_in`** | **the production commit** since 5 September afternoon, and the answer to "is there more here": the remaining gap is a **half-ALU** limit — a 128-point Hadamard done with warp shuffles — so it is arithmetic that has to happen rather than traffic that can be removed, worth **≤2 % of prefill** on this stack and unreachable in practice `[reported]`. With it the **`cuda-exl3` MoE stage is closed as an optimisation target here** ([docs/10](docs/10-results-and-roofline.md) §6, [docs/11](docs/11-open-issues.md) §2.19) |
+| `5903248` | `5903248` | Let a checkpoint declare its own packed-module fusions | written the same hour we reported that `glm5next` declares no `packed_modules_mapping`, so a fusion peculiar to one model can travel with the weights instead of in a fork of the model file. Checkpoint entries merge **under** the model class's, and a malformed entry is dropped rather than raised. **Not usable for our case as written** — the author said so himself before we could try it (see below) `[not tested]` |
+| `fba9f27` | `fba9f27` | The same mapping from `CUDA_EXL3_PACKED_MAPPING` | the follow-up, because a published checkpoint is not ours to edit. Verified here against his `config.py` mounted read-only into a CPU container: `in_proj_qkv` 34/34, `gate_up_proj` 45/45, `fused_qkv_a_proj` 11/11 `[measured-here]`. **Not in any image we have built**, so the arm ran on the vLLM patch instead |
+| `d19dee0` | `d19dee0` | Handle a bare `suh` on the v1 loader path, and fix the packed-mapping example | **our `ReplicatedLinear` workaround, done properly and on his side.** He infers the shard index from the shape where ours pins it at 0 — the same thing for a replicated module and not for anything else. Same commit corrects the README example we had measured at 0/34 and adds the rule that explains it: **every module in a packed group must be EXL3 in the checkpoint** |
+| `807d798` | `807d798` | Make `CUDA_EXL3_DEBUG_NAMES` print, and report the hits too | the diagnostic he had recommended as our acceptance gate, which printed nothing on our image because it logged at `info`. Now `warning`, and it logs the modules that **resolved** as well as those that stayed BF16, with running tallies — the failure it was meant to catch (half the attention stack silently left in BF16) is now visible as a climbing count |
 
 Four things we reported to that project and their outcome:
 
@@ -139,9 +165,12 @@ implemented with warp shuffles is **ALU-bound at about half the unit's rate**, s
 that has to be done, not traffic that can be removed — **≤2 % of prefill on this stack, and
 unreachable** `[reported]`. He also confirmed that `_zero_kv_blocks_kernel` is vLLM's, and that on
 this model family the page is shared with Mamba/KDA state so the zeroing cannot be skipped
-([docs/11](docs/11-open-issues.md) §2.13). **We have no open item against `cuda-exl3`**, which is an
-unusual place for a dependency to end up: two of our three reports produced upstream fixes, the third
-produced a bench that proved us wrong, and the fourth produced a bound that tells us to stop looking.
+([docs/11](docs/11-open-issues.md) §2.13). **We have no open *performance* item against `cuda-exl3`**,
+which is an unusual place for a dependency to end up: two of our three reports produced upstream
+fixes, the third produced a bench that proved us wrong, and the fourth produced a bound that tells us
+to stop looking. The one thing still outstanding on that side is not a kernel at all — it is the
+padded-load path for a vocab-parallel EXL3 head, agreed and scoped and waiting on nothing but the work
+(below, and [docs/11](docs/11-open-issues.md) §2.22).
 
 **Then we sent a real profiler trace, and the thread turned into the most valuable exchange in this
 repository.** Four things came back on it, and three of them make the author's side of the ledger
@@ -184,6 +213,45 @@ longer rather than ours:
   block**. The fix is `padding_size=384`, one constant in our launcher. He has offered to add the
   padded-load path behind a flag once our quality gate says whether it is worth building
   ([docs/11](docs/11-open-issues.md) §2.22).
+
+**Then the full-scope checkpoint went in, and the thread produced four commits in one afternoon.** The
+work split cleanly and he drew the line himself: the packed-module mapping belongs in the plugin
+because it is checkpoint layout, while the BF16 pinning and the KDA split are model structure and stay
+in the model file — "that is the part you did not want to carry as a fork patch". Two of the four are
+straight fixes to our reports, and one is a fix to something he had written:
+
+- **`5903248` then `fba9f27`.** He put the packed mapping on his side within the hour, reading it from
+  the checkpoint's own quantization config — and then, **before we could wire it up**, told us it was
+  unusable for our case as written, because a published checkpoint is not ours to edit. The env-var
+  route in `fba9f27` is the fix. Catching your own new feature's blind spot in the same thread, ahead
+  of the person who would have hit it at boot, is worth recording.
+- **`d19dee0`**, which is our `ReplicatedLinear` workaround done better: he infers the shard index
+  from the shape where we pin it at 0 — identical for a replicated module, not identical in general.
+  The same commit corrects a README example he had written from our prose without running it, and
+  which we then measured at 0/34; he said so plainly and added the rule that explains it, which is the
+  part that saves the next reader an afternoon.
+- **`807d798`**, after we reported that the diagnostic he had recommended as our acceptance gate
+  printed nothing on our image.
+
+**And the one answer that unblocks TP=3 in principle.** We asked for a one-line confirmation that a
+zero pad trellis multiplied by `svh = 0` cannot produce NaN. What came back was **the full domain
+enumerated**: all 65,536 possible 16-bit trellis codes swept through the device decoder for all three
+codebooks, zero non-finite values in every case, with the ranges reported (`3inst`
+[−3.9570, +3.9727], `mcg` [−3.9492, +3.9492], `mul1` [−3.4531, +3.3477]) `[reported]`. He also
+published that his first attempt reported an implausibly asymmetric range because it ordered floats by
+their integer bits, and re-ran it rather than quoting a number he did not trust. **That is the right
+standard underneath a padded-load path**, and it is a stronger answer than the question asked for.
+
+The **commitment** that follows from it: once our quality gate decided the lever was worth building,
+he would add the padded-load path behind a flag — accept an EXL3 tensor narrower than the parameter,
+place it, zero `svh` on the remainder — covering the three cases we checked our TP=3 geometry against:
+the vocab-parallel `lm_head` (hard-refused today, and this checkpoint has no BF16 head to fall back
+on), a "refuse unless the pad is 128-aligned" gate, and the input-dim case where
+`Exl3SuhParameter.load_row_parallel_weight` narrows on its own and would overrun the last rank's
+`o_proj`. He asked for the drafter's acceptance rate ahead of MMLU, on the grounds that a quantized
+target losing acceptance would decide TP=3 before quality did — a better ordering than ours. **The
+gate passed on 5 September** ([docs/13](docs/13-full-scope-checkpoint.md)), acceptance is flat, and
+the word has been sent.
 
 Three notes we owe that thread rather than the other way round: a 128-token prefill chunk costs 403 ms
 because 128 tokens at top-8 already touch every expert, which is a batched-token-budget fact worth

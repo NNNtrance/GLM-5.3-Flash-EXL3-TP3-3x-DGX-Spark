@@ -162,6 +162,69 @@ The mechanism is confirmed in the engine's own log rather than inferred: the dra
 blocks-per-request divisor stays at 363 — which is the whole point, since that divisor is what
 collapsed the pool before ([07](07-kv-and-draft-page.md) §1).
 
+### 2.2 A full-scope checkpoint at TP=2: the dense-stage lever, measured
+
+This arm is **not** in the progression above, because it is not a production candidate and it is not
+at TP=3. It is the experiment that answers the largest open item this repository has carried
+([11](11-open-issues.md) §2.22): what is the BF16 dense stage actually worth, if the same layers
+were 4-bit. The full story — why the checkpoint would not load, the three-layer loader patch, and
+what TP=3 needs — is [13](13-full-scope-checkpoint.md).
+
+**Settings, both arms identical unless the row says otherwise:** **two** nodes, **TP=2**, expert
+parallel **off**, image `exl3-zeus:62f53e6`, KV `fp8`, DFlash2 draft k=7,
+`gpu-memory-utilization 0.85`, `--block-size 256` requested, `--max-num-seqs 8`,
+`--max-num-batched-tokens 2048`, `NCCL_MAX_NCHANNELS=8`, tuner cache warm, **no** fast-load sidecar in
+either arm, **no** `HAREM_SW_BLOCK_SIZE`, **no** fp8 draft cache in either arm, temperature 0,
+reasoning effort `low`, medians of three rounds, 5 September 2026. Full scope is
+`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw (`2a30229e`, MIT); the control is the production
+checkpoint. **The one setting that is not identical:** the full-scope arm runs
+`max_model_len 65,536` against the control's `1,000,000`, because at 1M it could not boot. That
+changes the hybrid allocator's page size as well as the pool, so **only C1–C4 are a comparison** —
+C6/C8, every prefill figure and the pool are not.
+
+| metric | **full scope** | experts-only control | delta |
+|---|---|---|---|
+| **C1 per stream** | **68.00** tok/s | 54.69 | **+24.3 %** |
+| **C1 aggregate** | **59.93** tok/s | 47.40 | **+26.4 %** |
+| C2 aggregate | 83.02 | 68.03 | +22.0 % |
+| C4 aggregate | 111.05 | 90.66 | +22.5 % |
+| C6 / C8 aggregate | 109.75 / 110.03 | 110.12 / 133.57 | **KV-bound, void** |
+| TTFT at C1 | 0.524 s | 0.615 s | −14.8 % |
+| draft acceptance at C1 | 63.14 % | 64.08 % | equal |
+| accepted tokens per step at C1 | 5.42 | 5.49 | equal |
+| boot, cold, no sidecar | 355 s | 396 s | −10 % |
+| gates, cold and warm | **10/10 · 12/12** | 10/10 · 12/12 | equal |
+| MMLU sample (1,995 q) | **86.32 ±0.75** | 86.4 ±0.7 (not re-run — see below) | inside the bar |
+| KV pool | 31,343 at 65,536 ctx | 665,625 at 1,000,000 ctx | not comparable |
+| prefill, 7K and fresh | **not measurable** | 1,135 / 1,334 tok/s | see below |
+
+All figures `[measured-here]`. **The step arithmetic is the result**, not the tok/s: 5.49 tokens per
+step at 54.69 tok/s is a 100.4 ms step; 5.42 at 68.00 is **79.7 ms**. **20.7 ms saved per step, with
+acceptance and accepted length unchanged** — the whole gain is arithmetic, none of it is drafter
+behaviour. Against the estimate this page carried (42.90 ms of dense BF16 GEMM going to ~11 ms, about
++34 % single-stream), **65 % of it arrived**; the rest is the part this checkpoint leaves in BF16
+anyway ([13](13-full-scope-checkpoint.md) §4.2). The estimate was an upper bound, and it is not
+retracted so much as bounded.
+
+**The control's MMLU was not re-run in this arm.** It is the same 86.4 ±0.7 quoted everywhere in this
+repository — same checkpoint, same TP=2, measured earlier the same day with the MTP drafter rather
+than DFlash2. A log-likelihood task does not go through the speculative decoder, so the number
+transfers; it is flagged here so the table is not read as two fresh runs.
+
+**The cost is context, and it is the reason this is not a serving configuration.** The full-scope
+model is ~10 GiB *heavier* per node at TP=2 despite being 10 GiB smaller on disk (§6.2 of
+[13](13-full-scope-checkpoint.md) leaves that contradiction standing, unexplained), so the pool comes
+out at 31,343 tokens — about 6.8 pages once the hybrid allocator raises the attention block to 4,608.
+Measured admission: 844- and 1,684-token prompts serve normally; **~2,800 tokens and above are never
+scheduled at all** (`Running: 0, Waiting: 1`, KV usage 0 %, indefinitely). That is what voids C6/C8
+and every prefill number here.
+
+> **Correction to the version of this table posted upstream** `[retracted]`. The issue-thread copy
+> gave the control's C1 as "54.7 / 54.3" aggregate / per stream and derived "+9.5 % / +25 %". 54.7 is
+> the control's **per-stream** median and 54.3 its round-3 per-stream value; the aggregate median is
+> **47.40**. The like-for-like deltas are the ones above. The full-scope column, the quality gate and
+> the conclusion are unaffected ([11](11-open-issues.md) §1.9 row 31).
+
 ---
 
 ## 3. Against the NVFP4 sibling stack
@@ -773,7 +836,7 @@ rather than re-derived `[measured-here]`:
 
 | # | target | prefill | C1 | C8 | achieved vs ruler | realistic gain | owner |
 |---|---|---|---|---|---|---|---|
-| 1 | **Dense BF16 GEMM — the unquantized half of the checkpoint** | 17.4 % | **45.3 %** | 21.1 % | 79 % of shape-matched achievable TFLOP/s | **the largest item on the stack** — see §5.8 and [11](11-open-issues.md) §2.22 | checkpoint scope / vLLM / cuBLAS |
+| 1 | **Dense BF16 GEMM — the unquantized half of the checkpoint** | 17.4 % | **45.3 %** | 21.1 % | 79 % of shape-matched achievable TFLOP/s | **the largest item on the stack, and now measured rather than estimated: +24.3 % per stream at TP=2** (§2.2, [13](13-full-scope-checkpoint.md)) | **checkpoint scope + the vLLM model file**, not the kernels |
 | 2 | MoE trellis GEMM, large M | 28.5 % | 29.7 % | **51.6 %** | 78–85 % of 225 GB/s in the engine; duplicate-read lever **closed** (§5.4) | ~0 | cuda-exl3 — **closed** |
 | 3 | NCCL — **overlap** with compute, currently exactly 0 (§5.7) | 14.5 % | 15.5 % | 11.7 % | ~20 GB/s bus against a ~30 GB/s per-node PCIe ceiling | bandwidth ≤ −2…4 %; **overlap untried, ceiling is the whole class** | vLLM (the fabric side is spent) |
 | 4 | Hyper-connection mixing, 3 passes over a 4× residual | 12.0 % | 2.2 % | 1.5 % | 86–91 % of the ruler | ceiling −2.5…2.7 %; the kernel exists and delivers **−1.0…1.1 %** (§5.5.1) | vLLM / TileLang |
@@ -789,14 +852,22 @@ rather than re-derived `[measured-here]`:
 Four things a reader should take from that table, and the first three have changed since it was a
 reconciliation.
 
-**The largest item is not a kernel and not the fabric — it is the checkpoint's scope.** Dense BF16
-GEMM is 45 % of a C1 step because `scope: glm53_routed_experts_only` leaves attention, the shared
-experts and `lm_head` unquantized, so at M=8 that stage streams 16-bit weights beside a 4-bit routed
-half. The arithmetic, which is the kernel author's on our numbers: the stage is weight-bandwidth-bound
-at M=8, so 4 bpw instead of 16 is ~4× less traffic — 42.9 ms → ~11 ms, **~32 ms off a 94.65 ms step,
-roughly +34 % single-stream** `[estimate]`. Everything in the `cuda-exl3` column of this table comes
-to about 5 %. The experiment that decides it is a quality gate, not a speed run
-([11](11-open-issues.md) §2.22).
+**The largest item is not a kernel and not the fabric — it is the checkpoint's scope, and two lines
+in a model file.** Dense BF16 GEMM is 45 % of a C1 step because `scope: glm53_routed_experts_only`
+leaves attention, the shared experts and `lm_head` unquantized, so at M=8 that stage streams 16-bit
+weights beside a 4-bit routed half. The arithmetic, which is the kernel author's on our numbers: the
+stage is weight-bandwidth-bound at M=8, so 4 bpw instead of 16 is ~4× less traffic — 42.9 ms →
+~11 ms, **~32 ms off a 94.65 ms step, roughly +34 % single-stream** `[estimate]`. Everything in the
+`cuda-exl3` column of this table comes to about 5 %.
+
+**That is no longer an estimate.** A full-scope checkpoint was loaded at TP=2 on 5 September and
+measured at **+24.3 % per stream, +26.4 % aggregate, with the MMLU sample inside its error bar and
+draft acceptance unchanged** `[measured-here]` — 65 % of the estimate, the difference being the
+layers this particular checkpoint leaves in BF16 anyway (§2.2). Two things had to be fixed first, and
+neither is about quantization: the model class declares no `packed_modules_mapping`, and the vLLM
+`glm5next` model file pins the attention stack to BF16 in two places that between them lock **72.8 %**
+of the dense traffic. **The scoped checkpoint was not a quality choice; it was the only scope that
+could load** ([13](13-full-scope-checkpoint.md), [11](11-open-issues.md) §2.22).
 
 **The `cuda-exl3` kernel library is closed as a target on this stack.** Rows 2, 5, 7, 10, 11 and 12
 are at the roofline, bounded below what a rebuild is worth, or not kernels at all. Two of them closed

@@ -11,6 +11,95 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-05 (evening) — the full-scope checkpoint loads, and the largest item on the stack is now a measurement
+
+The item this repository has called its largest is no longer an estimate, and the reason it had been
+out of reach turned out not to be quantization, parallelism or the weights.
+
+- **A full-scope EXL3 checkpoint served for the first time on this stack, at TP=2**
+  `[measured-here]`. `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw (`2a30229e`, **MIT**, 165 GB,
+  `sha256` 23/23 verified on both nodes) against our production checkpoint as control, same image,
+  same two nodes, expert parallel off, DFlash2 k=7, medians of three rounds:
+
+  | | full scope | experts-only control | delta |
+  |---|---|---|---|
+  | C1 per stream / aggregate | **68.00 / 59.93** tok/s | 54.69 / 47.40 | **+24.3 % / +26.4 %** |
+  | C2 / C4 aggregate | 83.02 / 111.05 | 68.03 / 90.66 | +22.0 % / +22.5 % |
+  | TTFT at C1 | 0.524 s | 0.615 s | −14.8 % |
+  | draft acceptance, accepted length | 63.14 %, 5.42 | 64.08 %, 5.49 | unchanged |
+  | gates, cold and warm | 10/10 · 12/12 | 10/10 · 12/12 | equal |
+  | MMLU sample (1,995 q) | **86.32 ±0.75** | 86.4 ±0.7 | inside the bar |
+
+  Per decode step 100.4 → **79.7 ms**, 20.7 ms saved, with acceptance and accepted length flat — the
+  entire gain is arithmetic, none of it is drafter behaviour. Against the estimate this stack carried
+  (42.9 ms → ~11 ms, ~+34 %), **65 % arrived**; the rest is what this checkpoint leaves in BF16
+  anyway. **The 6-bit `lm_head` at vocab 154,880, the one quality risk we had flagged, cost nothing
+  measurable.** New page: [docs/13](docs/13-full-scope-checkpoint.md);
+  [docs/10](docs/10-results-and-roofline.md) §2.2, [docs/11](docs/11-open-issues.md) §2.22.
+
+- **Retracted: "the dense stage is a quality choice"** `[retracted]`. It was a **loader limitation**.
+  vLLM's `glm5next` model file pins the attention stack to BF16 in two places — `quant_config=None`
+  for the MLA projections and a `quant_config` strip in the KDA constructor — and between them they
+  lock **72.8 % of the dense traffic** whatever the checkpoint holds. `routed_experts_only` was not
+  the publisher's judgement about quality; it was the only scope that could load. Retraction 29.
+
+- **Retracted: "draft acceptance drops on a quantized target"** `[retracted]`. A cold single-prompt
+  probe read 45.5 → 39.2 % and 48.0 → 34.4 % and was reported upstream as an early signal that would
+  "eat part of the speed gain". Over three sweep rounds acceptance is 61–65 % against the control's
+  62–63 %. Sample of one, published. Retraction 30.
+
+- **Corrected: the delta we posted upstream** `[retracted]`. The issue-thread table gave the control's
+  C1 as "54.7 / 54.3" aggregate / per stream and derived "+9.5 % / +25 %"; 54.7 is the control's
+  *per-stream* median and its aggregate median is 47.40. Like for like: **+26.4 % aggregate, +24.3 %
+  per stream.** The conclusion is unaffected. Retraction 31 — the only row in that table produced by a
+  summary rather than a measurement.
+
+- **Three loader layers, one env-gated patch, and a vLLM bug** `[measured-here]`. The checkpoint would
+  not load for three independent reasons, measured as an unmapped-tensor count going
+  **886 → 526 → 170 → 0**: no `packed_modules_mapping` on the model class; the BF16 pinning above; and
+  a KDA factorisation mismatch (one `qkv_proj` and one `conv1d` against the model's fused
+  `in_proj_qkvbfg_a` and three `conv1d`). The last of those is **not an EXL3 problem** — `conv1d` is
+  BF16, so a BF16 copy of the same checkpoint fails identically. Eight anchors, four asserts, all
+  silent on the live boot, and with the flag unset the image is upstream byte for byte and still
+  serves the control checkpoint at 0 unmapped / 0 unfilled. On the way: **`ReplicatedLinear` has no
+  `weight_loader_v2` dispatch**, so any replicated linear served by a v2-parameter quantization method
+  fails at load — reported, and fixed upstream in the plugin rather than worked around.
+
+- **What it cost, and the line is not empty.** At TP=2 the full-scope model leaves a **31,343-token**
+  KV pool, so prompts above ~2,000 tokens are **never scheduled** — every prefill figure and the
+  C6/C8 aggregates are void in that arm, and TP=2 is a measurement rig rather than a serving
+  configuration. It is also **~10 GiB heavier per node** despite being 10 GiB smaller on disk, and
+  that contradiction is unexplained and left standing; it is the open risk for the TP=3 pool
+  (4.70 M → possibly ~3.4 M) and the one number to measure before spending a boot.
+  Production was down 1 h 15 m, planned, and came back at 4,696,969 tokens against 4,699,724, gates
+  full.
+
+- **Two instruments failed and are written down.** `CUDA_EXL3_DEBUG_NAMES=1` printed nothing — the
+  plugin logs it at `info`, and this image configures only vLLM's logger — so the designed boot gate
+  was unusable and three indirect checks carried it instead; the author has since fixed the level and
+  made it log the hits as well as the misses. And a fast-load sidecar **refused the production
+  restore** because an experimental patch had been placed in the hashed patch directory: correct
+  behaviour, an hour late. New rules: [docs/09](docs/09-measurement-protocol.md) §11.2 (nothing is
+  added to the patch directory between a dump and a load; experimental patches live elsewhere and are
+  hard-linked) and §11.3 (the meta-device name-set check as the tier-A acceptance test for any loader
+  change).
+
+- **Upstream.** Four commits from the kernel author came out of this thread in one afternoon —
+  a checkpoint-declared packed mapping (`5903248`), the same mapping from an environment variable
+  (`fba9f27`), the `ReplicatedLinear` `suh` fix plus a corrected README example (`d19dee0`), and
+  `CUDA_EXL3_DEBUG_NAMES` printing at all (`807d798`) — plus the one answer that unblocks TP=3 in
+  principle: **all 65,536 trellis codes swept through the device decoder on all three codebooks, zero
+  non-finite, bounded ranges**, so a zero pad trellis multiplied by `svh = 0` cannot produce NaN.
+  [CREDITS](CREDITS.md).
+
+- **What is open.** TP=3: `padding_size` 192 → **384**, shared expert 2112 → **2304** (not 2176 —
+  128-aligned but not divisible by three), the A9 KDA split fix which is written down and not written,
+  the checkpoint onto the third node, a re-dumped sidecar, and the padded-load path for the
+  vocab-parallel head on the plugin side. [docs/11](docs/11-open-issues.md) §2.22,
+  [docs/13](docs/13-full-scope-checkpoint.md) §7.
+
+---
+
 ## 2026-09-05 (afternoon) — production configuration 8, and a profiler that deleted two of our own targets
 
 Two entries in one day, and the interesting one is not the production change.

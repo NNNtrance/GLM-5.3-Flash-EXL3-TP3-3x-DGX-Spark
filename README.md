@@ -10,8 +10,9 @@ DGX Spark (GB10) nodes with vLLM and the `cuda-exl3` kernels: the two-layer imag
 parallelism over 288 experts, the TP=3 shape padding, the DFlash2 speculative-decoding port, the
 kernel bugs we found and what fixed them, the NCCL mesh cliff, the second cable nothing was using,
 the PCIe wall behind it, the KV-pool surgery, a 274-second cold boot, a measured breakdown of where a
-prefill and a decode step actually go, and what is still broken. Written so that a person **or their
-AI coding agent** can follow it step by step.
+prefill and a decode step actually go, the three-layer loader patch that finally got a **fully
+quantized** checkpoint to load and what it turned out to be worth, and what is still broken. Written
+so that a person **or their AI coding agent** can follow it step by step.
 
 This is the EXL3 sibling of our NVFP4 recipe,
 [`NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark`](https://github.com/NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark),
@@ -94,19 +95,24 @@ worth 8–26 % of pool; acting on it would have over-committed the head node
 ([07](docs/07-kv-and-draft-page.md) §1.1, [08](docs/08-fast-boot.md) §5.1,
 [11](docs/11-open-issues.md) §2.3).
 
-**The open edge has moved, and it is now the checkpoint rather than the kernels.** Dense BF16 GEMM is
-45 % of a single-stream decode step because our checkpoint is `scope: glm53_routed_experts_only` —
-attention, the shared experts and `lm_head` stay BF16, so at M=8 that stage streams 16-bit weights
-beside a 4-bit routed half. At 4 bpw the same stage would be bandwidth-bound on ~4× less traffic:
-42.9 ms → ~11 ms, **roughly +34 % single-stream** `[estimate]`, against about 5 % for everything in
-the `cuda-exl3` column of our target table put together. The blocker was TP=3 — 64 heads and a 154,880
-vocab do not split three ways, and an EXL3 trellis cannot be zero-extended — and it is softer than it
-looked: a checkpoint quantized *unpadded* can be loaded into a padded parameter with `svh = 0` on the
-pad, provided the pad occupies whole 128-column blocks. Our head pad already does (64 → 66 heads =
-256 columns); our vocab pad does not, and would at `padding_size=384`. **The question is quality, not
-speed**, and the experiment that decides it is a TP=2 trial of `turboderp/GLM-5.3-Flash-exl3` at
-4.05 bpw against our MMLU sample — running next, reported either way
-([11](docs/11-open-issues.md) §2.22, [01](docs/01-model-and-license.md) §3.2) `[not tested]`.
+**The open edge has moved, and it is now the checkpoint rather than the kernels — and that is no
+longer an estimate.** Dense BF16 GEMM is 45 % of a single-stream decode step because our checkpoint is
+`scope: glm53_routed_experts_only`: attention, the shared experts and `lm_head` stay BF16, so at M=8
+that stage streams 16-bit weights beside a 4-bit routed half. A full-scope checkpoint
+(`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw, MIT) was loaded at TP=2 on 5 September and measured
+against the production checkpoint on the same stack: **C1 68.00 tok/s per stream against 54.69,
++24.3 %** (aggregate 59.93 against 47.40, +26.4 %), C2 and C4 +22 %, **draft acceptance and accepted
+length unchanged**, gates full, **MMLU sample 86.32 ±0.75 against the control's 86.4 ±0.7**
+`[measured-here]`. Per step 100.4 → 79.7 ms — 65 % of the +34 % that had been estimated, the
+difference being what this checkpoint leaves in BF16 anyway. **Two things it corrected:** the 6-bit
+`lm_head` we had flagged as the quality risk cost nothing measurable, and the scope was never a
+quality decision — two lines in vLLM's `glm5next` model file pin the attention stack to BF16 whatever
+the weights hold, locking 72.8 % of the dense traffic, so `routed_experts_only` was the only scope
+that could load. **The cost is context:** at TP=2 the pool is 31,343 tokens and prompts over ~2,000
+tokens are never scheduled, so TP=2 is a measurement rig, not a serving configuration. TP=3 needs a
+padded-load path for the head, one launcher constant (`padding_size` 192 → 384), a shared-expert width
+of 2,304 and one patch we have not written
+([13](docs/13-full-scope-checkpoint.md), [11](docs/11-open-issues.md) §2.22).
 
 Behind it, two `NCCL_ALGO` arms and one memory rung. `Tree` is measured and rejected on this fabric —
 4–6× slower on the sizes that matter — while `Ring,Tree` came back *inside the sweep's own repeat
@@ -150,8 +156,9 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 11. [10 — Results and roofline](docs/10-results-and-roofline.md) — the full tables, the rulers measured rather than quoted, and where a prefill and a decode step actually go, class by class, from a profiler trace of the live server.
 12. [11 — Open issues](docs/11-open-issues.md) — what is unresolved, what we retracted, and what we never ran.
 13. [12 — The MLA tuner cache](docs/12-tuner-cache.md) — the measurement tax a process-local cache was charging, and the shorter protocol that removes it.
-14. [systemd](systemd/README.md) — a unit **template**, not installed anywhere, with the three things wrong with it named. This stack starts by hand; read this before a reboot.
-15. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
+14. [13 — The full-scope checkpoint](docs/13-full-scope-checkpoint.md) — the three independent reasons a fully quantized checkpoint would not load, none of them about quantization; the loader patch; and what the dense stage is worth, measured.
+15. [systemd](systemd/README.md) — a unit **template**, not installed anywhere, with the three things wrong with it named. This stack starts by hand; read this before a reboot.
+16. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
 
 ## Quick path (for an AI coding agent)
 

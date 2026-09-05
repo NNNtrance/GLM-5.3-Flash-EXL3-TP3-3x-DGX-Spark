@@ -52,13 +52,22 @@ an image without it the rule is still five rounds with two discarded
 | Speed by category, C1 | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 tok/s | acceptance 46 / 56 / 55 / **13 %** — prose is where a k=7 draft is wasted. **Measured one configuration earlier**; not re-run since `[not tested]` |
 
 **Production configuration 6 is unchanged since it was set.** A day of profiling, a MoE re-read
-bench, a hyper-connection analysis and a one-sided RDMA_WRITE transport followed it; all four were
-measurements, three of them closed an item, and **none of them moved a production number**
-([10](docs/10-results-and-roofline.md) §5, [06](docs/06-nccl-mesh.md) §9–§10). Where a step goes is
+bench, a hyper-connection analysis, a one-sided RDMA_WRITE transport, a fused hyper-connection kernel,
+a dual-batch-overlap design study and a draft-cache precision arm have all followed it; every one was
+a measurement, five of them closed an item, and **none of them moved a production number**
+([10](docs/10-results-and-roofline.md) §5, [06](docs/06-nccl-mesh.md) §9–§10,
+[11](docs/11-open-issues.md) §2.16–§2.18). Where a step goes is
 now measured rather than inferred: per 2,048-token prefill chunk, MoE trellis GEMM 26.4 %, NCCL
 all-reduce 16.5 %, dense BF16 GEMM 16.2 %, hyper-connection mixing 11.7 %; per C1 decode step, dense
 BF16 GEMM 44.8 % and the k=7 drafter 19.5 %. Both rulers those percentages are against were measured
 on the device — 225 GB/s and 97.3 TFLOP/s, not the 273 and ~125 the datasheet implies.
+
+**One change is measured, validated and waiting.** Moving the DFlash2 drafter's own KV cache to fp8
+should grow the pool by **+4.7 %**, to about 4.66M tokens. The arm has booted: the draft backend
+accepts fp8, draft acceptance is unchanged at 60–64 %, and the gates are full marks cold and warm.
+But it ran on a **dump boot**, whose KV pool figure is meaningless, so **the number that would promote
+it does not exist yet**. Production stays on the bf16 draft cache until an ordinary load boot supplies
+it ([07](docs/07-kv-and-draft-page.md) §7, [11](docs/11-open-issues.md) §2.18).
 
 For reference, our NVFP4 stack on the same three nodes reaches C1 57–60, C8 150, prefill 1,585 and a
 KV pool of 4.32M at `gpu-memory-utilization 0.88`. **EXL3 at TP=3 is now level on single-stream
@@ -92,7 +101,8 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 11. [10 — Results and roofline](docs/10-results-and-roofline.md) — the full tables, the rulers measured rather than quoted, and where a prefill and a decode step actually go, class by class.
 12. [11 — Open issues](docs/11-open-issues.md) — what is unresolved, what we retracted, and what we never ran.
 13. [12 — The MLA tuner cache](docs/12-tuner-cache.md) — the measurement tax a process-local cache was charging, and the shorter protocol that removes it.
-14. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
+14. [systemd](systemd/README.md) — a unit **template**, not installed anywhere, with the three things wrong with it named. This stack starts by hand; read this before a reboot.
+15. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
 
 ## Quick path (for an AI coding agent)
 

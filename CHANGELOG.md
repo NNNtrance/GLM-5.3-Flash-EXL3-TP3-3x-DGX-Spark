@@ -11,6 +11,111 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-05 — a kernel that half-worked, an overlap that does not pay, and a stricter definition of "equal"
+
+Production configuration 6 is **unchanged**, for the second entry running. One change is validated and
+waiting on a boot; three designs were costed and rejected; and the measurement protocol got stricter
+about what counts as a difference.
+
+- **Draft KV at fp8: validated, not yet promoted** `[measured-here]`. Moving the DFlash2 drafter's own
+  cache from bf16 to fp8 shrinks its page 393,216 → **196,608 bytes** and the per-block cost
+  21,917,440 → **20,934,400**, with the blocks-per-request divisor unchanged at 363 — worth about
+  **+4.7 %** of pool. The arm booted, which answered the only question a boot could: the DFlash
+  sliding-window backend accepts an fp8 cache. Draft acceptance **60.1–64.0 %** against production's
+  61–65 % and a gate that demanded the 60–65 band, gates 10/10 · 12/12 cold and warm, speed inside the
+  noise bands. **It ran on a dump boot, so its KV pool figure (4,382,920) is meaningless** and
+  production stays on bf16 until an ordinary load boot supplies the real number.
+  [docs/07](docs/07-kv-and-draft-page.md) §7, [docs/10](docs/10-results-and-roofline.md) §2.1,
+  [docs/11](docs/11-open-issues.md) §2.18.
+- **The hyper-connection fusion kernel was written and it reached 40 % of its own ceiling.** A Triton
+  kernel that tiles over tokens and reduces the post mapping in registers removes 30.4 % of the first
+  two kernels' traffic and delivers **−14.9 to −15.5 %** on that pair, **−9.0 to −9.9 %** on the
+  three-kernel route, and **−1.0 to −1.1 % of the prefill wall** — against a −2.1 to −2.8 % target.
+  `residual_cur` is bit-identical at every M but one 7-element 1-ulp difference at M=64; `layer_input`
+  is within one bf16 ulp on 5.1 % of elements. The shortfall is entirely bytes-per-second (187.7
+  against the 229.5 GB/s the route it replaces gets), not tiling — a 33-configuration sweep could not
+  improve the winner. **Not adopted standalone**: −1 % does not earn a boot when it also brings Triton
+  JIT into the serving process and a configuration surface that is a cliff (the winner reads
+  187.8 GB/s, its neighbours 79.4 and 44.5, and the shipped default was one of the bad ones). It rides
+  the next image bundle with `had_in`. Also measured: fusing **loses** below M ≈ 1024 (+37.7 % at
+  M=512), because the residual fits the 24 MiB L2 there and the re-read it deletes was never going to
+  DRAM `[measured-here]`. [docs/10](docs/10-results-and-roofline.md) §5.5.1.
+- **New lesson, and the more useful half of that kernel:** a GPU-free ahead-of-time compile check
+  reported 18 of 18 configurations building and all inside the shared-memory limit; at real launch
+  **6 of the 18 failed with `OutOfResources`**, the reported 36,864 bytes against 106,496 actually
+  needed. **A compile check answers "does it build", never "does it run"**
+  `[measured-here]`. [docs/11](docs/11-open-issues.md) §4.
+- **Closed: dual-batch overlap (DBO).** The all-reduce is 16.5 % of a prefill chunk at 99.3 %
+  occupancy, so overlapping it carried the largest number on the open-issues page. The mechanism does
+  suit it and the patch is *smaller* than we estimated (~95–160 lines, five files, and it does not
+  touch the model file — one bottleneck covers all 102 collectives, and the mHC state is thread-local,
+  so our "medium-to-large patch, mHC at risk" reading was wrong on both counts `[retracted]`). The
+  arithmetic kills it: splitting the batch pays the MoE expert weight stream **twice**, +73 to +232 ms
+  per chunk against −135 ms of hideable collective. Prefill lands at **−6.3 % to +8.0 %** — a coin
+  toss — and decode is a clear loss (**C1 +38 %**, C8 +6 %), with the drafter unable to micro-batch,
+  the breakable CUDA graph disabled for both models, and a silent-corruption hazard where a split
+  request restarts the KDA recurrent state from zero in 34 of 45 layers. Raising the batched-token
+  budget beats every overlap variant for the same KV price and no code. **Do not build it.**
+  [docs/11](docs/11-open-issues.md) §2.17.
+- **Also dead, each for a checkable reason, read out of the image with the engine down:** async
+  tensor parallelism, the sequence-parallelism pass and the FlashInfer all-reduce+RMSNorm fusion all
+  need `torch.compile`, which this model family never enters; and `world_size = 3` is excluded by the
+  supported-world-size lists of FlashInfer (2/4/8/16), custom all-reduce (2/4/6/8/16) and NCCL
+  symmetric memory (minimum 4). DeepEP is installed and never engages at `data_parallel_size = 1`.
+  Model-level sequence parallelism is a one-line gate and a bad idea: identical bytes, collective
+  count 90 → 180, **+10…15 % worse at decode**.
+- **One survivor in that class, and one free probe.** Attention-scoped micro-batching — split across
+  the attention block only, rejoin before the MoE stage — hides 44 % of the collective while paying
+  only for attention weights streaming twice: **−3 to −6 % of prefill** `[estimate]`, ~150 lines, and
+  it inherits the same KDA hazard. Before any of it, a model-free probe should establish whether an
+  all-reduce on a second stream overlaps a GEMM **at all** on this part. Written, not run
+  `[not tested]`.
+- **The measurement protocol got a floor.** Round-to-round spread inside a single settled arm is
+  **C1 ±4 %, C2 ±6 %, C4 ±9 %, C6 ±6 %, C8 ±3 %** `[measured-here]` — C4 is the noisiest column, which
+  is the opposite of the intuition. Two rules now apply to every table here: **a difference of 3 % or
+  less is written down as "equal"**, and above that floor it still has to clear its own metric's band.
+  This reclassifies the combine-staging arm's +2.3 % at C4 and patch 0007's −0.9…+4.2 % as equal;
+  production 5 → 6 survives on its +5.6 % at C8. Also corrected: the quick-arm harness claimed five
+  rounds with two discarded and ran three `[retracted]` — it is now one warm-up plus three measured
+  rounds, and the warm-up ramp it was written for is gone anyway on a warm tuner cache.
+  [docs/09](docs/09-measurement-protocol.md) §1.1–§1.2.
+- **New planning rule: a patch change costs a dump boot.** The fast-load sidecar's identity covers
+  *every* `patch-*.py` and the whole prelude, so three patches that touch no weight byte refused a
+  boot and cost an hour. Budget the 682-second dump boot into any arm that adds a patch, and never
+  record a dump boot's KV pool as a result. The narrower gate this argues for is written up but not
+  written. [docs/09](docs/09-measurement-protocol.md) §11, [docs/11](docs/11-open-issues.md) §2.21.
+- **Rank memory imbalance, now with a number and a diagnosis label.** The weights are identical on all
+  three ranks (`Model loading took 54.86 GiB` ×3), yet non-torch memory reads **1.50 GiB on rank 0
+  against 9.48–9.72 GiB on the workers** — about **8.2 GiB per worker stranded**, and the pool is sized
+  by the worst rank, so equalising it would be worth **8–26 % of pool**. Larger than every kernel item
+  left. Nobody knows yet what that memory is `[measured-here]`.
+  [docs/11](docs/11-open-issues.md) §2.3.
+- **The memory ladder is re-opened rather than settled.** The 0.85 rejection predates the fast-load
+  work that removed the page-cache spike; the same configuration now sits at 11–12 GiB free with zero
+  swap, and 0.82–0.83 was never tried. `--kv-cache-memory` — sizing the pool in bytes rather than as a
+  fraction of the device — has never been used. Ladder first, pin last
+  `[not tested]`. [docs/07](docs/07-kv-and-draft-page.md) §6.
+- **`NCCL_ALGO=Ring,Tree` has never been run on this mesh**, and it is the cheapest untried thing in
+  the repository: our launcher forces `Ring`, decode is latency-bound on a fixed 102 collectives per
+  step, and a tree is ~3.2 steps against a ring's 4 at `world_size = 3`. Expected −1…3 % of a decode
+  step; the sweep is model-free and costs nothing `[not tested]`.
+  [docs/06](docs/06-nccl-mesh.md) §14 item 8.
+- **New `systemd/` directory — a template, deliberately not installed.** With it, the hazard it
+  exists to name: the NVFP4 sibling's `harem-motor.service` is `enabled` on all three of our nodes, so
+  a reboot brings up the **other** engine on the same GPUs. The template's three unfinished pieces are
+  named rather than fixed — its preflight script does not exist, systemd will not honour the
+  worker-2 → worker-1 → head start order on its own, and its `ExecStop` names the wrong container.
+  [systemd/README.md](systemd/README.md), [docs/11](docs/11-open-issues.md) §2.20.
+- **A complete retraction audit.** Every published claim of ours was re-read against the raw data
+  behind it; **24 did not survive** and all 24 are now in one table with what replaced them, including
+  ones that had only been corrected in passing: the chat template we serve matches neither checkpoint
+  on disk and its provenance is unverified; `NCCL_BUFFSIZE` was listed as an open lever twelve hours
+  after being eliminated; `NCCL_MAX_NCHANNELS=8` had been "already tried" only in combination with
+  `NCCL_PROTO=LL`; `--language-model-only` does not stop the vision tower being built, only run.
+  Six of the 24 are a ruler we quoted instead of measured, four are a single pair of sweeps treated as
+  a result, three are an arithmetic model a bench refuted, two are our own tooling disagreeing with
+  our own documentation. [docs/11](docs/11-open-issues.md) §1.9.
+
 ## 2026-09-05 — where a step actually goes, and four items closed
 
 Production configuration 6 is **unchanged**. Everything in this entry is measurement.

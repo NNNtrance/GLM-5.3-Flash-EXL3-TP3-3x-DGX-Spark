@@ -94,3 +94,14 @@ runnable on a node with only this repository and the pinned upstreams.
 - Model-free first. Every conclusion in this repository that survived was reached with the engine
   down, on a micro-benchmark with the real shapes; every conclusion drawn from two engine sweeps
   alone has since been retracted.
+
+
+## The opening statement
+
+Every repository of ours opens, directly under the title, with the "below the engine" block: what we
+did beneath the flags — kernel, transport, loader — in this specific repository, each item true of
+this repository's contents, followed by the measurement-and-retraction sentence. Update the examples
+to what the new repository actually contains; never carry an example over from another repository.
+The claim is about depth of work, not about other people's recipes — name no one, and keep the
+comparison page ([docs/16](docs/16-comparison-with-published-recipes.md)) as the only place other
+recipes are discussed.

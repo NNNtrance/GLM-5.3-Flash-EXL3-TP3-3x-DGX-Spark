@@ -1,5 +1,15 @@
 # GLM-5.3-Flash (EXL3 4bpw) on 3× NVIDIA DGX Spark — vLLM, cuda-exl3, TP=3 + EP, DFlash2
 
+> **Most recipes stop at the flags. This one goes below the engine.** When three nodes ran slower
+> than two, we did not swap a setting — we found the kernel dispatch bug behind it, together with the
+> `cuda-exl3` author, and it is fixed upstream. We carry our own patch in the MoE combine kernel, we
+> patched the NCCL transport plugin so the second cable on every ConnectX-7 carries traffic, we built
+> the loading path that puts a **fully quantized** checkpoint into dimensions vLLM had padded (its
+> kernel side written by the author to our specification), and we found the page counter that was
+> hiding 45 % of the KV pool. Every change was measured on the hardware, and every number we got wrong
+> is withdrawn in public. Assembling a working cluster from other people's parts is where this work
+> starts, not where it ends.
+
 > **Status: release.** Numbers, flags and patches are current as of **5 September 2026** and describe
 > **production configuration 10** — configuration 9 with `gpu-memory-utilization` at 0.83 — which is
 > what our three nodes serve, start at boot and were rebooted into as a whole cluster with the gates

@@ -57,7 +57,7 @@ check_relative_sidecar() {   # $1 host dir, $2 container path, $3 label
 check_relative_sidecar "$MODEL_HOST_PATH" "$MODEL_PATH" MODEL
 # The link target must itself be mounted, at its own path, or the links dangle too.
 test -d "$MODEL_LINK_TARGET" || { echo "no link target at $MODEL_LINK_TARGET" >&2; exit 2; }
-mkdir -p "$CACHE_HOST_PATH/triton" "$CACHE_HOST_PATH/tilelang" "$CACHE_HOST_PATH/flashinfer"
+mkdir -p "$CACHE_HOST_PATH/triton" "$CACHE_HOST_PATH/tilelang" "$CACHE_HOST_PATH/flashinfer" "$CACHE_HOST_PATH/tune"
 # MASTER_ADDR must be the MANAGEMENT address of rank 0. A fabric (RoCE) address
 # hangs the rendezvous silently instead of failing. Set FABRIC_PREFIX to the first
 # octets of your fabric subnet and this refuses one outright.

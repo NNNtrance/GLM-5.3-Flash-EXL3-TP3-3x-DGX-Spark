@@ -326,6 +326,13 @@ The maintenance debt is the one that would bite an unattended cluster, so be exp
 regenerate", it is that the identity is recomputed on every boot and a mismatch is fatal, so the cost of forgetting is a refused
 boot with a printed diff — the cheapest possible failure.
 
+**It came due the same day.** Moving the image from `exl3-zeus:f4987cf` to `exl3-zeus:9bf594c` for the persisted MLA tuner cache
+([12](12-tuner-cache.md)) invalidated the sidecar, the preflight refused the boot, and regenerating it cost one dump boot of
+**682 s** wall on all three nodes `[measured-here]`. That is the design working, and it is also the real recurring price of this
+page: **every kernel-image change now carries an 11-minute dump boot.** Put it in the plan for the image, not in the surprise
+column. One trap with it: the dump boot's own KV pool reads 3,958,677 rather than ~4.48M, because writing 56 GiB per node goes
+out through the page cache (§5). It returns on the next boot. Do not record a dump boot's pool as a result.
+
 **And one thing that was not measured: the ceiling of the read path.** `[not tested]` The sidecar is read at 0.88–1.04 GB/s (893
 / 905 / 1039 MB/s on the three ranks) where another loader on the same NVMe reaches 3.1 GB/s, so roughly **3× is still on the
 table** on top of S4. `HAREM_FASTLOAD_READ=mmap` exists in the code as a one-variable A/B that needs no re-dump, and it has
@@ -384,12 +391,12 @@ for h in head worker-1 worker-2; do ssh $h "rm -rf /var/tmp/glm53-exl3-tp3-r*"; 
 2. **The profile run is now the second-largest item**, 67–73 s, and its **first step alone is ~45 s** (`Profiling CUDA graph
    memory (PIECEWISE): 1/19 [00:44<13:22, 44.56s/it]`) — inside that step the first NCCL collective is established and the MLA
    tuner fires. The NCCL part is unavoidable.
-3. **Persist the MLA tuner cache.** `cuda-exl3` keeps the tune map in a process-local `static std::map`; nothing writes it out
-   or reads it back, and no environment variable asks it to. About 40 lines would key it on device name, head count, head dim,
-   KV dtype and the kernel commit and write it into the already-mounted `/cache`: worth ~5–10 s of boot and, more importantly,
-   the end of the "discard the first two rounds" rule in [09](09-measurement-protocol.md), since this boot minted 11 tune events
-   before the server was up and 18 in total, and the ones minted *after* it came up are what poison the first two sweep rounds.
-   `[not tested]`
+3. ~~**Persist the MLA tuner cache.**~~ **Done, and it is upstream's, not ours.** `cuda-exl3` kept the tune map in a
+   process-local `static std::map`; commit `9bf594c` writes it into the already-mounted `/cache` behind
+   `CUDA_EXL3_TUNE_CACHE`. Measured on this cluster: **18 tune events before serving → 0**, and the first sweep round stops
+   being a penalty, which is what shortened the protocol in [09](09-measurement-protocol.md) from five rounds to three. The
+   boot-time part of it — a few hundred milliseconds inside phase 4 — was **not** isolated, because the reason for doing it was
+   measurement hygiene rather than boot time. Full account in [12](12-tuner-cache.md) `[measured-here]`.
 4. **Re-test the memory ladder.** The pool is 4,484,848 at 0.80 now, and the page-cache remedy from section 5 was not in place
    when the 0.85 arm was last measured, so the higher rungs may be roomier. A separate measurement, not a claim. `[not tested]`
 

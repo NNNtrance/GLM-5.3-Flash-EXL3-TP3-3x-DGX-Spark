@@ -27,6 +27,16 @@ of both models (16.8 + 14.8 s) and two post-`process_weights_after_loading` hash
 (2) In production: drafter restore 2.1 s plus a 32-tensor hash exam on each of the two models
 (8.2 + 11.6 s).
 
+## The sidecar is bound to the image, and the image moved
+
+The manifest records the image tag, so the move from `exl3-zeus:f4987cf` to `exl3-zeus:9bf594c` (the
+persisted tuner cache, [docs/12](../../docs/12-tuner-cache.md)) invalidated the sidecar and the
+preflight refused to boot on it — correctly. Regenerating it cost one dump boot of **682 s** wall,
+after which the boot path is the one in the table above. That dump boot's KV pool reads 3,958,677
+rather than ~4.48M, because writing 56 GiB per node goes out through the page cache; the pool returns
+on the next boot `[measured-here]`. Budget one such boot for every image, checkpoint, patch-set or
+TP/EP change.
+
 ## Bit-identity evidence
 
 Two independent proofs, on all three ranks `[measured-here]`:

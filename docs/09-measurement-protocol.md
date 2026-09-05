@@ -8,7 +8,7 @@ If you take one thing from this repository, take this page rather than any numbe
 
 ---
 
-## 1. Five sweep rounds, discard the first two
+## 1. Sweep rounds: five and discard two, or three if the tuner cache is warm
 
 **The trap.** The MLA decode tuner keys on the batch shape and re-tunes when it sees a new one, at
 about 15 ms per event, and every event is marked evicted. A boot mints 11 events before the server is
@@ -27,8 +27,26 @@ rounds 3–5, and report the spread.
 python3 scripts/bench-sweep.py --out sweep-1.json --label arm-round1 --think low
 ```
 
-Repeat five times, then take medians. Rounds 3–5 of a settled engine are tight: on our final
+Repeat five times, then take medians. Rounds 3–5 of a settled engine are tight: on the 8-channel
 configuration, C8 over five rounds read 151.7 / 150.1 / 152.4 / 150.8 / 147.0 `[measured-here]`.
+
+**The shorter protocol, and what earns it.** Upstream now persists the tuner cache across processes
+(`CUDA_EXL3_TUNE_CACHE`, [12](12-tuner-cache.md)). With it warm, a boot mints **zero** tune events
+before serving and **zero** during a full sweep, and round 1 stops being a penalty: cold cache, C8
+round 1 → round 3 is −3.4 %; warm cache it is +2.7 %, i.e. unordered noise `[measured-here]`. On an
+image that has the cache **and a warm cache file on disk**, the protocol drops to **three rounds,
+median of three** — about 15 minutes saved per arm.
+
+Three conditions, all of them, or go back to five:
+
+1. the image carries the persisted cache and `CUDA_EXL3_TUNE_CACHE` points at a directory that
+   survives the container;
+2. the cache file already exists from a previous boot of **this** image — the boot that writes it is
+   still a five-round boot;
+3. the three rounds agree within about 5 %. If they do not, that is a signal, not a number.
+
+Every arm in this repository up to *fast boot S4* is a five-round median with two discarded; the two
+after it are three-round medians. The tables say which, and the two are not interchangeable.
 
 ## 2. Boot-to-boot variance is 16 %, so two rounds decide nothing
 
@@ -160,7 +178,39 @@ give the numbers that show it.
 
 ---
 
-## 9. What is next
+---
+
+## 9. Three tiers of test, and picking the cheapest one that can answer
+
+A boot on this stack costs about 11 minutes and a full A/B arm about half an hour, so the question
+before every measurement is which of these can actually settle it. Working down from the cheapest:
+
+| Tier | What it runs | Cost | Answers |
+|---|---|---|---|
+| **A — model-free** | `bench/`: the real shapes, engine **down**. `bench/validate.sh <image>`, `bench/ar_bench.py`, `bench/mesh-multilink-sweep.sh`, `bench/moe_stage_bench.py`, `bench/topk_bench.py` | seconds to ~45 min, no boot | kernel and collective questions; rejecting a setting outright; anything with a mechanism |
+| **B — quick arm** | one boot → gates cold → `soguk-c1` → `prefill-7k` → **`prefill-fresh`** → **3** C1–C8 rounds → gates warm → free RAM and swap | ~17 min | does a model-free win survive the engine, and did it cost anything |
+| **C — full arm** | tier B with **5** rounds, plus `category-speed.py` and `mixed-load-probe.py` | ~30–40 min | a configuration that is going into production, or a claim about content types or latency under load |
+
+**Tier A first, always.** Every conclusion in this repository that survived was reached with the
+engine down; every conclusion drawn from two engine sweeps alone has since been retracted (§4). The
+protocol setting we rejected without spending a boot, and the per-kernel comparison that retired one
+of our own patches, cost five minutes between them.
+
+**Tier B is the workhorse, and it has a gap you must state.** It does not run the category probe or
+the mixed-load probe, so an arm measured at tier B has **no** prose/code/math/JSON numbers and **no**
+mixed-load numbers. Say `[not tested]` rather than carrying the previous arm's figures forward
+silently — the results tables in this repository do exactly that for the last two arms.
+
+**Tier C before anything becomes production**, and before any claim that a change moved the balance
+between content types or the behaviour under a long prompt.
+
+Two rules that cut across all three. Every tier ends with the **gates cold and warm** (§5) — a speed
+number without them is not a result. And every tier reports **what the gain cost**: speed, quality
+and memory together, with the KV pool line filled in, because several changes on this stack have paid
+for throughput out of the pool without anyone noticing for a boot or two.
+
+## 10. What is next
 
 [10 — Results and roofline](10-results-and-roofline.md) — the numbers this protocol produced, and how
-close to the hardware they are.
+close to the hardware they are. [12 — The tuner cache](12-tuner-cache.md) — why §1 has two protocols
+in it.

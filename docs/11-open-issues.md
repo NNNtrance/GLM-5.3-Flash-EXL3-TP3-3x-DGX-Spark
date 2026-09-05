@@ -8,8 +8,8 @@ elsewhere.
 
 ## 1. Retracted
 
-Five things we wrote down as findings and later measured properly. Each one was published — in a
-report, an upstream issue, or both — before it was corrected.
+Six things we wrote down as findings and later measured properly, plus two smaller ones. Each was
+published — in a report, an upstream issue, or both — before it was corrected.
 
 ### 1.1 "The missing `n_rows` also costs the non-expert-parallel path"
 
@@ -45,7 +45,20 @@ prefills**, each triggering roughly 350 eviction calls — a one-off cost that s
 repeat, not continuous re-tuning `[retracted]`. We withdrew the proposal to disable tuning. The axis
 that actually varies on this model is the batch size, not the top-k the fix bucketed.
 
-### 1.6 Two smaller ones
+### 1.6 "The mesh ceiling is ~13 GB/s against a 25 GB/s link, and GPUDirect is the fix we cannot make"
+
+Two errors in one sentence, both published here, both corrected on 5 September `[retracted]`. The
+"25 GB/s link" is a **pair of cables at 50 GB/s**, and the plugin was using one of them — the second
+cable of every pair had transmitted exactly zero bytes since driver load, on all three nodes. And
+recovering the device-pointer path was **two lines** in `getProperties` plus a real flush, not the
+receiver-advertised-FIFO redesign we had priced it at, because the plugin's `regMr` already
+registered CUDA pointers and was simply never handed one.
+
+What replaced it: the all-reduce reaches **20.84 GB/s** at 64 MB against 12.08 before, and the engine
+went from C8 159.9 to **168.9**. See [06](06-nccl-mesh.md) §6–§7. The lesson we would rather have
+learned earlier is in §4 of this page.
+
+### 1.7 Two smaller ones
 
 - **"The gemm should zero a retired tile rather than return."** We shipped it; upstream's design is
   10.7 % cheaper per MoE layer at M=2048. Our patch is retired in writing
@@ -70,24 +83,32 @@ today, because with attention quantized there is no unquantized dimension left t
 ([01](01-model-and-license.md) §3.1). Next step: nothing cheap. It is either a differently scoped
 quantization, or pipeline parallelism, which we have not evaluated at all `[not tested]`.
 
-### 2.2 The mesh plugin's residual RNR
+### 2.2 The mesh plugin's residual RNR, and what the fabric is worth now
 
 `NCCL_MAX_NCHANNELS=8` drives the receive-not-ready counters to about zero in the microbenchmark but
-**not in the engine**: a live counter read across a full sweep plus prefill plus mixed load still
-shows roughly 42,000 events per node over five minutes, on the order of 1–3 % of wall clock
-`[measured-here]`. The plugin patch (`patches/kernel/0004-min-rnr-timer.patch`) would make each one
-about 64× cheaper. It is built, unit-tested and staged, and has **never been A/B'd on the engine**
-because with the channel cap in place its model-free contribution is inside the noise. That residual
-is the concrete argument for giving it one boot.
+**not in the engine**: a live counter read across a full sweep plus prefill plus mixed load showed
+roughly 42,000 events per node over five minutes, on the order of 1–3 % of wall clock
+`[measured-here]`. That read was taken on the single-cable, host-bounce-buffer configuration and has
+**not been repeated** since the plugin patches landed `[not tested]`, although model-free the retries
+per operation fell from ~15 to ~3 with `NCCL_PTR_CUDA` `[measured-here]`.
 
-Also open: **12 channels was never taken to the engine.** Model-free it is indistinguishable from 8
-and slightly better at 3.4 MB, and it keeps more parallelism for the largest messages. One boot would
-settle it.
+`patches/kernel/0004-min-rnr-timer.patch` is now carried in the production plugin build alongside
+0005 and 0006, at `NCCL_MESH_MIN_RNR_TIMER=1`. What it is worth **on its own** in the engine is still
+unmeasured.
 
-The deeper fix is upstream's to make: a receiver-advertised buffer FIFO with `RDMA_WRITE`, which
-would remove the stall from the steady state entirely instead of making it cheap, and would let the
-plugin advertise device pointers and recover the GPUDirect path — currently disabled on all four
-HCAs, which is what holds the ceiling at ~13 GB/s against a 25 GB/s link.
+Also open: **12 channels was never taken to the engine**, and now needs re-measuring rather than
+carrying forward — it was indistinguishable from 8 on one cable, and 16 turned out to be badly wrong
+on two ([06](06-nccl-mesh.md) §8.1), so the channel arithmetic over two cables is not the same
+question `[not tested]`.
+
+The deeper fix is still upstream's to make: a receiver-advertised buffer FIFO with `RDMA_WRITE`,
+which would remove the stall from the steady state instead of making it cheap. It is a wire-format
+change of ~650–850 lines. With the cap and both patches in place, the remaining prize is small.
+
+**Retracted here** `[retracted]`: an earlier version of this section said the disabled GPUDirect path
+"holds the ceiling at ~13 GB/s against a 25 GB/s link". Both halves were wrong. The link is a *pair*
+of cables at 50 GB/s and one of them was idle; and the device-pointer path was two lines away, not a
+redesign away. Both are fixed and the all-reduce now reaches 20.8 GB/s ([06](06-nccl-mesh.md) §6–§7).
 
 ### 2.3 The pool is sized by the smallest rank
 
@@ -121,13 +142,19 @@ multi-threaded reader.
 After that, the profile run at 67–73 s becomes the largest remaining item; its first step alone is
 about 45 s and contains the first NCCL collective and the MLA tune.
 
-### 2.8 A persisted MLA tuner cache
+### 2.8 A persisted MLA tuner cache — closed
 
-The tuner's cache is process-local, so every boot re-tunes: 11 events before the server is up, more
-as new batch shapes appear, ~15 ms each, every one logged as evicted. On this hardware that is what
-pollutes the first two rounds of every A/B — the reason the protocol discards them — and it costs the
-same again after every restart in production. Upstream has since landed a persisted cache
-(`9bf594c`); we have **not built or measured an image with it** `[not tested]`.
+**Done.** Upstream's `9bf594c` persists the cache behind `CUDA_EXL3_TUNE_CACHE`; we built the image,
+wired it into the environment and measured it: **18 tune events before serving → 0**, no events during
+a sweep, and round 1 is no longer a penalty. The sweep protocol dropped from five rounds to three.
+Kept here as a closed item rather than deleted, because the *sub*-items it left behind are open:
+
+- the cache key does not know about our kernel patches, so a patch that changed the candidate grid
+  would need the file cleared by hand, and nothing enforces that `[not tested]`;
+- the boot-time part of the saving was never isolated from phase 4 of the ledger `[not tested]`;
+- three rounds is calibrated on **one** cold/warm pair at one configuration.
+
+Full account in [12](12-tuner-cache.md).
 
 ### 2.9 The 2,304-padded alternative to expert parallelism
 
@@ -137,6 +164,19 @@ instead of distributed whole. It was designed, the sidecars were built and verif
 at M=2048, while costing +12.5 % expert bytes straight out of the KV pool `[measured-here]`. With a
 k=7 draft the real decode batch is M=8 at one stream and M=64 at eight — both in the region where
 expert parallelism wins. The sidecars exist on disk as an option and nothing uses them.
+
+### 2.10 DMA-BUF registration on the mesh plugin
+
+`NCCL_MESH_DMABUF=1` works — `ibv_reg_dmabuf_mr` accepts these buffers on this platform, which was an
+open question — and is **slower** than plain `ibv_reg_mr` across the size range (64 MB all-reduce
+18.08 against 20.84 GB/s) `[measured-here]`. Rejected on the measurement; not investigated further,
+so the *why* is `[not tested]`.
+
+### 2.11 The RDMA_READ flush
+
+`NCCL_MESH_FLUSH=0` measures inside noise of flush-on, and better at a couple of sizes. We keep the
+flush because coherence is not a noise-level decision, but "inside noise" over two repetitions is not
+the same as "free", and it has never been taken to the engine either way `[not tested]`.
 
 ---
 
@@ -149,6 +189,8 @@ expert parallelism wins. The sidecars exist on disk as an option and nothing use
 | **IFEval, GSM8K, needle-in-a-haystack, tool-eval-bench, ExtractBench** | All exist for the NVFP4 sibling recipe; none re-run on this stack. Anyone comparing the two on quality should treat this repository as having the gates and one MMLU sample. |
 | **The newer checkpoint revision** (`aba59d21`, four days newer than the one we pinned) | Not tested. |
 | **`NCCL_MAX_NCHANNELS=8` on the NVFP4 stack** | Same plugin, same fabric, same TP=3, so it should transfer — one line per node, reversible. Not applied there. |
+| **The mesh plugin patches on the NVFP4 stack** | The idle second cable and the host bounce buffer are properties of the fabric and the plugin, not of the quantization, so both should transfer and are worth more there than the channel cap. Not applied. |
+| **The collective's share of a decode step, re-profiled** | The 21.9 % prefill / ~24 % decode figures everything is reasoned against were profiled at 64 channels on one cable, before three separate collective changes. One profiling boot would replace three inferences with a measurement. It is the cheapest unspent measurement here. |
 | **Prefix caching** | With a 3,328-token attention block our benchmark prompts never fill one, so the hit rate is 0 % throughout and the benchmark measures nothing about it. |
 | **Long-context behaviour under load** | KV usage never exceeded 13 %. The pool is insurance, not something we have stress-tested. |
 | **Pipeline parallelism** | The other way to run a fully quantized checkpoint on three nodes. Not evaluated; its interaction with speculative decoding is unknown. |
@@ -166,8 +208,13 @@ expert parallelism wins. The sidecars exist on disk as an option and nothing use
 - **One node's build wall-clock does not match its own build's internal step timer**, by 90 seconds,
   and clock skew, toolchain version and compiler caching were each checked and ruled out. Unexplained
   `[measured-here]`. It does not affect any conclusion, which rest on content hashes and on tests.
-- **The drafter is the difference between ~20 and ~54 tok/s at a single stream, and it is the most
+- **The drafter is the difference between ~20 and ~57 tok/s at a single stream, and it is the most
   restrictively licensed component in the stack.** See [../LICENSES.md](../LICENSES.md).
+- **Half of this fabric had never carried a packet, and nothing told us.** Every link was `ACTIVE`,
+  every subnet was configured, every benchmark ran, and the second cable of each pair had transmitted
+  zero bytes since the driver loaded. The ceiling we spent a day reasoning against was half the real
+  one. If you take one operational lesson from this repository, take that one: read the byte counters,
+  not the link state ([06](06-nccl-mesh.md) §6).
 
 ---
 

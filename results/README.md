@@ -18,13 +18,17 @@ The exact settings per arm are in each file's header.
 | `speed/category-prefill-and-mixed-load.md` | Decode rate by content type (prose / code / math / JSON) at C1 and C4; prefill, warm and fresh; the mixed-load probe; cold versus warm single stream. |
 | `gates/quality-gates.md` | The correctness probe and code exam for every arm, cold and after the benchmark; the MMLU sample; long-form generation. |
 | `boot/boot-ledger.md` | Boot time per phase across the four arms, the bit-identity evidence, the block-layer forensics, memory and swap. |
+| `boot/tuner-cache.md` | The persisted MLA tuner cache: tune events per boot, round-1 against round-3, and why the sweep protocol got shorter. |
 | `mesh/all-reduce-sweep.md` | The mesh all-reduce cliff: bandwidth by message size against point-to-point, the hardware counters, the channel-count dose–response, the protocol sweep, and the engine A/B. |
+| `mesh/multilink-sweep.md` | The nine-arm plugin sweep: the idle second cable, `NCCL_PTR_CUDA`, what the flush and DMA-BUF cost, and why 16 channels is harmful. |
+| `mesh/multilink-sweep.csv` | The same sweep, every arm × operation × size, with the per-collective RNR counters. Machine-readable. |
 
 ## What is deliberately not here
 
-- **Per-round raw JSON.** The published figures are medians of sweep rounds 3–5 with rounds 1–2
-  discarded; the medians are in the CSV and re-running `scripts/bench-sweep.py` five times reproduces
-  them. Keeping 40 raw files whose only use is to be re-medianed added weight without adding
+- **Per-round raw JSON.** The published figures are medians — of rounds 3–5 with rounds 1–2 discarded
+  on the images without a persisted tuner cache, and of three rounds on the ones with it
+  ([docs/12](../docs/12-tuner-cache.md)). The medians are in the CSV and re-running
+  `scripts/bench-sweep.py` reproduces them. Keeping 40 raw files whose only use is to be re-medianed added weight without adding
   evidence.
 - **Boot and engine logs.** They carry host names and addresses throughout. What they proved is
   quoted as individual log lines in the documents, in context, with the surrounding text.

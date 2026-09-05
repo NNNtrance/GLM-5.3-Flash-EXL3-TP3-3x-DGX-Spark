@@ -1,8 +1,10 @@
-# Concurrency sweeps — medians of rounds 3–5
+# Concurrency sweeps — arm by arm
 
 Source: `bench-sweep.py` with `scripts/hizset-v2.jsonl` (12 short English code prompts),
-`reasoning_effort: low`, temperature 0, `max_tokens` 256 per request, five rounds per arm with
-rounds 1–2 discarded as MLA-tuner warm-up ([docs/09](../../docs/09-measurement-protocol.md)).
+`reasoning_effort: low`, temperature 0, `max_tokens` 256 per request. Every arm up to and including
+*fast boot S4* is a median of five rounds with rounds 1–2 discarded as MLA-tuner warm-up; the two
+arms after it are medians of three rounds on an image whose tuner cache persists, which removed that
+warm-up ([docs/09](../../docs/09-measurement-protocol.md), [docs/12](../../docs/12-tuner-cache.md)).
 All arms: three nodes, TP=3 + expert parallel, EXL3 4bpw, KV `fp8`, DFlash2 draft k=7,
 `--block-size 256`, `--max-num-seqs 8`, `NCCL_MAX_NCHANNELS=8`, CUDA graphs on,
 `gpu-memory-utilization 0.80` except where the arm says otherwise. 5 September 2026.
@@ -22,7 +24,9 @@ decides throughput, not `accept_rate_pct`.
 | f4987cf + draft page 256 | as above plus HAREM_SW_BLOCK_SIZE=256 (docs/07) |
 | draft page 256 @ 0.85 | same, gpu-memory-utilization 0.85 - REJECTED, broke the free-memory rule |
 | fast boot S1+S2+S3 | EP weight filter, eager safetensors, FlashInfer autotune off (docs/08) |
-| fast boot S4 (production) | per-rank pre-sliced sidecar, full bit-identity verification (docs/08) |
+| fast boot S4 | per-rank pre-sliced sidecar, full bit-identity verification (docs/08) |
+| tuner cache warm (9bf594c) | image moved to cuda-exl3 9bf594c, CUDA_EXL3_TUNE_CACHE warm (docs/12) |
+| dual cable + `PTR_CUDA` (production) | mesh plugin patches 0005 + 0006: both cables per peer, no host bounce buffer (docs/06) |
 
 ## The numbers
 
@@ -68,6 +72,24 @@ decides throughput, not `accept_rate_pct`.
 | fast boot S4 (production) | 4 | **114.6** | 113.5–115.6 | 36.3 | 0.927 | 27.53 | 62.8 | 5.4 | 4,468,319 |
 | fast boot S4 (production) | 6 | **136.8** | 135.9–137.4 | 28.5 | 0.975 | 35.09 | 60.5 | 5.24 | 4,468,319 |
 | fast boot S4 (production) | 8 | **161.8** | 161.3–163.4 | 25.2 | 1.142 | 39.65 | 61.6 | 5.31 | 4,468,319 |
+| tuner cache warm (9bf594c) | 1 | **54.5** | 54.4–54.5 | 62.5 | 0.465 | 15.99 | 64.1 | 5.49 | 4,429,752 |
+| tuner cache warm (9bf594c) | 2 | **80.8** | 76.4–81.1 | 46.6 | 0.629 | 21.47 | 63.7 | 5.46 | 4,429,752 |
+| tuner cache warm (9bf594c) | 4 | **112.0** | 111.1–112.2 | 34.7 | 0.784 | 28.84 | 61.5 | 5.31 | 4,429,752 |
+| tuner cache warm (9bf594c) | 6 | **135.6** | 131.7–138.1 | 28.3 | 1.016 | 35.39 | 60.5 | 5.23 | 4,429,752 |
+| tuner cache warm (9bf594c) | 8 | **159.9** | 159.0–163.3 | 24.6 | 1.026 | 40.62 | 60.9 | 5.26 | 4,429,752 |
+| **dual cable + `PTR_CUDA` (production)** | 1 | **56.9** | 56.1–57.2 | 63.6 | 0.414 | 15.71 | 64.2 | 5.49 | 4,449,035 |
+| **dual cable + `PTR_CUDA` (production)** | 2 | **84.2** | 83.0–84.4 | 49.5 | 0.562 | 20.21 | 64.7 | 5.53 | 4,449,035 |
+| **dual cable + `PTR_CUDA` (production)** | 4 | **118.5** | 114.9–125.1 | 36.1 | 0.752 | 27.66 | 63.0 | 5.41 | 4,449,035 |
+| **dual cable + `PTR_CUDA` (production)** | 6 | **142.9** | 142.8–146.4 | 29.6 | 0.903 | 33.74 | 61.5 | 5.30 | 4,449,035 |
+| **dual cable + `PTR_CUDA` (production)** | 8 | **168.9** | 167.3–170.2 | 26.0 | 1.010 | 38.47 | 61.2 | 5.29 | 4,449,035 |
+
+**The last two arms are medians of three rounds, not five with two discarded.** They ran on the
+`9bf594c` image with a persisted MLA tuner cache, which is what removed the warm-up window the
+five-round rule existed to skip ([docs/12](../../docs/12-tuner-cache.md)); their per-round figures are
+in [`../boot/tuner-cache.md`](../boot/tuner-cache.md) and are unordered noise. Every earlier arm on
+this page is a five-round median with rounds 1–2 discarded, and the two are not interchangeable: a
+three-round median on a cold tuner would still be polluted.
 
 Raw per-round JSON is not included in this repository; the medians above are the published
-figures. Re-running `scripts/bench-sweep.py` five times reproduces them.
+figures. Re-running `scripts/bench-sweep.py` reproduces them — five times on an image without the
+tuner cache, three times on one with it.

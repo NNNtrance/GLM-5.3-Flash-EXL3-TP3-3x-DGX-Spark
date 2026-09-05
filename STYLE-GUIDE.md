@@ -63,7 +63,7 @@ effort would take days on this cluster). Where a max-effort number would change 
 
 - "What we tried and rejected", with reason and evidence tier.
 - "Open problems" (unsolved) and "Retracted" (numbers we withdrew, and what replaced them). This
-  stack has produced four retractions already; they are in [docs/11](docs/11-open-issues.md) and they
+  stack has produced six retractions already; they are in [docs/11](docs/11-open-issues.md) and they
   stay there.
 - A **"what this cost"** line for every gain — speed, quality and memory together. No gain is
   reported without its price. If the price is genuinely zero, say that it was looked for.

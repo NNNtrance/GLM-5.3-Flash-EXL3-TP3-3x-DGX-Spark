@@ -6,12 +6,23 @@ DFlash2 draft k=7, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`, `--max-num-bat
 `gpu-memory-utilization 0.80`, temperature 0, `reasoning_effort: low`, warm engine.
 5 September 2026 `[measured-here]`.
 
+The last two arms — *tuner cache warm* and *dual cable + `PTR_CUDA`* (the production configuration
+since) — ran on image `exl3-zeus:9bf594c` with the persisted MLA tuner cache
+([docs/12](../../docs/12-tuner-cache.md)) and, for the last one, the patched mesh plugin
+([docs/06](../../docs/06-nccl-mesh.md) §6–§8). They were measured with the quick arm of the tiered
+protocol ([docs/09](../../docs/09-measurement-protocol.md) §10), which does not run the category or
+mixed-load probes — so those two tables stop at the fast-boot arm and say so.
+
 ## 1. Decode rate by content type
 
 `scripts/category-speed.py`. Decode rate excludes TTFT. Acceptance is read from the server's own
 speculative-decoding counters, differenced across the run.
 
-### Production configuration (fast-boot sidecar, image `f4987cf`, draft page 256)
+### Fast-boot arm (image `f4987cf`, draft page 256, fast-load sidecar)
+
+The category probe has **not** been re-run on the two arms after this one `[not tested]`; category
+decode is decode-bound and neither change touches the decode kernel path, but that is a reason to
+expect no movement, not a measurement of it.
 
 | | C1 decode tok/s | range | TTFT | acceptance | mean tokens |
 |---|---|---|---|---|---|
@@ -39,7 +50,7 @@ wasted draft work eats the gain. This is a property of speculative decoding, not
 | `f4987cf`, draft page 16 | 22.2 | 47.3 | 63.5 | 56.2 |
 | `f4987cf` + draft page 256 | 21.7 | 48.5 | 61.0 | 56.6 |
 | fast boot S1+S2+S3 | 22.5 | 47.3 | 60.2 | 57.0 |
-| **production (fast-boot sidecar)** | **22.4** | **47.9** | **59.0** | **57.7** |
+| **fast-boot sidecar (last arm measured)** | **22.4** | **47.9** | **59.0** | **57.7** |
 
 Category decode is decode-bound, so these arms differ by less than their own run-to-run spread. Do
 not read a ranking into this table; read it as a stability check.
@@ -51,8 +62,8 @@ Two different measurements, and the difference between them matters — see
 
 | Measurement | What it is | Production value |
 |---|---|---|
-| `prefill 7k` (`scripts/prefill-7k.py`) | Two fixed seeds, second request reported. **Warm.** Reads whole blocks out of the prefix cache on a repeat. | 1,447 – 1,475 tok/s |
-| `prefill-fresh` (`bench/prefill-fresh.py`) | Three ~8.2K prompts the engine has never seen, new seed per request. **This is the honest number.** | 1,633 / 1,704 / 1,721, median **1,704** |
+| `prefill 7k` (`scripts/prefill-7k.py`) | Two fixed seeds, second request reported. **Warm.** Reads whole blocks out of the prefix cache on a repeat. | 1,506 tok/s |
+| `prefill-fresh` (`bench/prefill-fresh.py`) | Three ~8.3K prompts the engine has never seen, new seed per request. **This is the honest number.** | 1,742 / 1,792 / 1,797, median **1,792** |
 
 Across the arms `[measured-here]`:
 
@@ -64,7 +75,9 @@ Across the arms `[measured-here]`:
 | `f4987cf`, MNBT 2048 | 1,331 | 1,645 |
 | `f4987cf` + draft page 256 | 1,469 | 1,508 (first prompt cold at 817; warm repeats 1,699 – 1,709) |
 | fast boot S1+S2+S3 | 1,470 | 1,669 |
-| **production (fast-boot sidecar)** | **1,475** | **1,704** |
+| fast boot S4 (sidecar) | 1,475 | 1,704 |
+| tuner cache warm (`9bf594c`) | 1,445 | 1,709 |
+| **dual cable + `PTR_CUDA` (production)** | **1,506** | **1,792** |
 
 `--max-num-batched-tokens 4096` is worth about +9.5 % on fresh prefill and costs 28.5 % of the KV
 pool ([docs/07](../../docs/07-kv-and-draft-page.md) §5). The production configuration takes the pool.
@@ -80,7 +93,8 @@ preemption policy actually costs.
 | `bc0e0f6`+0003, MNBT 4096 | 10.2 | 4.9 s |
 | `f4987cf`, MNBT 2048 | 7.5 | 5.0 s |
 | `f4987cf` + draft page 256 | 6.9 | 4.9 s |
-| **production (fast-boot sidecar)** | **7.0** | **4.9 s** |
+| **fast boot S4 (last arm measured)** | **7.0** | **4.9 s** |
+| tuner cache warm, dual cable + `PTR_CUDA` | not run `[not tested]` | not run `[not tested]` |
 
 A stream running alone does about 50 tok/s, so a concurrent 7K prefill costs it roughly 85 % of its
 rate for the duration. `--max-num-batched-tokens 4096` is the lever that improves this (10.4 tok/s
@@ -94,7 +108,9 @@ and 4.8 s TTFT in a clean A/B) and it is not taken, for the pool.
 |---|---|---|---|---|---|
 | `f4987cf`, MNBT 2048 | 1.38 s | 45.5 | 43.9 | 41.8 | 40 – 44 % |
 | `f4987cf` + draft page 256 | **0.79 s** | 45.9 | 45.8 | 45.5 | 44 % |
-| **production (fast-boot sidecar)** | **0.79 s** | 44.2 | 45.3 | 43.2 | 41 – 44 % |
+| fast boot S4 (sidecar) | 0.79 s | 44.2 | 45.3 | 43.2 | 41 – 44 % |
+| tuner cache warm (`9bf594c`) | 0.77 s | 42.3 | 47.5 | 45.7 | 40 – 47 % |
+| **dual cable + `PTR_CUDA` (production)** | **0.72 s** | 45.1 | 44.1 | 44.7 | 40 – 42 % |
 
 The cold TTFT halves with the draft page change, which is the 16× smaller draft block table showing
 up ([docs/07](../../docs/07-kv-and-draft-page.md) §3).

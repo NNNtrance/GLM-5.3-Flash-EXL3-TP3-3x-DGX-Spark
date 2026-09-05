@@ -4,9 +4,64 @@ Dated entries for the stack this repository documents. This is a working record,
 history — the repository is a **private draft** and is overwritten in place as the work continues.
 
 Speed figures are aggregate output tok/s on `scripts/hizset-v2.jsonl` at `reasoning_effort: low`,
-temperature 0, medians of sweep rounds 3–5 unless an entry predates that protocol and says so.
+temperature 0. Entries up to and including *production configuration 4* are medians of sweep rounds
+3–5 with rounds 1–2 discarded; from *production configuration 5* onwards they are medians of three
+rounds, which is what the persisted MLA tuner cache bought — see
+[docs/09](docs/09-measurement-protocol.md) §1 and [docs/12](docs/12-tuner-cache.md).
 
 ---
+
+## 2026-09-05 — production configuration 6: both cables, and no host bounce buffer
+
+- **Half the fabric had never carried a packet.** Two cables run between every pair of nodes;
+  `mesh_connect()` discards NCCL's device index and stops at the first reachable peer address, so
+  every channel to a peer rode one cable. `port_xmit_data` on the second cable of each pair read
+  **exactly zero since driver load**, on all three nodes. The 13 GB/s we had been calling "the link"
+  was one cable of a 50 GB/s pair.
+- `patches/kernel/0005-device-aware-link-selection.patch` (~30 lines, no wire-format change) picks
+  `dev % usable` among the parallel links; with one cable, or `NCCL_MESH_LINKS_PER_PEER=1`, the
+  selection is bit-identical to the stock plugin. 64 MB all-reduce **12.0 → 16.7 GB/s**.
+- `patches/kernel/0006-ptr-cuda-dmabuf-and-flush.patch` advertises `NCCL_PTR_CUDA` — two lines; the
+  plugin's `regMr` already registered CUDA pointers and NCCL was simply never handing it one — plus a
+  real RDMA_READ `iflush` and a real DMA-BUF path. 64 MB all-reduce **16.7 → 20.8 GB/s**, RNR retries
+  per operation 15 → 3.
+- Engine, three rounds per arm: **C1 54.5 → 56.9, C4 112.0 → 118.5, C8 159.9 → 168.9** (+4–6 %),
+  prefill-fresh 1,709 → **1,792**, TTFT C1 0.47 → 0.41 s, gates 10/10 · 12/12 cold and warm.
+- **What it cost:** nothing measurable — the KV pool moved +0.4 % (inside boot noise), which was the
+  line to watch because `NCCL_PTR_CUDA` moves NCCL's buffers into memory accounted under
+  `gpu-memory-utilization`. The real price is not a number: a patched plugin to maintain.
+- **`NCCL_MAX_NCHANNELS=16` rejected.** Restoring 8 channels per cable is the obvious follow-up and
+  it is 2.5× slower on the decode-sized message (STEP90 9.3 → 26.2 ms), in both patch families. 8
+  stays.
+- **`NCCL_MESH_DMABUF=1` rejected.** It works — which settles whether `ibv_reg_dmabuf_mr` accepts
+  these buffers here — and is slower than plain `ibv_reg_mr` (64 MB 18.1 against 20.8).
+- Patch `0004-min-rnr-timer` is carried into the production build at `NCCL_MESH_MIN_RNR_TIMER=1`
+  rather than staying on the shelf. Its isolated engine contribution is still unmeasured.
+- **Retracted:** "the ceiling is ~13 GB/s against a 25 GB/s link, and the GPUDirect path needs a
+  plugin redesign". The link is a pair of cables at 50 GB/s with one idle, and the device-pointer
+  path was two lines. See [docs/11](docs/11-open-issues.md) §1.6.
+- Reported upstream as a follow-up on the plugin's issue thread, with both patches offered.
+
+## 2026-09-05 — production configuration 5: the MLA tuner cache stops charging us for measurement
+
+- Image moved to `cuda-exl3` `9bf594c` ("Persist the MLA tuner cache across processes"), which adds
+  `CUDA_EXL3_TUNE_CACHE`. The tuner's map had been process-local, so every boot re-tuned and every
+  unseen batch shape bought a ~15 ms tune **while serving** — which is what polluted the first rounds
+  of every A/B on this stack.
+- Measured: **18 tune events before serving → 0**, none during a sweep, and round 1 stops being a
+  penalty (cold cache C8 round 1 → round 3 −3.4 %; warm +2.7 %, i.e. unordered noise).
+- **Protocol change:** five sweep rounds with two discarded → **three rounds, median of three**, on
+  an image with the cache and a warm cache file. About 15 minutes saved per arm. Five rounds still
+  stands everywhere else, including the boot that writes the cache.
+- Speed unchanged by design: C1 54.5, C8 159.9 against 54.4 and 161.8, inside the spread. Gates
+  10/10 · 12/12. KV pool 4,429,752.
+- **What it cost:** a new image invalidates the fast-load sidecar, because the manifest records the
+  image tag — the preflight refused the boot, correctly, and regenerating cost one **682 s** dump
+  boot on all three nodes. That is now the standing price of every kernel-image change.
+- The implementation is upstream's; ours was the measurement that asked for it. Credit in
+  [CREDITS.md](CREDITS.md).
+- Closes the open item in [docs/08](docs/08-fast-boot.md) §10.3 and
+  [docs/11](docs/11-open-issues.md) §2.8. New page: [docs/12](docs/12-tuner-cache.md).
 
 ## 2026-09-05 — production configuration 4: fast boot
 

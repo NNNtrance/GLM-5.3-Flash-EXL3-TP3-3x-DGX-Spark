@@ -52,6 +52,12 @@ not free:
   of the KV pool ([docs/07](../docs/07-kv-and-draft-page.md)).
 - `GPU_MEMORY_UTILIZATION` — the ladder above 0.80 is real but it runs into the free-memory rule
   before it runs into anything else ([docs/00](../docs/00-hardware-and-os.md) §6).
+- `IMAGE` — changing it invalidates the fast-load sidecar, because the manifest records the image
+  tag. The preflight refuses the boot rather than serving something else, and regenerating the
+  sidecar costs one ~11-minute dump boot on every node ([docs/08](../docs/08-fast-boot.md) §8).
+- `NCCL_MESH_PLUGIN_DIR` — points at a *patched* plugin build in the template. Pointing it back at a
+  stock build is the rollback for everything in [docs/06](../docs/06-nccl-mesh.md) §6–§8; the
+  behaviour is then what `NCCL_MESH_LINKS_PER_PEER=1` gives, which is the pre-patch behaviour exactly.
 
 Keep a backup before every change, on every node, and name it after what it was:
 

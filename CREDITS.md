@@ -74,8 +74,10 @@ kernels for Blackwell plus a fused sparse-MLA attention backend, with a vLLM plu
   classifier reports `other` / NOASSERTION for the repository, which is what a licence file with an
   added paragraph does to template matching; the file body is MIT terms. Both facts are recorded
   because they are not contradictory and a compliance reviewer will see the second one first.
-- **Production commit:** `f4987cf11806c7381c8a59cb388ab5863852679c` — "Do not fetch the MoE padding
-  rows".
+- **Production commit:** `9bf594cd8b43a2a53db9c7d1d629794aa9365f1a` — "Persist the MLA tuner cache
+  across processes". The previous production commit was
+  `f4987cf11806c7381c8a59cb388ab5863852679c`, "Do not fetch the MoE padding rows"; every table dated
+  before 5 September 06:45 was measured on it.
 
 Commits this recipe built, measured or depends on:
 
@@ -90,12 +92,12 @@ Commits this recipe built, measured or depends on:
 | `bc0e0f6` | `bc0e0f699a826242a4cf917023d978ecb60ee667` | Bucket topk in the MLA tuner key | the tuner fix; on our model the varying axis turned out to be the batch, not the top-k |
 | `61a17bc` | `61a17bcdcd5ec496bd963fd265dda7774225e671` | Do not fuse the input transform | the fusion arm we A/B'd |
 | `76598b2` | `76598b22cb105b84c4edd6d164567be7a11e9462` | Drop the fused MoE input transform | fusion removed upstream |
-| **`f4987cf`** | `f4987cf11806c7381c8a59cb388ab5863852679c` | **Do not fetch the MoE padding rows** | **the production commit** |
-| `e24f059` | `e24f059793c01b26418fee054484bcec4316567e` | Always skip the MoE padding rows | the follow-up; equivalent on this hardware, where the gate is always open `[not tested]` |
+| `f4987cf` | `f4987cf11806c7381c8a59cb388ab5863852679c` | Do not fetch the MoE padding rows | the production commit for configurations 2–4; every table dated before 5 September 06:45 |
+| `e24f059` | `e24f059793c01b26418fee054484bcec4316567e` | Always skip the MoE padding rows | the follow-up; equivalent on this hardware, where the gate is always open. Rides along in the `9bf594c` checkout, still unmeasured on its own `[not tested]` |
 | `5814c7f` | `5814c7fb09e8d1ffaef19506ef38ff02cd279f18` | Let the down projection finish the MoE | not built here |
-| `9bf594c` | `9bf594cd8b43a2a53db9c7d1d629794aa9365f1a` | Persist the MLA tuner cache across processes | the answer to an open item of ours; not built or measured `[not tested]` |
+| **`9bf594c`** | `9bf594cd8b43a2a53db9c7d1d629794aa9365f1a` | **Persist the MLA tuner cache across processes** | **the production commit.** Written by the author in answer to a measurement of ours; built, wired up and measured here — tune events before serving 18 → 0, and our sweep protocol dropped from five rounds to three ([docs/12](docs/12-tuner-cache.md)) |
 
-Three defects we reported to that project and their outcome:
+Four things we reported to that project and their outcome:
 
 - The expert-parallel alignment receiving the local expert count, and remote rows reaching the
   combine uninitialised — fixed upstream.
@@ -104,6 +106,14 @@ Three defects we reported to that project and their outcome:
   ([docs/11](docs/11-open-issues.md) §1.1).
 - The fused input transform winning at small batch and regressing at large batch on this hardware —
   the fusion was subsequently removed upstream.
+- **The MLA decode tuner's cache being process-local**, with the measurement of what that costs on
+  GB10: tune events per boot, the batch shapes that mint new keys while serving, and the
+  round-1-versus-round-3 spread it produces in a serving benchmark. We asked whether a persisted
+  cache would be accepted and offered to write it; **the author wrote it instead**, in `9bf594c`,
+  with a design better than our sketch — a device-name and format-tag keyed filename, `O_APPEND`
+  sharing across the tensor-parallel ranks with no lock, and a runtime fallback for unseen keys. The
+  code is theirs; ours was the evidence and the request. It removed the largest measurement tax on
+  this stack ([docs/12](docs/12-tuner-cache.md)).
 
 Our one surviving kernel change, `patches/kernel/0003-combine-smem-staging-on-a95e809.patch`, is
 offered upstream with its description in `patches/kernel/0003-PR-DESCRIPTION.md`.
@@ -144,10 +154,27 @@ offered upstream with its description in `patches/kernel/0003-PR-DESCRIPTION.md`
 - **Revision:** commit `19924dcc7c571d6e260953724d394ae50bad82cf`.
 - **Link:** https://github.com/autoscriptlabs/nccl-mesh-plugin
 - **Licence:** **MIT** — confirmed on the repository.
-- We found and reported a one-line flow-control setting in it that costs about 10× on mid-size
-  collectives, with a patch ([docs/06](docs/06-nccl-mesh.md)). The plugin's own published benchmarks
-  show the same curve on the author's hardware, so the finding is a property of the design and not of
-  anyone's cabling. We do not ship the built `.so`.
+- **Three findings reported upstream, all with patches, none of them the plugin author's fault to
+  have missed** — two of the three only show up on a fabric with more than one cable per pair:
+  1. A one-line flow-control setting (`min_rnr_timer = 12`, 0.64 ms, where the comment intends code 1
+     at 0.01 ms) that costs about 10× on mid-size collectives.
+     `patches/kernel/0004-min-rnr-timer.patch`. The plugin's own published benchmarks show the same
+     curve on the author's hardware, so it is a property of the design, not of anyone's cabling.
+  2. **`mesh_connect()` ignoring NCCL's `dev` index** (`(void)dev;`) and stopping at the first
+     subnet match, so every channel to a peer rides one cable and the second cable of each pair never
+     carries a byte — confirmed in hardware with `port_xmit_data == 0` on those ports after weeks of
+     use. `patches/kernel/0005-device-aware-link-selection.patch`, ~30 lines, no wire-format change.
+  3. **`ptrSupport` advertising `NCCL_PTR_HOST` only**, although the plugin's own `regMr` already
+     registers CUDA pointers and plain `ibv_reg_mr` works for device pointers on this unified-memory
+     part — so NCCL was staging every transfer through a host bounce buffer for nothing.
+     `patches/kernel/0006-ptr-cuda-dmabuf-and-flush.patch`, which also makes `mesh_iflush()` a real
+     RDMA_READ and `regMrDmaBuf` a real DMA-BUF registration.
+
+  Findings 2 and 3 went upstream together as a follow-up on the plugin's issue thread (issue #58),
+  with the sweep numbers, the port-counter evidence and the patches offered as a PR on top of
+  `19924dcc`. Both changes are env-gated (`NCCL_MESH_LINKS_PER_PEER`, `NCCL_MESH_PTR_CUDA`,
+  `NCCL_MESH_FLUSH`) and default to today's behaviour when a peer has one cable. Details and numbers
+  in [docs/06](docs/06-nccl-mesh.md) §6–§8. We do not ship the built `.so`.
 
 ### NCCL 2.30.7 (inside the base image)
 
@@ -222,5 +249,8 @@ Two of them are not ours to keep:
 - `patches/kernel/0002-harem-on-77513d2.patch` is **retired** — three of its four changes are
   upstream and the fourth was measurably the wrong choice. `patches/kernel/0002-RETIRED.md` records
   that in writing rather than deleting it quietly.
-- `patches/kernel/0004-min-rnr-timer.patch` is a patch against someone else's project, offered
-  upstream, and carried here only so the finding is reproducible.
+- `patches/kernel/0004-min-rnr-timer.patch`, `0005-device-aware-link-selection.patch` and
+  `0006-ptr-cuda-dmabuf-and-flush.patch` are patches against someone else's project
+  (`autoscriptlabs/nccl-mesh-plugin`), offered upstream, and carried here so the findings are
+  reproducible. If they land upstream we will retire our copies in writing, the way
+  `0002-RETIRED.md` retires ours.

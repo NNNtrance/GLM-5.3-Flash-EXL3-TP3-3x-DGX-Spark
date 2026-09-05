@@ -1,0 +1,322 @@
+0005-device-aware-link-selection.patch
+===================================================================
+nccl-mesh-plugin @ 19924dcc, on top of 0004-min-rnr-timer.patch.
+Files: src/mesh_plugin.c, include/mesh_plugin.h.  No wire-format change:
+struct mesh_handle, struct mesh_addr_entry and struct mesh_qp_info are all
+untouched, so a patched node and a stock node still hand-shake correctly.
+
+WHAT IT FIXES
+-------------
+mesh_connect() began with "(void)dev;" and then walked the peer's advertised
+address list, stopping at the FIRST address a local NIC could reach.  That is
+deterministic, so on a fabric with two cables between every node pair every
+NCCL channel to a given peer landed on the same cable and the second cable
+carried nothing.  The plugin's own README lists this under "Known limitations"
+(no single-peer multi-QP striping or physical-lane aggregation).
+
+WHAT IT DOES
+------------
+mesh_connect() now enumerates every parallel link to the peer - a candidate is
+one (local NIC, peer address) pair sharing a subnet, i.e. one cable - and uses
+NCCL's device index to choose among them:
+
+    pick = dev % usable;   usable = min(candidates found, NCCL_MESH_LINKS_PER_PEER)
+
+Candidates are collected in the peer's advertised order and, within one peer
+address, in local NIC order.  That is precisely the order the old first-match
+search walked, so cands[0] is the NIC it would have returned.  With one cable
+per peer - or with NCCL_MESH_LINKS_PER_PEER=1 - the selection is bit-identical
+to the pre-patch plugin.
+
+HOW NCCL USES THE MULTIPLE DEVICES  (channels -> devs -> cables)
+---------------------------------------------------------------
+Nothing changes on NCCL's side; the plumbing was already there and the plugin
+was the part throwing the information away.
+
+  * mesh_devices() reports one NCCL net device per physical port (4 on these
+    nodes).  It already did.
+  * NCCL's graph search builds its rings and assigns each channel a netDev,
+    cycling over the devices.  This is visible in NCCL_DEBUG=INFO as
+        Channel 00/0 : 2[0] -> 0[0] [receive] via NET/Mesh/0
+        Channel 01/0 : 2[0] -> 0[0] [receive] via NET/Mesh/1
+    and so on.  One connection - one queue pair - per channel per peer.
+  * NCCL passes that netDev to listen()/connect() as `dev`.  connect() now
+    honours it.
+  * The listener needs no change and gets none: mesh_listen() already opens a
+    QP on EVERY NIC and advertises all of them in the handle, and mesh_accept()
+    takes its NIC from wherever the handshake arrived - the handshake thread
+    picks it from mesh_qp_info.nic_idx, which the connector already fills in
+    from the address it selected.  The connector's choice therefore propagates
+    to the acceptor over the existing wire format.
+
+Concretely, on a 3-node triangle with two cables per pair, the local NIC order
+is nic0 -> peer A, nic1 -> peer B, nic2 -> peer A, nic3 -> peer B.  For traffic
+to peer A the candidate list is {nic0, nic2}, and channels with dev 0,1,2,3,...
+map to cables 0,1,0,1,... - an even split.  (Honouring `dev` naively, i.e.
+"use nics[dev] if it reaches the peer, else fall back to the old search", would
+give 6:2 instead of 4:4, because half the devices do not face this peer at all.
+That is why the mapping is over the candidate list and not over nics[].)
+
+INTERACTION WITH NCCL_MAX_NCHANNELS=8  -- READ BEFORE MEASURING
+---------------------------------------------------------------
+NCCL_MAX_NCHANNELS=8 is in production because the plugin's two-sided
+SEND/RECV data path has no flow control but the RNR NAK, and with NCCL's
+default 64 channels the proxy thread's round-robin lap is long enough that a
+sender routinely beats its receiver to the QP (NCCL-MESH-RAPOR.md).  Eight
+channels shortens the lap and the RNR counters fall to ~0.
+
+The cap counts CHANNELS, not cables.  With this patch those 8 channels are
+split 4 + 4 over the two cables of each peer pair, so each cable now carries
+half the queue pairs it did.  Two consequences, both of which the A/B has to
+measure rather than assume:
+
+  1. Bandwidth: 4 channels per cable may not be enough to fill a cable at the
+     large messages (16-64 MB) where the curve was healthy before.  The likely
+     answer is NCCL_MAX_NCHANNELS=16 - 8 per cable, 16 total - which keeps the
+     per-cable parallelism the tuned configuration had.  BUT 16 channels was
+     measured (NCCL-MESH-RAPOR.md sec 3.1) to bring the RNR misses back at the
+     default single-cable arrangement; whether that still holds when the 16 are
+     spread over two independent NICs, two CQs and two proxy paths is exactly
+     the open question.  Sweep 8 and 16 with the patch, both arms.
+  2. RNR: the proxy lap length is set by the total channel count, so at a fixed
+     8 channels this patch cannot make RNR worse, and per cable it halves the
+     number of QPs competing for the receiver - if anything it should help.
+
+KNOBS
+-----
+  NCCL_MESH_LINKS_PER_PEER  0 = use every link found (default)
+                            1 = pre-patch behaviour, first match only
+                            n = cap at n links per peer
+  NCCL_MESH_DISTINCT_GUID   0 = report guid 0 for every port (default, and what
+                                has been measured to date)
+                            1 = report a unique guid per port (the port's
+                                fabric IP).  NCCL uses guid to recognise
+                                several logical devices that are one physical
+                                NIC; reporting 0 for all four says the opposite
+                                of the truth.  Untested here, hence opt-in.
+
+TESTS RUN
+---------
+  make test-unit -> test_routing 13/13.
+  test_error_paths (linked by hand; the Makefile's TEST_LDFLAGS still omits
+  $(IBVERBS_LIBS)) -> 60 passed / 6 failed, byte-identical to the stock tree.
+  Build clean under -Wall -Wextra.
+  No fabric test has been run with this patch.
+===================================================================
+
+diff --git a/include/mesh_plugin.h b/include/mesh_plugin.h
+index 1237d1a..a86de13 100644
+--- a/include/mesh_plugin.h
++++ b/include/mesh_plugin.h
+@@ -393,6 +393,8 @@ struct mesh_plugin_state {
+     int timeout_ms;             // NCCL_MESH_TIMEOUT_MS: connection timeout in ms (default: 5000)
+     int retry_count;            // NCCL_MESH_RETRY_COUNT: retry attempts (default: 3)
+     int min_rnr_timer;          // NCCL_MESH_MIN_RNR_TIMER: RNR NAK timer code 0-31 (default: 1 = 0.01ms)
++    int links_per_peer;         // NCCL_MESH_LINKS_PER_PEER: parallel links used per peer (0 = every link found)
++    int distinct_guid;          // NCCL_MESH_DISTINCT_GUID: advertise a unique guid per port (default: 0)
+     int disable_rdma;           // NCCL_MESH_DISABLE_RDMA: force TCP fallback
+ 
+     // Connection pooling config (TICKET-6)
+diff --git a/src/mesh_plugin.c b/src/mesh_plugin.c
+index 8961702..c815010 100644
+--- a/src/mesh_plugin.c
++++ b/src/mesh_plugin.c
+@@ -2884,6 +2884,33 @@ static ncclResult_t mesh_init(ncclDebugLogger_t logFunction) {
+     if (g_mesh_state.min_rnr_timer < 0 || g_mesh_state.min_rnr_timer > 31)
+         g_mesh_state.min_rnr_timer = 1;
+ 
++    /*
++     * NCCL_MESH_LINKS_PER_PEER: how many of the parallel links to a peer this
++     * plugin is allowed to spread connections over. 0 (default) means every
++     * link it finds; 1 reproduces the pre-patch behaviour exactly (always the
++     * first subnet match, NCCL's device index ignored).
++     *
++     * On a direct-attached mesh a "link" is one cable: one local NIC whose
++     * subnet matches one of the addresses the peer advertised in its handle.
++     * A three-node triangle wired with two cables per node pair has two such
++     * links per peer; a triangle wired with one cable per pair has one, and
++     * there this knob changes nothing.
++     */
++    env_val = getenv("NCCL_MESH_LINKS_PER_PEER");
++    g_mesh_state.links_per_peer = env_val ? atoi(env_val) : 0;
++    if (g_mesh_state.links_per_peer < 0) g_mesh_state.links_per_peer = 0;
++
++    /*
++     * NCCL_MESH_DISTINCT_GUID: report a unique guid per physical port instead
++     * of 0 for all of them. NCCL uses the guid to recognise several logical
++     * devices that are the same physical NIC; reporting 0 everywhere tells it
++     * the opposite of the truth in both directions. It has not been measured
++     * to matter on this fabric, so it stays off by default and is here to be
++     * A/B'd rather than assumed.
++     */
++    env_val = getenv("NCCL_MESH_DISTINCT_GUID");
++    g_mesh_state.distinct_guid = env_val ? atoi(env_val) : 0;
++
+     // NCCL_MESH_DISABLE_RDMA: Force TCP fallback (default: 0)
+     env_val = getenv("NCCL_MESH_DISABLE_RDMA");
+     g_mesh_state.disable_rdma = env_val ? atoi(env_val) : 0;
+@@ -2939,6 +2966,10 @@ static ncclResult_t mesh_init(ncclDebugLogger_t logFunction) {
+              g_mesh_state.gid_index, g_mesh_state.debug_level, g_mesh_state.fast_fail,
+              g_mesh_state.timeout_ms, g_mesh_state.retry_count, g_mesh_state.disable_rdma,
+              g_mesh_state.enable_conn_pool, g_mesh_state.enable_async_connect);
++    MESH_LOG(NCCL_LOG_INFO, "MESH Link selection: min_rnr_timer=%d links_per_peer=%d (0=all) "
++             "distinct_guid=%d",
++             g_mesh_state.min_rnr_timer, g_mesh_state.links_per_peer,
++             g_mesh_state.distinct_guid);
+     MESH_LOG(NCCL_LOG_INFO, "MESH Error hardening: op_timeout=%ds connect_timeout=%ds "
+              "accept_timeout=%ds health_check=%dms fatal_on_timeout=%d",
+              g_mesh_state.op_timeout_sec, g_mesh_state.connect_timeout_sec,
+@@ -3041,7 +3072,9 @@ static ncclResult_t mesh_getProperties(int dev, ncclNetProperties_v8_t *props) {
+     /* TICKET-D: pciPath may be empty on Grace Blackwell (NVLink-C2C topology).
+      * NCCL treats NULL/empty pciPath as "use any NIC" which is correct. */
+     props->pciPath = nic->pci_path[0] ? nic->pci_path : NULL;
+-    props->guid = 0;
++    /* A unique guid per physical port, when asked for (NCCL_MESH_DISTINCT_GUID).
++     * The port's fabric IP is unique within the node and stable across a boot. */
++    props->guid = g_mesh_state.distinct_guid ? (uint64_t)nic->ip_addr : 0;
+     props->ptrSupport = NCCL_PTR_HOST;
+     props->regIsGlobal = 0;
+     // Use actual link speed if available, otherwise default to 100 Gbps
+@@ -3186,7 +3219,8 @@ static ncclResult_t mesh_connect(int dev, void *opaqueHandle, void **sendComm,
+         return mesh_tcp_connect_impl(dev, opaqueHandle, sendComm, sendDevComm);
+     }
+ 
+-    (void)dev;  // We pick the right NIC based on subnet match
++    /* dev is NOT discarded any more: it selects which of the parallel links to
++     * this peer this connection rides. See the candidate list below. */
+ 
+     // NCCL-001: Check for fatal async event before connection attempt
+     if (mesh_check_fatal_error()) {
+@@ -3213,52 +3247,84 @@ static ncclResult_t mesh_connect(int dev, void *opaqueHandle, void **sendComm,
+         return ncclInvalidArgument;
+     }
+     
+-    MESH_INFO("connect: Peer advertised %d addresses", handle->num_addrs);
++    MESH_INFO("connect: Peer advertised %d addresses (NCCL dev=%d)",
++              handle->num_addrs, dev);
+ 
+-    // Search through peer's addresses to find one we can reach
+-    // Priority: Fast lane (100Gbps+) first, then management (10GbE) as fallback
++    /*
++     * Enumerate every parallel link to this peer, then let NCCL's device index
++     * choose among them.
++     *
++     * A candidate is a (local NIC, peer address) pair sharing a subnet, i.e.
++     * one cable. Pass 0 collects fast-lane cables only; pass 1 runs only if
++     * pass 0 found nothing and accepts any lane, so a 10GbE management link is
++     * never mixed into a fast-lane set (that was the point of the original
++     * two-pass search and it is preserved).
++     *
++     * Candidates are collected in the peer's advertised order, and within one
++     * peer address in local NIC order -- exactly the order the old first-match
++     * search walked -- so cands[0] is the NIC that search would have returned.
++     * With one link per peer, or NCCL_MESH_LINKS_PER_PEER=1, the selection is
++     * therefore bit-identical to the pre-patch plugin.
++     */
++    struct mesh_link_cand {
++        struct mesh_nic *nic;
++        struct mesh_addr_entry *addr;
++    } cands[MESH_MAX_NICS];
++    int ncand = 0;
++
++    for (int pass = 0; pass < 2 && ncand == 0; pass++) {
++        for (int i = 0; i < handle->num_addrs && ncand < MESH_MAX_NICS; i++) {
++            struct mesh_addr_entry *addr = &handle->addrs[i];
++            uint32_t cand_peer_ip = ntohl(addr->ip);
+ 
+-    // Pass 1: Try to find a fast lane connection
+-    for (int i = 0; i < handle->num_addrs; i++) {
+-        struct mesh_addr_entry *addr = &handle->addrs[i];
+-        uint32_t peer_ip = ntohl(addr->ip);
++            for (int j = 0; j < g_mesh_state.num_nics && ncand < MESH_MAX_NICS; j++) {
++                struct mesh_nic *cand_nic = &g_mesh_state.nics[j];
++                int dup = 0;
+ 
+-        char ip_str[INET_ADDRSTRLEN];
+-        mesh_uint_to_ip(peer_ip, ip_str, sizeof(ip_str));
+-        MESH_DEBUG("connect: Checking peer address %d for fast lane: %s", i, ip_str);
++                if (pass == 0 && cand_nic->lane != MESH_LANE_FAST) continue;
++                if ((cand_peer_ip & cand_nic->netmask) != cand_nic->subnet) continue;
+ 
+-        // Find fast lane NIC on same subnet
+-        nic = mesh_find_fast_nic_for_ip(peer_ip);
+-        if (nic) {
+-            selected_addr = addr;
+-            MESH_INFO("connect: Found FAST LANE NIC %s (%d Mbps) for peer %s",
+-                      nic->dev_name, nic->link_speed_mbps, ip_str);
+-            break;
++                for (int k = 0; k < ncand; k++) {
++                    if (cands[k].nic == cand_nic) { dup = 1; break; }
++                }
++                if (dup) continue;
++
++                cands[ncand].nic = cand_nic;
++                cands[ncand].addr = addr;
++                ncand++;
++            }
+         }
+     }
+ 
+-    // Pass 2: If no fast lane, try any NIC (including management)
+-    if (!nic) {
+-        MESH_DEBUG("connect: No fast lane connection available, trying management network");
+-        for (int i = 0; i < handle->num_addrs; i++) {
+-            struct mesh_addr_entry *addr = &handle->addrs[i];
+-            uint32_t peer_ip = ntohl(addr->ip);
++    if (ncand > 0) {
++        int usable = ncand;
++        int pick;
+ 
+-            char ip_str[INET_ADDRSTRLEN];
+-            mesh_uint_to_ip(peer_ip, ip_str, sizeof(ip_str));
+-            MESH_DEBUG("connect: Checking peer address %d for any lane: %s", i, ip_str);
+-
+-            // Find any NIC on same subnet
+-            nic = mesh_find_nic_for_ip(peer_ip);
+-            if (nic) {
+-                selected_addr = addr;
+-                const char *lane_name = mesh_lane_name((enum mesh_nic_lane)nic->lane);
+-                MESH_INFO("connect: Found %s NIC %s (%d Mbps) for peer %s",
+-                          lane_name, nic->dev_name,
+-                          nic->link_speed_mbps > 0 ? nic->link_speed_mbps : 0, ip_str);
+-                break;
+-            }
++        if (g_mesh_state.links_per_peer > 0 && g_mesh_state.links_per_peer < usable) {
++            usable = g_mesh_state.links_per_peer;
++        }
++        /* dev is NCCL's netDev for this channel. Channels are handed out over
++         * the devices round-robin, so dev % usable spreads the channels evenly
++         * over the cables. A negative dev (never seen from NCCL) falls back to
++         * the first cable. */
++        pick = (dev >= 0) ? (dev % usable) : 0;
++
++        nic = cands[pick].nic;
++        selected_addr = cands[pick].addr;
++
++        for (int k = 0; k < ncand; k++) {
++            char cand_ip[INET_ADDRSTRLEN];
++            mesh_uint_to_ip(ntohl(cands[k].addr->ip), cand_ip, sizeof(cand_ip));
++            MESH_INFO("connect:   link %d/%d %s -> %s%s", k, ncand,
++                      cands[k].nic->dev_name, cand_ip,
++                      (k == pick) ? "   <== selected"
++                                  : (k >= usable ? "   (capped out)" : ""));
+         }
++        MESH_INFO("connect: dev=%d selects link %d of %d usable (%d found), "
++                  "%s NIC %s (%d Mbps)",
++                  dev, pick, usable, ncand,
++                  mesh_lane_name((enum mesh_nic_lane)nic->lane),
++                  nic->dev_name, nic->link_speed_mbps > 0 ? nic->link_speed_mbps : 0);
+     }
+ 
+     if (!nic || !selected_addr) {
+@@ -4356,7 +4422,9 @@ static ncclResult_t mesh_getProperties_v9(int dev, ncclNetProperties_v9_t *props
+     /* TICKET-D: pciPath may be empty on Grace Blackwell (NVLink-C2C topology).
+      * NCCL treats NULL pciPath as "use any NIC" which is correct. */
+     props->pciPath = g_v9_pcipath_storage[0] ? g_v9_pcipath_storage : NULL;
+-    props->guid = 0;
++    /* A unique guid per physical port, when asked for (NCCL_MESH_DISTINCT_GUID).
++     * The port's fabric IP is unique within the node and stable across a boot. */
++    props->guid = g_mesh_state.distinct_guid ? (uint64_t)nic->ip_addr : 0;
+     props->ptrSupport = NCCL_PTR_HOST;
+     props->regIsGlobal = 0;
+     props->forceFlush = 0;

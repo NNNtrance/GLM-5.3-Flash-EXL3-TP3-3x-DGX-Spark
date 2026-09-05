@@ -23,7 +23,7 @@ This page gives the versions this stack was measured on and the handful of thing
 | Memory | 128 GB unified per node; the OS reports **121 GiB**, the engine sees 121.63 GiB on the device |
 | CPU | 20 cores per node |
 | Storage | ~916 GB NVMe per node. This recipe needs ~250 GB free on each: 176 GB checkpoint + 56 GB fast-load sidecar + images |
-| Interconnect | 2 ConnectX-7 QSFP cages per node, **no switch** — three direct cables in a ring, one `/24` per link |
+| Interconnect | 2 dual-port ConnectX-7 cards per node, **no switch** — **six** direct cables, **two per node pair**, one `/24` per cable |
 
 Unified memory is the fact that shapes every decision downstream. The KV pool and the host's page
 cache come out of the same 121 GiB, which is why reading the checkpoint through the page cache costs
@@ -87,6 +87,19 @@ ibv_devinfo | grep -c "PORT_ACTIVE"
 
 Expected: `4` on each node. Anything less and the rendezvous will either hang or silently fall back,
 and you will spend the next hour reading engine logs for a cabling problem.
+
+**`PORT_ACTIVE` is not the same as "carrying traffic", and the difference cost us a factor of two.**
+All four ports read `ACTIVE` on all three nodes for the entire life of this cluster while two of
+them, on every node, had transmitted **zero bytes since driver load** — the mesh plugin was putting
+every channel on the first cable of each pair. Add this to the pre-boot check and read it as a
+delta, not as an absolute `[measured-here]`:
+
+```
+for p in /sys/class/infiniband/*/ports/1/counters/port_xmit_data; do echo "$p $(cat $p)"; done
+```
+
+Any port stuck at a value that never moves is a port nothing is using. See
+[06](06-nccl-mesh.md) §6.
 
 Two rules we learned the hard way and carry over from the NVFP4 stack `[measured-here]`:
 

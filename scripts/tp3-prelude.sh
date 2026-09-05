@@ -55,6 +55,37 @@ run python3 "$TP3_DIR/patch-epfilter-tp3.py" --root "$VLLM_PY"
 # start-tp3.sh sets that (and the mount) from FASTLOAD_MODE in the env file.
 run python3 "$TP3_DIR/patch-fastload-tp3.py" --root "$VLLM_PY"
 
+# --- Optional arms (5 Eyl 2026) ----------------------------------------------
+# Each of the three is applied ONLY when its own env knob is set, so an env file
+# that never asks for one cannot be broken by an anchor that drifted in another
+# image.  Unset knob == upstream behaviour, byte for byte.
+#
+#  HAREM_ZERO_ATTENTION_KV=0  fail-closed gate that skips the per-step ATTENTION
+#                             KV memset (13.5-15.6 ms/chunk = 1.2-1.4 % prefill).
+#                             It proves uniform KV precision AND that no Mamba/KDA
+#                             layer shares an attention KVCacheTensor, or raises
+#                             at startup instead of serving.
+#  HAREM_DRAFT_KV_DTYPE=fp8   put the DFlash2 drafter's KV at the main groups'
+#                             precision (start-tp3.sh pins it to "auto" today).
+#  HAREM_TILELANG_FAILLOUD=1  turn tilelang_kernels.py:26's silent
+#                             contextlib.suppress around `import flashinfer.comm`
+#                             into a named, immediate error.
+if [ "${HAREM_ZERO_ATTENTION_KV:-}" = "0" ]; then
+  run python3 "$TP3_DIR/patch-zerokv-tp3.py" --root "$VLLM_PY"
+fi
+if [ -n "${HAREM_DRAFT_KV_DTYPE:-}" ]; then
+  run python3 "$TP3_DIR/patch-draftkv-tp3.py" --root "$VLLM_PY"
+fi
+if [ "${HAREM_TILELANG_FAILLOUD:-}" = "1" ]; then
+  run python3 "$TP3_DIR/patch-tilelang-failloud-tp3.py" --root "$VLLM_PY"
+fi
+
+# Import flashinfer.comm once, CPU-side, before any worker starts: prints the
+# version into the boot log and warms flashinfer's JIT cache so the ranks do not
+# race it.  ~2 s.  Never fails the boot unless HAREM_TILELANG_FAILLOUD=1.
+# HAREM_FLASHINFER_WARMUP=0 skips it.
+run python3 "$TP3_DIR/flashinfer-warmup.py"
+
 # The model directory is argv[1]; run the shape preflight against whatever the
 # launcher actually mounted, not against what the .env says it mounted.
 # The EP-vs-tensor-sliced decision is arithmetic on the mounted model, and

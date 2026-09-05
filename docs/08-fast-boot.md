@@ -450,4 +450,43 @@ for h in head worker-1 worker-2; do ssh $h "rm -rf /var/tmp/glm53-exl3-tp3-r*"; 
 4. **Re-test the memory ladder.** The pool is 4,484,848 at 0.80 now, and the page-cache remedy from section 5 was not in place
    when the 0.85 arm was last measured, so the higher rungs may be roomier. A separate measurement, not a claim. `[not tested]`
 
+## 11. The prelude, start to finish
+
+[`scripts/tp3-prelude.sh`](../scripts/tp3-prelude.sh) is mounted as the container's entrypoint and runs
+every patch below, in this order, before `exec vllm serve "$@"`. Two invocation styles are mixed on
+purpose: most patches are **called unconditionally** and are inert internally when their own knob is
+unset (so a patch that drifts cannot be blamed on a shell `if` nobody remembered to update); the three
+newest arms are **called conditionally**, from the shell script itself, so an env file that never asks
+for one of them cannot be broken by an anchor that drifted in some other image. `patches/tp3/README.md`
+has the full description of each patch's env knob and default; this table is only the order and the
+gate.
+
+| # | Command | Invoked | Effect gated by | Introduced |
+|---|---|---|---|---|
+| 1 | `patch-vllm-tp3.py --root $VLLM_PY` | always | — (unconditional) | base TP=3 padding |
+| 2 | `patch-exl3-ep.py --pkg $EXL3_PKG --overlay .../overlay/cuda_exl3/_harem_ep.py` | always | — (unconditional) | base EP support |
+| 3 | `patch-dflash-tp3.py --root $VLLM_PY` | if `qwen3_dflash2.py` exists in the image | — (unconditional once invoked) | DFlash2 port |
+| 4 | `patch-kvdiag-tp3.py --root $VLLM_PY` | always | — (logging only) | KV pool visibility |
+| 5 | `patch-swblock-tp3.py --root $VLLM_PY` | always | `HAREM_SW_BLOCK_SIZE` | production 3 |
+| 6 | `patch-epfilter-tp3.py --root $VLLM_PY` | always | `--enable-ep-weight-filter` (CLI) + `HAREM_EP_FILTER_SUFFIXES` | production 4 |
+| 7 | `patch-fastload-tp3.py --root $VLLM_PY` | always | `HAREM_FASTLOAD_MODE` | production 4 |
+| 8 | `patch-zerokv-tp3.py --root $VLLM_PY` | only if `HAREM_ZERO_ATTENTION_KV=0` | (the `if` itself; refuses at startup on this checkpoint — [07](07-kv-and-draft-page.md) §8) | shipped with production 7, not active in it |
+| 9 | `patch-draftkv-tp3.py --root $VLLM_PY` | only if `HAREM_DRAFT_KV_DTYPE` is set | (the `if` itself) | production 7 |
+| 10 | `patch-tilelang-failloud-tp3.py --root $VLLM_PY` | only if `HAREM_TILELANG_FAILLOUD=1` | (the `if` itself) | production 7 |
+| 11 | `flashinfer-warmup.py` | always | `HAREM_FLASHINFER_WARMUP` (internal; default on) | production 7 |
+| 12 | `preflight-tp3.py --model $1 --tp ... --ep ...` | if argv[1] is a directory | — | base |
+| 13 | `preflight-fastload.py --model $1` | if `HAREM_FASTLOAD_MODE` is set and argv[1] is a directory | — | production 4 |
+| 14 | `exec vllm serve "$@"` | always | — | — |
+
+`patch-mhcfused-tp3.py` is **not** in this list. It is written, statically verified and kept in
+`patches/tp3/`, but the prelude does not call it — see `patches/tp3/README.md` and
+[11](11-open-issues.md) §2.16.
+
+Two things this ordering is not: it is not the order the patches were written in (5, 6 and 7 predate 8,
+9 and 10 by weeks), and it is not a claim that steps 1–7 are cheaper to change than 8–10. The fast-load
+sidecar's identity hash covers every `patch-*.py` in the directory and the prelude script's full text,
+so changing any one of these fourteen steps — including only editing a comment on a step whose knob is
+never set — invalidates the sidecar on every node ([09](09-measurement-protocol.md) §11,
+[11](11-open-issues.md) §2.21).
+
 Open items and retractions from this page are carried in [11](11-open-issues.md).

@@ -22,6 +22,7 @@ The exact settings per arm are in each file's header.
 | `mesh/all-reduce-sweep.md` | The mesh all-reduce cliff: bandwidth by message size against point-to-point, the hardware counters, the channel-count dose–response, the protocol sweep, and the engine A/B. |
 | `mesh/multilink-sweep.md` | The nine-arm plugin sweep: the idle second cable, `NCCL_PTR_CUDA`, what the flush and DMA-BUF cost, and why 16 channels is harmful. |
 | `mesh/multilink-sweep.csv` | The same sweep, every arm × operation × size, with the per-collective RNR counters. Machine-readable. |
+| `mesh/algo-sweep.md` | The `NCCL_ALGO` sweep: Ring against Ring,Tree against Tree, both repetitions printed, with the decode-step proxy, the RNR counters and the port deltas that show how a tree redistributes the traffic. |
 | `mesh/rdma-write-sweep.md` | The six-arm sweep of the one-sided `RDMA_WRITE` transport: RNR and out-of-buffer to exactly zero, throughput unmoved, the engine arm, and why it was not adopted. |
 | `profile/step-breakdown.md` | Where a prefill chunk and a decode step actually go, class by class; the two rulers measured on the device; the MoE stage model-free; the expert re-read bench; the hyper-connection kernels; the KV-zeroing geometry. |
 

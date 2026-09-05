@@ -160,6 +160,27 @@ DOCKER_ARGS=(run --gpus all -d --log-opt max-size=20m --log-opt max-file=3 --nam
 [ -n "${EXTRA_ARGS:-}" ] && DOCKER_ARGS+=(${EXTRA_ARGS})
 if [ "${DRY_RUN:-0}" = "1" ]; then printf 'docker'; printf ' %q' "${DOCKER_ARGS[@]}"; printf '\n'; exit 0; fi
 docker rm -f "$NAME" 2>/dev/null || true
+
+# SETTLE GATE. vLLM sizes the KV pool from a *delta*: MemAvailable just after NCCL
+# init minus MemAvailable after the memory profile. On this integrated-GPU part
+# "free GPU memory" IS /proc/meminfo MemAvailable, so whatever the kernel has not
+# yet reclaimed from the container we just killed (~90 GiB) is charged to the pool
+# -- and in the wrong direction: the dirtier the node starts, the BIGGER its pool
+# reads. The last node started is the one given least time to reclaim, which is how
+# a 9 GiB spread in per-rank startup free memory, and ~6 % of boot-to-boot noise in
+# the pool number, appeared out of nothing. Waiting for the host to settle costs
+# up to 180 s of boot (measured: well under 20 s) and buys zero tokens; what it
+# buys is a pool number that means something. docs/07 section 1.1, docs/08 5.1.
+sync
+SETTLE_MIN_GIB="${SETTLE_MIN_GIB:-112}"
+settle_avail=0
+for settle_i in $(seq 1 60); do
+  settle_avail=$(awk '/^MemAvailable:/{printf "%d", $2/1048576}' /proc/meminfo)
+  [ "$settle_avail" -ge "$SETTLE_MIN_GIB" ] && break
+  sleep 3
+done
+echo "mem settle: MemAvailable=${settle_avail} GiB (target ${SETTLE_MIN_GIB}) after $(( (settle_i - 1) * 3 ))s"
+
 docker "${DOCKER_ARGS[@]}"
 echo "launched $NAME rank=$NODE_RANK host=$HOST_IP"; sleep 2
 docker ps --format '{{.Names}} {{.Status}}' | grep "$NAME" || { echo "$NAME exited; docker logs $NAME" >&2; exit 1; }

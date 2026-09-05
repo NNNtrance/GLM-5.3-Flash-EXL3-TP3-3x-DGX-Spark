@@ -339,6 +339,50 @@ the prelude's ordered list of calls rather than its full text — is written up 
 [11](11-open-issues.md) §2.21. Until it exists, the rule is the one above: budget the dump boot, or
 do not touch the patches.
 
+### 11.1 The profile-baseline rule: settle the host, then read the pool
+
+A dump boot is only the loudest case of a more general problem, and the general case cost us a real
+finding before it was understood.
+
+**The KV pool is a difference between two readings of `/proc/meminfo`, not a reading of memory.** On
+this integrated-GPU part vLLM's "free GPU memory" *is* `MemAvailable`, and "consumed memory
+(weights + non-torch)" is `MemAvailable(just after NCCL init) − MemAvailable(after the profile run)`
+([07](07-kv-and-draft-page.md) §1.1). Two consequences that a measurement protocol has to carry:
+
+1. **The instrument runs backwards.** A node that starts with less memory available computes itself a
+   *larger* pool. Whatever the host has not finished reclaiming — the previous container, page cache,
+   dirty writeback — is booked as engine memory it never took.
+2. **It is systematic, not random.** The ranks start worker-2 → worker-1 → head, so the head is always
+   the node given least time to reclaim ~90 GiB, and its number is always the inflated one. Read as an
+   allocation, that produced a "the head has 8.2 GiB of stranded memory" claim that survived a day and
+   was false ([11](11-open-issues.md) §2.3).
+
+The protocol rule, in three parts:
+
+- **Settle the host before the container.** `scripts/start-tp3.sh` waits after `docker rm -f` until
+  `MemAvailable` is back over `SETTLE_MIN_GIB`. It buys **zero** tokens; it buys a ruler that does not
+  move ([08](08-fast-boot.md) §5.1).
+- **Read the pool from a load boot only.** Dump boots read about 6.7 % low, and the number is not
+  merely noisy, it is biased.
+- **Verify the gate on the boot you are about to quote**, the same way any other instrument is
+  verified before its reading is used: all three ranks within **1 GiB** on both the
+  `Free memory on device` and the `Actual usage ... consumed memory` lines. Fail that check and the
+  boot still produced a valid speed and quality result — and no pool result.
+
+**State the exposure honestly, in both directions.** No pool figure published in this repository is
+known to be wrong: the pool takes the minimum over ranks, and on every boot with a ledger the polluted
+node was the head, which was not binding. That is luck — the polluted node is whichever starts last —
+and the amount at stake is **27 % of a rank's KV allowance**. Meanwhile recent pool figures span
+**4,231,404 → 4,484,848, 6.0 %** `[measured-here]`, each step of which has a candidate explanation in
+[08](08-fast-boot.md) §5, with comparable post-fix load boots agreeing to 0.4 %. The cost was never a
+proven error; it was that **an explanation and an artefact were indistinguishable**, in the one metric
+this stack has spent the most arms on, at exactly the few-percent scale its decisions are made at.
+
+The general form, and the one worth stealing: **an instrument that measures a difference between two
+moments is only as good as your control over both moments.** Verify the ruler, not just the reading —
+the same lesson the bandwidth ruler taught in [10](10-results-and-roofline.md) §4.1, arriving by a
+completely different route.
+
 ---
 
 ## 12. What is next

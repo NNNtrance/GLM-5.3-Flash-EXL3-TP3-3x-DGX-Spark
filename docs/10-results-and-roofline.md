@@ -10,7 +10,8 @@ image `exl3-zeus:9bf594c`, KV `fp8`, DFlash2 draft k=7, `--block-size 256`,
 `NCCL_MAX_NCHANNELS=8`, CUDA graphs on, `gpu-memory-utilization 0.80`, per-rank fast-load sidecar,
 `CUDA_EXL3_TUNE_CACHE` warm, mesh plugin built from `19924dcc` + patches 0004/0005/0006 with
 `NCCL_MESH_LINKS_PER_PEER=0 NCCL_MESH_PTR_CUDA=1 NCCL_MESH_FLUSH=1`, temperature 0, **reasoning
-effort `low`**, 5 September 2026. Speed on this configuration is the **median of three sweep rounds**
+effort `low`**, 5 September 2026. Production configuration 7 adds `HAREM_DRAFT_KV_DTYPE=fp8` and the
+launcher's memory settle gate; rows that predate it are labelled in §2. Speed on this configuration is the **median of three sweep rounds**
 — the persisted tuner cache is what makes three enough ([09](09-measurement-protocol.md) §1,
 [12](12-tuner-cache.md)); the older arms in §2 are five-round medians with two discarded. Raw tables
 in [`../results/`](../results/README.md).
@@ -25,26 +26,45 @@ read-bandwidth ruler drifted 6.5 % between three runs on the same idle machine t
 
 ## 1. The production configuration
 
-| | value |
-|---|---|
-| C1 aggregate / per stream | **56.9** / 63.6 tok/s `[measured-here]` |
-| C2 / C4 / C6 / **C8** aggregate | 84.2 / 118.5 / 142.9 / **168.9** tok/s `[measured-here]` |
-| C8 per stream | 26.0 tok/s `[measured-here]` |
-| TTFT, C1 / C8 | 0.41 / 1.01 s `[measured-here]` |
-| Draft acceptance / accepted tokens per step | 61–65 % / 5.3–5.5 `[measured-here]` |
-| Prefill, fresh unseen ~8.3K prompts (median of 3) | **1,792** tok/s `[measured-here]` |
-| Prefill, warm repeated 7K prompt | 1,506 tok/s `[measured-here]` |
-| KV pool | **4,449,035** tokens (4.4 concurrent 1M-token requests) `[measured-here]` |
-| Weights per node | 54.86 GiB `[measured-here]` |
-| Boot, container start → API ready | **274 s** (~4.5 min) `[measured-here]` |
-| Free host RAM / swap at rest | 11.3 / 12.6 / 12.5 GiB · ~0.1 GiB `[measured-here]` |
-| Quality gates, cold and warm | 10/10 · 12/12 `[measured-here]` |
+**Production configuration 7**, since 5 September: production 6 plus the **fp8 draft cache**, the
+tilelang fail-loud guard, a FlashInfer warm-up and the launcher's memory settle gate.
 
-Two of those rows need their footnote said out loud rather than hidden in a tier label.
+| | value | production 6, for comparison |
+|---|---|---|
+| C1 aggregate / per stream | **57.0** / 64.0 tok/s `[measured-here]` | 56.9 / 63.6 |
+| C2 / C4 / C6 / **C8** aggregate | 80.9 / 120.0 / 143.4 / **175.1** tok/s `[measured-here]` | 84.2 / 118.5 / 142.9 / 168.9 |
+| C8 per stream | 26.9 tok/s `[measured-here]` | 26.0 |
+| TTFT, C1 / C8 | **0.34 / 0.91 s** `[measured-here]` | 0.41 / 1.01 |
+| Draft acceptance (per-concurrency medians) | 60.8–64.3 % `[measured-here]` | 61–65 % |
+| Accepted tokens per step | 5.3–5.5 `[measured-here]` | 5.3–5.5 |
+| Prefill, fresh unseen ~8.5K prompts (median of 3) | **1,769** tok/s `[measured-here]` | 1,792 |
+| Prefill, warm repeated 7K prompt | 1,529 tok/s `[measured-here]` | 1,506 |
+| KV pool | **4,699,724** tokens (4.70 concurrent 1M-token requests) `[measured-here]` | 4,449,035 |
+| Weights per node | 54.86 GiB `[measured-here]` | 54.86 |
+| Boot, container start → API ready | **~274 s** (~4.5 min) plus the settle wait `[measured-here, raw lost]` | 274 s |
+| Free host RAM / swap at rest | 12.3 / 13.5 / 13.3 GiB · ~0.1 GiB `[measured-here]` | 11.3 / 12.6 / 12.5 · ~0.1 |
+| Quality gates, cold and warm | 10/10 · 12/12 `[measured-here]` | 10/10 · 12/12 |
+
+**Read the speed column as unchanged.** C8 reads +3.7 % and C2 −3.9 %; both are inside their own
+metric's round-to-round band ([09](09-measurement-protocol.md) §1.2), they point in opposite
+directions, and the change has no mechanism by which it could make decoding faster. What production 7
+actually bought is the **pool, +5.6 %**, and a TTFT that is better on both ends. That is the claim.
+
+Three of those rows need their footnote said out loud rather than hidden in a tier label.
+
+**The KV pool** is the one number this configuration exists for, and it is the first one on this page
+taken with a pinned baseline: the launcher now waits for the host's memory to settle before starting
+the container, which took the per-rank startup spread from 9 GiB to 1.4 GiB — 27 % of a rank's KV
+allowance out of the measurement ([07](07-kv-and-draft-page.md) §1.1, [08](08-fast-boot.md) §5.1). No
+earlier figure on this page is known to be wrong; they were simply taken with the baseline unpinned.
+It is read from an ordinary **load** boot; a dump boot's pool number is not usable
+([09](09-measurement-protocol.md) §11).
 
 **Boot** was itemised on the fast-boot arm ([08](08-fast-boot.md)): 617.9 s → **273.6 s**, of which
-weight loading is 67.2 s. Nothing in the two configurations after it touches the loader, so 274 s is
-carried forward rather than re-itemised `[measured-here]`. A full restart driven from the workstation
+weight loading is 67.2 s. Nothing in the three configurations after it touches the loader — production
+7 loaded weights in 73 s — so 274 s is carried forward rather than re-itemised, with two things added
+on top that were never separately timed: the settle gate's wait (seconds, capped at 180 s) and the
+FlashInfer warm-up `[measured-here, raw lost]`. A full restart driven from the workstation
 — stop all three, drop caches, staggered start, wait for `/health` — measured 307 s wall on the
 production arm, and that number includes the driver's own stop and stagger.
 
@@ -73,14 +93,16 @@ Each row is a boot with its own gates. Aggregate tok/s, medians of rounds 3–5 
 | + draft page 256 | 52.8 | 117.1 | 162.8 | 1,508 | **4,413,223** | [07](07-kv-and-draft-page.md) |
 | + fast-boot sidecar | 54.4 | 114.6 | 161.8 | 1,704 | 4,484,848 | [08](08-fast-boot.md); boot 618 → 274 s |
 | + `9bf594c`, tuner cache warm | 54.5 | 112.0 | 159.9 | 1,709 | 4,429,752 | [12](12-tuner-cache.md); speed unchanged by design, protocol 5 rounds → 3 |
-| **+ dual cable + `NCCL_PTR_CUDA` (production)** | **56.9** | **118.5** | **168.9** | **1,792** | **4,449,035** | [06](06-nccl-mesh.md) §6–§8; the second cable of every pair had never carried a packet |
+| + dual cable + `NCCL_PTR_CUDA` (production 6) | 56.9 | 118.5 | 168.9 | 1,792 | 4,449,035 | [06](06-nccl-mesh.md) §6–§8; the second cable of every pair had never carried a packet |
+| **+ fp8 draft cache + settle gate (production 7)** | **57.0** | **120.0** | **175.1** | **1,769** | **4,699,724** | [07](07-kv-and-draft-page.md) §7; speed unchanged, pool +5.6 %, the first pool number taken with a settled baseline |
 
 Three of those rows are the interesting ones. **The third node initially made the machine slower**, by
 8–29 %, and that was a one-line kernel bug rather than a cost of the arrangement. **The largest single
 jump in the KV pool cost no memory at all** — it was a per-request block counter, not bytes. And the
-**last row is not a tuning win at all**: half the fabric had never been used, by any workload, since
-the cluster was built. The two rows before it move by less than their own spread and are in the table
-because they changed the boot and the measurement protocol, not the speed.
+**dual-cable row is not a tuning win at all**: half the fabric had never been used, by any workload,
+since the cluster was built. Several rows move by less than their own spread and are in the table
+because they changed the boot, the pool or the measurement protocol rather than the speed — the tuner
+cache, the fast-boot sidecar, and production 7.
 
 Rejected on the way, each with its own boot and gates:
 
@@ -94,34 +116,39 @@ Rejected on the way, each with its own boot and gates:
 | A 2,304-padded tensor-sliced arrangement instead of expert parallelism | On the fixed kernel it loses everywhere except M=1 and costs +12.5 % expert bytes out of the KV pool `[measured-here]`. |
 | A one-sided RDMA_WRITE mesh transport (`patches/kernel/0007`) | Removes RNR retries to exactly zero and moves throughput by nothing: engine C1 56.4, C8 171.1, prefill-fresh 1,763 against production's 56.9 / 168.9 / 1,792 — differences in both directions, inside boot spread. The ceiling is the cards' PCIe slots, not the flow control ([06](06-nccl-mesh.md) §9–§10) `[measured-here]`. |
 
-### 2.1 Measured since, not yet production: the draft cache at fp8
+### 2.1 The draft cache at fp8: validated on a dump boot, promoted on a load boot
 
-The DFlash2 drafter's own KV cache is `bf16` while the main cache is `fp8`. Moving it to fp8 shrinks
-the drafter's page and should grow the pool by about 4.7 % ([07](07-kv-and-draft-page.md) §7). The
-open question was never the arithmetic — it was whether the draft's sliding-window backend accepts an
-fp8 cache at all, and whether a drafter attending over fp8 still proposes as well.
+The DFlash2 drafter's own KV cache was `bf16` while the main cache was `fp8`. Moving it to fp8 shrinks
+the drafter's page and grows the pool ([07](07-kv-and-draft-page.md) §7). The open question was never
+the arithmetic — it was whether the draft's sliding-window backend accepts an fp8 cache at all, and
+whether a drafter attending over fp8 still proposes as well.
 
-Both are now answered. The arm ran on a **dump boot** (it added three prelude patches, which
-invalidates the fast-load sidecar — [09](09-measurement-protocol.md) §11), so its speed and quality
-lines are valid and **its KV pool line is not** `[measured-here]`:
+It took **two boots** to answer, and the pair is a worked example of the dump-versus-load rule
+([09](09-measurement-protocol.md) §11). The validation arm added three prelude patches, which
+invalidates the fast-load sidecar and forces a dump boot, so its speed and quality lines are valid and
+**its KV pool line is not**. The promotion arm is the ordinary load boot that followed, with the
+launcher's settle gate in place `[measured-here]`:
 
-| | production 6 | draft KV fp8 (dump boot) | |
+| | production 6 | draft KV fp8, **dump** boot | **production 7**, load boot |
 |---|---|---|---|
-| C1 / C2 / C4 / C6 / C8 aggregate | 56.9 / 84.2 / 118.5 / 142.9 / 168.9 | 56.0 / 82.3 / 121.7 / 143.6 / **175.5** | medians of 3 rounds |
-| TTFT, C1 / C8 | 0.41 / 1.01 s | **0.40 / 0.91 s** | |
-| draft acceptance | 61–65 % | **60.1–64.0 %** (one C1 round at 57.3 %) | the gate was "stay in 60–65" |
-| accepted tokens per step | 5.3–5.5 | 5.2–5.5 | |
-| prefill-fresh (median of 3) | 1,792 | 1,790 | |
-| prefill 7K, warm repeat | 1,506 | 1,532 | |
-| gates, cold and warm | 10/10 · 12/12 | **10/10 · 12/12** | |
-| free RAM / swap | 11.3 / 12.6 / 12.5 GiB · ~0.1 | 14.5 / 15.8 / 15.8 GiB · ~0.1 | a dump boot's ledger, not production's |
-| KV pool | 4,449,035 | 4,382,920 — **not usable** | a dump boot writes 56 GiB per node through the page cache |
+| C1 / C2 / C4 / C6 / C8 aggregate | 56.9 / 84.2 / 118.5 / 142.9 / 168.9 | 56.0 / 82.3 / 121.7 / 143.6 / 175.5 | **57.0 / 80.9 / 120.0 / 143.4 / 175.1** |
+| TTFT, C1 / C8 | 0.41 / 1.01 s | 0.40 / 0.91 s | **0.34 / 0.91 s** |
+| draft acceptance | 61–65 % | 60.1–64.0 % (one C1 round at 57.3 %) | **60.8–64.3 %** (per-concurrency medians; full round range 59.4–65.9 %) |
+| accepted tokens per step | 5.3–5.5 | 5.2–5.5 | 5.3–5.5 (round range 5.16–5.61) |
+| prefill-fresh (median of 3) | 1,792 | 1,790 | 1,769 |
+| prefill 7K, warm repeat | 1,506 | 1,532 | 1,529 |
+| gates, cold and warm | 10/10 · 12/12 | 10/10 · 12/12 | **10/10 · 12/12** |
+| free RAM / swap | 11.3 / 12.6 / 12.5 GiB · ~0.1 | 14.5 / 15.8 / 15.8 GiB · ~0.1 | 12.3 / 13.5 / 13.3 GiB · ~0.1 |
+| KV pool | 4,449,035 | 4,382,920 — **not usable** | **4,699,724 (+5.6 %)** |
 
-**The claim this supports is "it costs nothing", not "it is faster".** C8 reads +3.9 %, which does
-clear that metric's ±3 % band ([09](09-measurement-protocol.md) §1.2), but this is one boot, in a
-different memory state from production, and it has not been repeated — §2 of the protocol page says a
-single pair decides nothing. The one number that would promote it is the pool, and that needs a load
-boot. Open item: [11](11-open-issues.md) §2.18.
+**The claim this supports is "it costs nothing and buys pool", not "it is faster."** C8 reads +3.7 %
+on the load boot, which clears that metric's ±3 % band ([09](09-measurement-protocol.md) §1.2) — and
+C2 reads −3.9 % on the same three rounds, which clears its band in the other direction. Two boots with
+opposite-signed excursions in different columns is what noise looks like, and there is no mechanism by
+which a smaller draft cache would speed up decoding. The number that promoted the change is the pool,
+and it needed the load boot: **+5.6 % against +4.7 % predicted**, on the first boot of this stack whose
+memory baseline was pinned rather than inherited from whatever the previous container had not yet
+released ([07](07-kv-and-draft-page.md) §1.1). Closed: [11](11-open-issues.md) §2.18.
 
 The mechanism is confirmed in the engine's own log rather than inferred: the drafter's page goes
 393,216 → **196,608 bytes**, per-block cost 21,917,440 → **20,934,400 bytes** (−4.5 %), and the
@@ -138,11 +165,11 @@ figures are from [`NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark`](https://gith
 
 | | **EXL3 TP=3 (this recipe)** | NVFP4 TP=3 |
 |---|---|---|
-| C1 aggregate | **56.9** | 57–60 |
-| C8 aggregate | **168.9** | 150 |
-| prefill, fresh | **1,792** | 1,585 (7K) |
-| TTFT C1 | 0.41 s | **0.38 s** |
-| KV pool | **4,449,035 @ 0.80** | 4,321,739 @ 0.88 |
+| C1 aggregate | **57.0** | 57–60 |
+| C8 aggregate | **175.1** | 150 |
+| prefill, fresh | **1,769** | 1,585 (7K) |
+| TTFT C1 | **0.34 s** | 0.38 s |
+| KV pool | **4,699,724 @ 0.80** | 4,321,739 @ 0.88 |
 | weights per node | **54.9 GiB** | 65.5 GiB |
 | boot to serving | **274 s** | ~300 s |
 | gates | 10/10 · 12/12 | 10/10 · 12/12 |
@@ -534,7 +561,7 @@ Per 2,048-token prefill chunk (1,109 ms measured end to end), against the **meas
 | 4 | MLA prefill (`mla_decode_partial` runs at prefill too) | 90 | 8.2 % | **not measured** — the trace does not carry the selected-key count | ? | cuda-exl3 |
 | 5 | KDA linear attention (triton) | 83 | 7.5 % | **not measured** | ? | vLLM |
 | 6 | MoE trellis GEMM, large M | 291 | 26.4 % | 81–96 % — and the duplicate-read lever is **closed** (§5.4) | ~0 | cuda-exl3 |
-| 7 | `exl3_moe_had_in` | 44 | 4.0 % | 37–57 % — the only sub-roofline kernel in the MoE stage | −0.2…0.3 % (taken upstream, `a47da6e`) | cuda-exl3 |
+| 7 | `exl3_moe_had_in` | 44 | 4.0 % | 37–57 % — was the only sub-roofline kernel in the MoE stage | −0.2…0.3 % (taken upstream in `a47da6e`; **bounded and closed** in `62f53e6` — what is left is half-ALU work, ≤2 % of prefill and unreachable) `[reported]` | cuda-exl3 — **closed** |
 | 8 | `_zero_kv_blocks_kernel` | 14 | 1.3 % | 100 % of the memset ruler; gain **not available** (§5.6) | ~0 | vLLM |
 | 9 | `exl3_moe_glu_had_in` | 24 | 2.2 % | 190 GB/s = 84 % | −0.3 % | cuda-exl3 |
 | 10 | `exl3_moe_combine` | 16 | 1.5 % | 205 GB/s = 91 % | ~0 | cuda-exl3 |
@@ -542,7 +569,9 @@ Per 2,048-token prefill chunk (1,109 ms measured end to end), against the **meas
 
 Two things a reader should take from that table. **The two largest prefill items are outside the EXL3
 kernel library entirely** — the fabric and the unquantized half of the model — and the largest item
-that is inside it is already at the roof. And **there is no single-digit-percent win left anywhere in
+that is inside it is already at the roof. As of `62f53e6` the kernel library is closed as a target on
+this stack altogether: rows 6, 7, 9, 10 and 11 are all either at the roofline or bounded below what a
+rebuild would be worth, which leaves every remaining prefill lever with somebody else's name on it. And **there is no single-digit-percent win left anywhere in
 prefill**: the honest list is 2–4 % from the fabric, 2.5–2.7 % from a hyper-connection kernel nobody
 has written, 3.1 % from someone shipping Blackwell-class dense GEMM kernels for sm_121, and a
 scattering of fractions. The one **config** lever that is larger than all of them is the batched-token

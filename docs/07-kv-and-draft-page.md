@@ -1,7 +1,8 @@
 # 07 — The KV pool and the draft page
 
-The KV pool went from 825,000 tokens at TP=2 to **4,484,848** at TP=3, and the last 82 % of that came
-from a change that cost no memory at all. This page is why the pool was small, why the obvious
+The KV pool went from 825,000 tokens at TP=2 to **4,699,724** at TP=3, and most of that came from two
+changes that cost no memory at all — a per-request block counter, and then the drafter's own cache
+precision. This page is why the pool was small, why the obvious
 explanation was wrong twice, and what the memory ladder above `gpu-memory-utilization 0.80` actually
 looks like on this hardware.
 
@@ -43,6 +44,83 @@ GPU KV cache size: 2,428,769 tokens, Maximum concurrency for 1,000,000 tokens pe
 ```
 
 **The drafter takes 385 of the 723 blocks per request — 53 % — while costing 0.6 % of the memory.**
+
+### 1.1 The other input is a delta, and it drifts with the state of the host
+
+`num_blocks` — "what the free memory buys" — is not a reading of free memory either. It is the
+difference between two readings, taken minutes apart, and on this hardware both of them are
+`/proc/meminfo`. Three facts from vLLM's own source, checked in the production image `[measured-here]`:
+
+- **On an integrated GPU, "free GPU memory" is `MemAvailable`.** `mem_utils.py` calls
+  `torch.accelerator.get_memory_info()` and then, when `torch.cuda.get_device_properties().is_integrated`
+  is true — which it is on GB10 — replaces the answer with `psutil.virtual_memory().available`,
+  because `cudaMemGetInfo` cannot see reclaimable OS memory. The confirmation is arithmetic: the
+  engine reports a device total of **121.63 GiB** and the host's `MemTotal` is 121.6297 GiB, the same
+  number; `nvidia-smi --query-gpu=memory.used` returns `[N/A]` on all three nodes.
+- **"consumed memory (weights + non-torch)" is not an allocation.** It is
+  `free_memory(before load) − free_memory(after the profile run)`. Anything else on the machine that
+  frees or consumes memory between those two points lands in it.
+- The budget itself is `ceil(total_memory × gpu_memory_utilization)` — a share of the **total**, not
+  of what is free. So the pool is
+  `0.80 × MemTotal − (MemAvailable(init) − MemAvailable(after profile)) − peak activation`.
+
+Read that formula once more: **the lower `MemAvailable` is when the engine starts, the larger the pool
+it computes.** The instrument runs backwards. A node that starts dirty awards itself memory it does
+not have.
+
+That is not hypothetical. The launcher kills the previous container (~90 GiB) and starts the new one
+immediately, and the nodes are started worker-2 → worker-1 → head, so the **head** — started last — is
+the node the kernel has had least time to reclaim for. On one dump boot the three ranks began with
+104.10 / 113.07 / 113.10 GiB available, a **9.00 GiB** spread, and ended the profile at
+47.74 / 48.73 / 48.52 GiB, a **0.99 GiB** spread `[measured-here]`. A spread that disappears by the
+end was never an allocation.
+
+**The cure is on the host, before the container.** `scripts/start-tp3.sh` waits after `docker rm -f`
+until `MemAvailable` is back over `SETTLE_MIN_GIB` (112 by default), polling every 3 s for at most
+180 s, and logs what it waited for:
+
+```
+sync
+SETTLE_MIN_GIB="${SETTLE_MIN_GIB:-112}"
+for settle_i in $(seq 1 60); do
+  settle_avail=$(awk '/^MemAvailable:/{printf "%d", $2/1048576}' /proc/meminfo)
+  [ "$settle_avail" -ge "$SETTLE_MIN_GIB" ] && break
+  sleep 3
+done
+```
+
+It cannot be done from inside the container: `/proc/sys` is in the container's `ReadonlyPaths` and the
+container is not privileged, so a prelude cannot even drop caches. **The gate buys zero tokens.** What
+it buys is a ruler: per-rank startup free memory went from a **9 GiB** spread to **1.4 GiB**
+(111.65 / 113.06 / 113.07) `[measured-here]`.
+
+**How much of the pool was ever at risk — stated carefully, because it is easy to overstate.** No
+published pool figure here is known to be wrong. The pool takes the **minimum** over ranks, and on
+every boot we have a ledger for, the node with the polluted baseline was the **head**, which was not
+the binding rank. That is luck, not design: 9 GiB is **27 %** of a rank's KV allowance, and the polluted
+node is simply whichever one starts last. Change the start order, add a node, or let a worker be the
+slow one, and the artefact walks straight into the pool. Meanwhile the pool figures across recent boots
+span 4,231,404 → 4,484,848 (**6.0 %**); each of those has a candidate explanation in
+[08](08-fast-boot.md) §5, and comparable load boots after that fix agree to 0.4 % — but **with the
+baseline unpinned there was no way to tell an explanation from an artefact**, which is the actual cost
+and the reason the gate was worth writing. A pool difference of a few percent is exactly the size this
+stack argues about ([09](09-measurement-protocol.md) §1.2).
+
+**Two rules follow, and they are the operative half of this section:**
+
+1. **Read the pool only from a load boot.** A dump boot writes 56 GiB per node through the page cache
+   and its dirty pages are still in flight during the profile, so they are billed to
+   `total_consumed`: the same configuration reads about **6.7 % low** on a dump boot
+   ([09](09-measurement-protocol.md) §11).
+2. **Check the gate did its job before quoting the number.** All three ranks' `Free memory on device`
+   *and* `Actual usage ... consumed memory` lines must agree within 1 GiB. If they do not, the boot
+   produced a speed result and a quality result, and no pool result.
+
+The acceptance check that follows from rule 2 is one grep:
+
+```
+docker logs exl3-tp3 2>&1 | grep 'gpu_worker.py' | grep 'Free memory on device'
+```
 
 ---
 
@@ -247,15 +325,34 @@ configuration sits at 11–12 GiB free with **zero** swap and 3.0–3.5 GiB of p
 and 0.85 deserves a re-run rather than a carried-forward verdict `[not tested]`.
 
 There is a second, sharper instrument nobody here has used: **`--kv-cache-memory`**, which sizes the
-pool in bytes instead of as a fraction of the device. `gpu-memory-utilization` budgets a share of the
+pool in bytes instead of as a fraction of the device. It skips the memory profile altogether — vLLM
+takes the byte figure as given — so it is immune both to the rank spread and to the baseline drift of
+§1.1, and all three ranks get the same number. `gpu-memory-utilization` budgets a share of the
 **total**, so a worker that starts with 113 GiB free is still squeezed into a 97.3 GiB budget, and
 vLLM's own boot log says as much — it prints the byte figure it thinks would fully utilise the device
 against the far smaller one we actually take. Ladder first and pin last, because a pin removes the
 headroom that the free-memory rule is protecting `[not tested]`.
 
+**Do not take the "to fully utilize gpu memory" hint.** That figure is
+`MemAvailable(init) − non_kv_cache_memory − 150 MiB`, i.e. *all* of the memory the host had free at
+boot: on a unified-memory part it leaves the machine zero page cache, which is the 0.85 boot's swap
+table again by a different route `[measured-here]`.
+
+**The rung to try next is 0.83, and the reason it is worth trying now is §1.1.** The knob multiplies
+`MemTotal`, so it is the one input to the pool that the baseline cannot corrupt: +0.03 × 121.63 GiB is
+**+3.65 GiB** of budget, which lands whole on the binding rank (~33.3 GiB at today's pool and
+141,247 tokens per GiB) and is worth about **+11 %**, roughly **5.2M tokens** `[estimate]`. Run before
+the settle gate existed, an 11 % signal would have shared a table with up to 27 % of baseline artefact
+per rank, and no way to separate them. The
+price, stated rather than left out: the OS share drops from 20 % to 17 %, and the narrowest node — the
+head, which also carries the API server — goes from ~12.3 GB free under load to about **8.4 GB**. That
+is still clear of the 4 GiB rule, and 0.85 (another +6.08 GiB, leaving ~5.8 GB) is the rung after it,
+not instead of it, and only after a soak. **Not run: it is a production memory change and waits on the
+stack owner's approval** `[not tested]`.
+
 ---
 
-## 7. The draft cache at fp8
+## 7. The draft cache at fp8 — in production
 
 The main cache is `fp8`; the drafter's is `bf16`, because our launcher pins it there —
 `"kv_cache_dtype": "auto"` inside `--speculative-config`, where `auto` for the draft means "inherit"
@@ -285,12 +382,22 @@ rounds, with one C1 round at 57.3 % — against production's 61–65 %, and agai
 arm dies if acceptance leaves the 60–65 band. Speed is inside the bands ([09](09-measurement-protocol.md)
 §1.2). Full table in [10](10-results-and-roofline.md) §2.1 `[measured-here]`.
 
-**What it has not produced is the pool number.** The arm added three prelude patches, which
-invalidates the fast-load sidecar and forces a dump boot ([09](09-measurement-protocol.md) §11), and
-a dump boot's pool reads low because 56 GiB per node goes out through the page cache — this one read
-4,382,920, which is *below* production and means nothing. The expected figure on a load boot is about
-4.66M. **Not promoted until that boot happens** `[not tested]`;
-[11](11-open-issues.md) §2.18 tracks it.
+**The pool number arrived on the load boot, and it promoted the change.** The validation arm had run
+on a **dump boot** — it added three prelude patches, which invalidates the fast-load sidecar
+([09](09-measurement-protocol.md) §11) — and a dump boot's pool reads low, this one 4,382,920, *below*
+production and meaningless. The ordinary load boot that followed, with the settle gate of §1.1 in
+place, read `[measured-here]`:
+
+| | production 6 (bf16 draft cache) | **production 7 (fp8 draft cache)** |
+|---|---|---|
+| KV pool | 4,449,035 | **4,699,724** (+5.6 %) |
+| maximum concurrency at 1M tokens per request | 4.45× | **4.70×** |
+| per-rank startup free memory, spread | 9 GiB (baseline artefact) | **1.4 GiB** (settle gate) |
+
+**+5.6 % against the +4.7 % predicted** — the estimate was good to within a point, and the residual is
+the settle gate removing part of the drift the old number carried. This is now the production
+configuration; the rollback is still one environment variable
+([11](11-open-issues.md) §2.18 records it closed).
 
 ---
 
@@ -324,13 +431,15 @@ cache were uniform — is 0.19 % of prefill and no partial mode was written for 
 
 ## 9. Where the pool stands
 
-Production, `gpu-memory-utilization 0.80`, draft page 256, `--max-num-batched-tokens 2048`, with the
-fast-load sidecar in place `[measured-here]`:
+Production, `gpu-memory-utilization 0.80`, draft page 256, **draft cache fp8**,
+`--max-num-batched-tokens 2048`, with the fast-load sidecar in place and the settle gate of §1.1 on a
+load boot `[measured-here]`:
 
 | | tokens |
 |---|---|
-| KV pool | **4,484,848** |
-| maximum concurrency at 1,000,000 tokens per request | **4.48×** |
+| KV pool | **4,699,724** |
+| maximum concurrency at 1,000,000 tokens per request | **4.70×** |
+| the same stack with a bf16 draft cache (production 6) | 4,449,035 |
 | for comparison: TP=2 with the same draft | 825,000 |
 | for comparison: our NVFP4 stack at `gpu-memory-utilization 0.88` | 4,321,739 |
 

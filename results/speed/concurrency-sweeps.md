@@ -26,7 +26,8 @@ decides throughput, not `accept_rate_pct`.
 | fast boot S1+S2+S3 | EP weight filter, eager safetensors, FlashInfer autotune off (docs/08) |
 | fast boot S4 | per-rank pre-sliced sidecar, full bit-identity verification (docs/08) |
 | tuner cache warm (9bf594c) | image moved to cuda-exl3 9bf594c, CUDA_EXL3_TUNE_CACHE warm (docs/12) |
-| dual cable + `PTR_CUDA` (production) | mesh plugin patches 0005 + 0006: both cables per peer, no host bounce buffer (docs/06) |
+| dual cable + `PTR_CUDA` (production 6) | mesh plugin patches 0005 + 0006: both cables per peer, no host bounce buffer (docs/06) |
+| fp8 draft cache + settle gate (production 7) | `HAREM_DRAFT_KV_DTYPE=fp8` on the DFlash2 drafter's own cache, and the launcher's host-side memory settle gate (docs/07 sections 1.1 and 7) |
 
 ## The numbers
 
@@ -82,8 +83,20 @@ decides throughput, not `accept_rate_pct`.
 | **dual cable + `PTR_CUDA` (production)** | 4 | **118.5** | 114.9–125.1 | 36.1 | 0.752 | 27.66 | 63.0 | 5.41 | 4,449,035 |
 | **dual cable + `PTR_CUDA` (production)** | 6 | **142.9** | 142.8–146.4 | 29.6 | 0.903 | 33.74 | 61.5 | 5.30 | 4,449,035 |
 | **dual cable + `PTR_CUDA` (production)** | 8 | **168.9** | 167.3–170.2 | 26.0 | 1.010 | 38.47 | 61.2 | 5.29 | 4,449,035 |
+| **fp8 draft cache + settle gate (production 7)** | 1 | **57.0** | 56.7–57.9 | 64.0 | 0.336 | 15.63 | 64.3 | 5.50 | **4,699,724** |
+| **fp8 draft cache + settle gate (production 7)** | 2 | **80.9** | 80.8–81.8 | 47.6 | 0.511 | 20.99 | 62.3 | 5.36 | **4,699,724** |
+| **fp8 draft cache + settle gate (production 7)** | 4 | **120.0** | 116.3–120.2 | 37.2 | 0.710 | 26.88 | 61.9 | 5.33 | **4,699,724** |
+| **fp8 draft cache + settle gate (production 7)** | 6 | **143.4** | 142.8–152.4 | 30.4 | 0.808 | 32.90 | 60.8 | 5.26 | **4,699,724** |
+| **fp8 draft cache + settle gate (production 7)** | 8 | **175.1** | 171.6–175.5 | 26.9 | 0.914 | 37.21 | 62.0 | 5.34 | **4,699,724** |
 
-**The last two arms are medians of three rounds, not five with two discarded.** They ran on the
+**Production 7's speed columns are not a result; its KV column is.** C8 reads +3.7 % over production 6
+and C2 −3.9 %, on three rounds each, which is what noise looks like when it is reported honestly
+([docs/09](../../docs/09-measurement-protocol.md) §1.2). The change it was made for is the pool,
++5.6 %, and it is the first pool figure here taken from a load boot with a settled memory baseline
+([docs/07](../../docs/07-kv-and-draft-page.md) §1.1) — every KV column above it was measured with the
+baseline unpinned. None of them is known to be wrong; none of them was checkable either.
+
+**The last three arms are medians of three rounds, not five with two discarded.** They ran on the
 `9bf594c` image with a persisted MLA tuner cache, which is what removed the warm-up window the
 five-round rule existed to skip ([docs/12](../../docs/12-tuner-cache.md)); their per-round figures are
 in [`../boot/tuner-cache.md`](../boot/tuner-cache.md) and are unordered noise. Every earlier arm on

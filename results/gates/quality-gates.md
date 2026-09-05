@@ -29,7 +29,11 @@ because a fresh caching allocator hands out zeroed pages. See
 | draft page 256 @ 0.85 (rejected on memory) | 10/10 | 12/12 | **10/10** | **12/12** |
 | fast boot S1+S2+S3 | 10/10 | 12/12 | **10/10** | **12/12** |
 | fast boot, sidecar dump | 10/10 | 12/12 | — | — |
-| **production (fast-boot sidecar)** | **10/10** | **12/12** | **10/10** | **12/12** |
+| fast boot, S4 (per-rank sidecar) | 10/10 | 12/12 | **10/10** | **12/12** |
+| tuner cache warm (`9bf594c`) | 10/10 | 12/12 | **10/10** | **12/12** |
+| production 6 (dual cable + `PTR_CUDA`) | 10/10 | 12/12 | **10/10** | **12/12** |
+| draft KV fp8, dump boot | 10/10 | 12/12 | **10/10** | **12/12** |
+| **production 7 (fp8 draft cache, load boot)** | **10/10** | **12/12** | **10/10** | **12/12** |
 
 Full marks everywhere, in every arm, in both states `[measured-here]`.
 

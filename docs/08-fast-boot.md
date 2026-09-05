@@ -253,6 +253,56 @@ mmap does. The remedy is two calls in `harem_fastload.py`, both on by default an
 5.20 GiB). Result: **4,484,848 tokens, 1.6 % above the pre-change reference arm**, not merely recovered. `[measured-here]`
 Closed.
 
+### 5.1 The same mechanism from outside the container: the settle gate
+
+Section 5 is about page cache the engine *itself* generated. There is a second source of exactly the same
+error, and it arrives before the container does.
+
+The launcher kills the previous container with `docker rm -f` and starts the new one immediately. That
+container held about 90 GiB, and the kernel does not give it back instantly. vLLM's boot-time memory profile is a
+**delta** against `MemAvailable` taken just after NCCL init ([07](07-kv-and-draft-page.md) §1.1), so whatever has
+not been reclaimed at that instant is charged to `weights + non-torch` — **and the sign is backwards**: a node that
+starts dirty computes itself a *larger* KV pool. Boot order makes it systematic rather than random. The nodes start
+worker-2 → worker-1 → head, so the head is the node given the least reclaim time; on one boot the three ranks began
+with 104.10 / 113.07 / 113.10 GiB available (a **9.00 GiB** spread) and finished the profile within **0.99 GiB** of
+each other `[measured-here]`.
+
+**The boot sequence therefore has a step before `docker run`.** `scripts/start-tp3.sh` calls `sync` and then waits
+for `MemAvailable` to come back above `SETTLE_MIN_GIB` (112 by default), polling every 3 s up to 180 s, and logs the
+result:
+
+```
+mem settle: MemAvailable=113 GiB (target 112) after 6s
+```
+
+It has to be on the host: `/proc/sys` is in the container's `ReadonlyPaths` and the container is unprivileged, so a
+prelude cannot drop caches even if it wanted to. Optionally the gate can be preceded by
+`sudo sh -c 'sync; echo 1 > /proc/sys/vm/drop_caches'` — our NVFP4 sibling's preflight does exactly that on these
+same nodes — but the wait alone was enough here, and dropping caches on a node the engine is about to read 56 GiB
+from is not free.
+
+**What it changed, and what it did not** `[measured-here]`:
+
+| | before the gate | with the gate |
+|---|---|---|
+| per-rank startup free memory | 104.10 / 113.07 / 113.10 GiB (spread **9.00**) | 111.65 / 113.06 / 113.07 GiB (spread **1.4**) |
+| the spread as a share of a rank's KV allowance | **27 %** | ~4 % |
+| KV tokens bought | — | **zero** |
+| boot time | — | + the wait (measured: seconds, capped at 180 s) |
+
+**No published pool figure here is known to be wrong**, and this section is not a retraction of one. The pool takes
+the minimum over ranks, and on every boot with a ledger the polluted node was the head, which was not binding —
+which is luck rather than design, since the polluted node is whichever one starts last. What the gate removes is
+the *possibility*: 27 % of a rank's allowance sitting in the measurement, waiting for a different start order.
+
+The gate is a **measurement** fix, not a performance one, and section 5 is why it matters. That section chased a
+4.1 % pool regression to page cache and fixed it — a piece of work that is only sound if the pool number is stable
+enough to attribute. Recent boots span 4,231,404 → 4,484,848 (**6.0 %**), every step of which has a candidate
+explanation here, and comparable load boots after the page-cache fix agree to 0.4 %. With the baseline unpinned
+there was no way to prove which was which. The acceptance test for a boot that intends to report a pool number is in
+[07](07-kv-and-draft-page.md) §1.1: all three ranks within 1 GiB on both the `Free memory on device` and the
+`consumed memory` lines, and the boot must be a **load** boot, never a dump boot.
+
 ## 6. Block-layer forensics, and the decision rule they support
 
 Before choosing between "the read path is slow" and "the copy path is slow", the boot was recorded at the block layer:

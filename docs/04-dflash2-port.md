@@ -353,7 +353,7 @@ DFlash2 is the largest single decode win in this stack, and it is not free `[mea
 
 **The KV pool is the item to understand.** The draft's own cache group explains only **0.6 %** of that drop.
 Most of the rest was memory scarcity at TP=2 — 81.53 GiB of weights per node left 17.27 GiB for KV — and the
-third node resolved it: the headline configuration runs a **4,484,848-token** pool with the same drafter at k=7
+third node resolved it: the headline configuration runs a **4,699,724-token** pool with the same drafter at k=7
 ([README](../README.md), [10](10-results-and-roofline.md)). The remainder, a counter rather than a byte, is
 [07](07-kv-and-draft-page.md).
 

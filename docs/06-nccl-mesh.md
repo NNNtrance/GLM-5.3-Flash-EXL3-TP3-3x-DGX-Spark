@@ -637,7 +637,9 @@ proposed forcing `Simple` as the largest prefill lead open. Forcing LL at 16 MB 
 mesh delivers at that size anyway, since `Simple` — no flag words at all — reaches 12.2 GB/s. There is no half link to
 recover. What replaced it is the finding on this page: the loss is mid-range, and the mechanism is RNR.
 
-## 12. `NCCL_PROTO` — rejected
+## 12. `NCCL_PROTO` and `NCCL_ALGO`
+
+### 12.1 `NCCL_PROTO` — rejected
 
 You will reach for this first; it does not work. Model-free, engine down, `bench/ar_bench.py` with the engine's exact
 NCCL environment; every protocol measured twice, `ALGO=Ring` unless noted; µs per all-reduce, world = 3
@@ -657,6 +659,50 @@ than auto at 16 MB. `LL128` is 3.1× better than auto at 4 MB but 2.1× worse at
 forced `Ring` (3.90 against 3.96 ms per decode step), so the launcher's `Ring` stays. One trap: an old env file
 carrying `NCCL_MAX_NCHANNELS=8` *alongside* `NCCL_PROTO=LL` is not evidence that 8 channels was tried and rejected —
 the `LL` in it costs 11× at 16 MB and buries the channel gain. That combination was never tried cleanly.
+
+### 12.2 `NCCL_ALGO`: `Tree` is dead here, `Ring,Tree` is unresolved
+
+The launcher **forces** `NCCL_ALGO=Ring`, which for a long time was an inherited default and not a measured choice —
+it sat on the open list as the cheapest untried thing in this repository. It has now been swept, model-free, engine
+down, on the production plugin build and the production NCCL environment (`NCCL_MAX_NCHANNELS=8`,
+`NCCL_MESH_LINKS_PER_PEER=0`, `NCCL_MESH_MIN_RNR_TIMER=1`, `NCCL_MESH_PTR_CUDA=1`, `NCCL_MESH_FLUSH=1`), three arms
+× **two repetitions**, world = 3 `[measured-here]`.
+
+**All-reduce**, GB/s, both repetitions shown because the answer is in the disagreement between them:
+
+| message | `Ring` | `Ring,Tree` | `Tree` |
+|---|---|---|---|
+| 1 MB | 4.49 / 2.61 | 2.66 / 6.90 | 2.43 / 3.46 |
+| 4 MB | 9.61 / 15.46 | 16.70 / 17.24 | 1.74 / 1.91 |
+| 16 MB (prefill chunk) | 20.23 / 18.30 | 20.39 / 21.06 | **3.15 / 3.36** |
+| 64 MB | 22.24 / 18.23 | 22.50 / 22.58 | **4.93 / 5.93** |
+
+**The decode-step proxy** — 90 collectives at the decode message size, which is the shape that actually decides this
+question, since a decode step spends its collective time on a fixed count of 102 small messages
+([10](10-results-and-roofline.md) §5.3):
+
+| | rep 1 | rep 2 | mean |
+|---|---|---|---|
+| `Ring` | 9.165 ms | 9.669 ms | **9.42** |
+| `Ring,Tree` | 9.118 ms | 9.045 ms | **9.08** |
+| `Tree` | 11.596 ms | 18.442 ms | **11.60 (rep 1) / 15.02 (both)** |
+
+**`Tree` is dead on this fabric.** It is 4–6× slower on the two message sizes the engine actually uses in bulk, its
+RNR retry counters climb to 37–41 per operation at 64 MB where Ring sits at 0–13, and it is 23–96 % worse on the step
+proxy. The mechanism is not mysterious: a tree wants a bandwidth-shaped topology to pay for its lower step count, and
+this is three nodes, each a pair of PCIe Gen5 x4 cards (§9). The step-count arithmetic that made it attractive —
+`2(w−1) = 4` ring steps against `~2·log₂3 ≈ 3.2` — was never worth what it costs per step here.
+
+**`Ring,Tree` is not decided, and this sweep cannot decide it.** It is 3.6 % better than Ring on the step proxy and
+better at 4 MB; it is worse than Ring on `sendrecv` at 64 MB (17.27 / 15.43 against 21.62 / 20.79) and the two arms
+swap places at 1 MB. The reason none of that is conclusive is visible in the table: **two repetitions of the same arm
+differ by up to 1.7× at 1 MB and by 22 % at 64 MB**, so an effect of a few percent is well under the instrument's own
+spread. Giving the tuner the list rather than pinning `Tree` is still the right shape for the arm — but settling it
+needs a five-round engine measurement ([09](09-measurement-protocol.md) §1), not another model-free sweep, and at an
+expected −1…3 % of a decode step that arm has not earned its slot yet. **Deferred; `Ring` stays in production**
+`[not tested]` for the engine half.
+
+Raw logs, port counters and the JSON per arm: [`../results/mesh/algo-sweep.md`](../results/mesh/algo-sweep.md).
 
 ## 13. What this cost
 
@@ -710,15 +756,12 @@ for very large messages: at 2 and 4 channels the 64 MB column suffers, at 8 it d
    should before the two larger levers ([11](11-open-issues.md) §2.12, §2.1) are spent. If you want to try: the
    remaining candidates are channel count over two cables (item 1), and getting NCCL to keep both cards busy on the
    *same* collective rather than alternating channels between them, which nobody here has looked at.
-8. **`NCCL_ALGO=Ring,Tree` has never been run here, and it is the cheapest thing left** `[not tested]`. The launcher
-   **forces** `NCCL_ALGO=Ring` (see the `NCCL_ENV` block in `scripts/start-tp3.sh`), which was never a measured
-   choice. At `world_size = 3` a ring all-reduce is `2(w−1) = 4` sequential steps and a tree is about `2·log₂3 ≈ 3.2`;
-   decode spends its collective time on a **fixed count** of 102 small messages per step
-   ([10](10-results-and-roofline.md) §5.3), so step count converts directly into latency. Expected **−1…3 % of a
-   decode step** and ~0 at prefill, where Ring is already right at 16.78 MB. The mesh plugin is algorithm-agnostic —
-   same peer pairs, three nodes fully connected — so nothing about it blocks Tree; it has simply never been asked
-   for. Give the tuner the list rather than pinning Tree, and run it model-free with the engine down before spending
-   an arm on it.
+8. **`NCCL_ALGO` — half closed** `[measured-here]`. The model-free sweep has been run (§12.2): **`Tree` is dead
+   here**, 4–6× slower at 16 and 64 MB and 23–96 % worse on the decode-step proxy, so the step-count arithmetic that
+   made it attractive is decisively outweighed on this fabric. **`Ring,Tree` is unresolved**: 3.6 % better on the
+   step proxy, worse on `sendrecv` at 64 MB, and the sweep's own repeat-to-repeat spread is larger than the effect.
+   Settling it needs a five-round engine arm at an expected −1…3 % of a decode step, and it has been **deferred**
+   rather than run `[not tested]`. `Ring` stays in the launcher.
 
 ## 15. The same fix applies to the NVFP4 sibling
 

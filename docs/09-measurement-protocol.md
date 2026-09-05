@@ -198,6 +198,23 @@ line afterwards `[measured-here]`.
 
 ---
 
+### 4.2 A working set that fits the cache flatters every synthetic bench, the same way three times
+
+Three model-free benches in this recipe looked better than the engine for one reason: the synthetic
+working set was small enough to be served from cache, and production's is not.
+
+| bench | what fit | what it hid | how it was caught |
+|---|---|---|---|
+| MoE GEMM with uniform-random routing | eight experts' blocks per step stayed in L2 | the real router concentrates on hot experts and streams the rest | the engine profile disagreed with the bench at small M |
+| MLA attention on a 200 k-row KV pool | the whole pool | a 5 M-token pool is a cold read every step | the pool-size sweep bent where L2 ran out |
+| Dense/KDA GEMM timed on one weight tensor | a 0.7–33 MB weight in a 24–128 MB L2 | the trellis exists to save bytes that a resident weight never pays for | the ruler read 210 % of the card's peak bandwidth; the `cuda-exl3` author later caught the same artefact in his own table and withdrew a claim |
+
+The rule: **before trusting a model-free ratio, size the working set against L2 and rotate over a
+bank at least three times larger** (`bench/kda_gate_bench.py` and `bench/ruler_check.py` do this),
+and read the achieved bandwidth — a number above the machine's measured peak is the cache talking,
+not the kernel. A warm ratio is not wrong, it is a different question: it answers "what if the weight
+were resident", which at decode it is not.
+
 ## 5. The gates come before the numbers
 
 Two cheap tests, run **cold** after every boot and again **after** the full benchmark. Nothing else

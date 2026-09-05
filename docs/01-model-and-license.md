@@ -43,8 +43,14 @@ Two other EXL3 packages of this model exist, and we tried the obvious one first.
 | Candidate | Verdict |
 |---|---|
 | `brandonmusic/GLM-5.3-Flash-tr3-4bpw` (routed experts only, `mcg` codebook) | **What we run.** Everything outside the routed experts is BF16, so ordinary tensor parallelism still applies to attention and KDA, and the experts can be distributed whole. TP=3 is possible. |
-| A fully quantized 4.05 bpw package (`mul1` codebook, attention and `lm_head` quantized too) | **Rejected for TP=3.** With attention quantized as well, there is no unquantized dimension left to split three ways — see §3. It would leave TP=2 or pipeline parallelism, and a third idle node `[not tested]` at TP=3. |
-| Higher-precision EXL3 packages | Not evaluated for this stack `[not tested]`. |
+| `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw — **full scope**, `mul1` codebook, attention and `lm_head` quantized too | **Rejected for TP=3 when this was written, and that rejection is now under active challenge.** With attention quantized there is no unquantized dimension left to split three ways (§3.1), so it left TP=2 or pipeline parallelism and a third idle node. What changed: the measured profile says the BF16 half is **45 % of a decode step** (§3.2), and there is a mechanism — `svh = 0` padded loading, plus one launcher constant — that would put a full-scope checkpoint on all three ranks with no re-quantization. A TP=2 trial of exactly this package is the next experiment on the stack: C1 and the MMLU sample, posted either way ([11](11-open-issues.md) §2.22) `[not tested]`. |
+| Higher-precision EXL3 packages, and mixed per-layer bitrates (higher on attention and the head, 4-bit on the experts) | Not evaluated `[not tested]`. If the full-scope gate above fails, this is the fallback rather than a return to routed-experts-only. |
+
+**Licence, for the full-scope candidate: `[to verify]`.** We have not read
+`turboderp/GLM-5.3-Flash-exl3`'s licence file against the repository, and nothing in this document
+should be taken as saying it is the same as the checkpoint we run (it is not the same publisher, and
+ours is the ShapleyMCG License 1.0 described in §2 — an unusual one). Read it before you download it,
+and expect this row to be filled in when we do.
 
 Independent panels put EXL3 at ~4 bits in the same KL band as FP8 for this model family, and well
 ahead of 4-bit NVFP4 and int4 AWQ `[reported]`. Our own comparison is narrower and honest about it:
@@ -105,17 +111,25 @@ rather than trusting a comment.
 ### 3.2 Most of the model is still BF16, and that is now the biggest single cost
 
 `scope: glm53_routed_experts_only` means attention, the KDA layers, the shared expert and `lm_head`
-are unquantized. In the decode profile those BF16 dense GEMMs are **~37 % of GPU time**, ahead of the
-EXL3 MoE GEMM at 29.3 % `[measured-here]`. At prefill they are ~20 %.
+are unquantized. Measured on the live server with a torch profiler, those BF16 dense GEMMs are
+**45.3 % of a single-stream decode step** — the largest class, ahead of the EXL3 MoE GEMM at 29.7 % —
+**21.1 % of a C8 step and 17.4 % of a prefill chunk** `[measured-here]`
+([10](10-results-and-roofline.md) §5.3).
 
-Two consequences worth holding on to:
+Three consequences worth holding on to:
 
-- Kernel work inside `cuda-exl3` cannot touch the largest item in the decode profile. The largest
-  remaining structural lever on this stack is a checkpoint that also quantizes attention — which,
-  today, is the one that cannot run at TP=3 (§1).
+- Kernel work inside `cuda-exl3` cannot touch the largest item in the decode profile. Everything in
+  that column of the ranked target table comes to about 5 %; this one item is priced at **~+34 %
+  single-stream** if the same layers were 4-bit `[estimate]`.
 - Each rank's share of those BF16 tensors is a *third* rather than a half, so they get **less**
   efficient per rank as ranks are added. Part of the single-stream gap against a two-node arrangement
   is exactly this, and it is not a bug.
+- The way out is a differently scoped checkpoint, and the TP=3 obstacle to one turns out to be
+  softer than §3.1 implies: an EXL3 tensor still cannot be *zero-extended*, but it can be loaded
+  narrow into a padded parameter with `svh = 0` on the pad, provided the pad occupies whole
+  128-column blocks. Our head pad already does (64 → 66 heads = 256 columns); our vocab pad does not
+  (192 = 1.5 blocks) and would at `padding_size=384`. The quality gate decides whether any of that is
+  worth building — [11](11-open-issues.md) §2.22 is the item, and the TP=2 trial is the experiment.
 
 ---
 

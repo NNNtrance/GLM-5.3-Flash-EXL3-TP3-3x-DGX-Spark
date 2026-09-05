@@ -74,10 +74,12 @@ kernels for Blackwell plus a fused sparse-MLA attention backend, with a vLLM plu
   classifier reports `other` / NOASSERTION for the repository, which is what a licence file with an
   added paragraph does to template matching; the file body is MIT terms. Both facts are recorded
   because they are not contradictory and a compliance reviewer will see the second one first.
-- **Production commit:** `9bf594cd8b43a2a53db9c7d1d629794aa9365f1a` — "Persist the MLA tuner cache
-  across processes". The previous production commit was
-  `f4987cf11806c7381c8a59cb388ab5863852679c`, "Do not fetch the MoE padding rows"; every table dated
-  before 5 September 06:45 was measured on it.
+- **Production commit:** `62f53e676d3e416401c3a0716558e1454affa8ad` — "Bound what is left in
+  `exl3_moe_had_in`", carrying `a47da6e` beneath it, since 5 September afternoon (production
+  configuration 8). The previous production commits were
+  `9bf594cd8b43a2a53db9c7d1d629794aa9365f1a`, "Persist the MLA tuner cache across processes"
+  (production 5–7; every table dated between 5 September 06:45 and that afternoon), and before it
+  `f4987cf11806c7381c8a59cb388ab5863852679c`, "Do not fetch the MoE padding rows".
 
 Commits this recipe built, measured or depends on:
 
@@ -98,8 +100,8 @@ Commits this recipe built, measured or depends on:
 | **`9bf594c`** | `9bf594cd8b43a2a53db9c7d1d629794aa9365f1a` | **Persist the MLA tuner cache across processes** | **the production commit.** Written by the author in answer to a measurement of ours; built, wired up and measured here — tune events before serving 18 → 0, and our sweep protocol dropped from five rounds to three ([docs/12](docs/12-tuner-cache.md)) |
 | `3cad1d2` | `3cad1d2` | Document the environment variables that exist | not built here; read while preparing the bench below |
 | `9b17ea9` | `9b17ea9` | Add the expert-reread bench, and close the duplicate-read question here | **the author's answer to our profile.** We ran his script unmodified on GB10 against the production build; it closed our own open item ([docs/10](docs/10-results-and-roofline.md) §5.4, [docs/11](docs/11-open-issues.md) §2.12) |
-| `a47da6e` | `a47da6e` | Remove the 64-bit division in `had_in`, deriving the index from the grid | the follow-up to the same profile: **−10 to −18 %** on `exl3_moe_had_in`, roofline 57 % → 63 % `[reported]`. Worth ~0.2–0.3 % of prefill here — real, and not worth an image rebuild alone. **Not in the production image**; queued for the next build ([docs/11](docs/11-open-issues.md) §2.19) |
-| `62f53e6` | `62f53e6` | Bound what is left in `had_in` | the answer to "is there more here": the remaining gap is a **half-ALU** limit — a 128-point Hadamard done with warp shuffles — so it is arithmetic that has to happen rather than traffic that can be removed, worth **≤2 % of prefill** on this stack and unreachable in practice `[reported]`. With it the **`cuda-exl3` MoE stage is closed as an optimisation target here** ([docs/10](docs/10-results-and-roofline.md) §6, [docs/11](docs/11-open-issues.md) §2.19) |
+| `a47da6e` | `a47da6e` | Remove the 64-bit division in `had_in`, deriving the index from the grid | the follow-up to the same profile: **−10 to −18 %** on `exl3_moe_had_in`, roofline 57 % → 63 % `[reported]`. Worth ~0.2–0.3 % of prefill here. **In production since configuration 8**, and it read exactly as advertised: every serving column inside its own band ([docs/10](docs/10-results-and-roofline.md) §1) |
+| **`62f53e6`** | `62f53e676d3e416401c3a0716558e1454affa8ad` | **Bound what is left in `had_in`** | **the production commit** since 5 September afternoon, and the answer to "is there more here": the remaining gap is a **half-ALU** limit — a 128-point Hadamard done with warp shuffles — so it is arithmetic that has to happen rather than traffic that can be removed, worth **≤2 % of prefill** on this stack and unreachable in practice `[reported]`. With it the **`cuda-exl3` MoE stage is closed as an optimisation target here** ([docs/10](docs/10-results-and-roofline.md) §6, [docs/11](docs/11-open-issues.md) §2.19) |
 
 Four things we reported to that project and their outcome:
 
@@ -131,21 +133,65 @@ ran that bench unmodified on GB10 and measured 1.11×: the trellis stays residen
 and our estimate was wrong because the model behind it was wrong. He then took the item that
 *was* real — `exl3_moe_had_in` at 37–57 % of the ruler — in **`a47da6e`**.
 
-The thread closed the same day, and it closed the whole stage rather than the one kernel. In
-**`62f53e6`** the author bounded what remains in `had_in`: a 128-point Hadamard implemented with warp
-shuffles is **ALU-bound at about half the unit's rate**, so the rest is work that has to be done, not
-traffic that can be removed — **≤2 % of prefill on this stack, and unreachable** `[reported]`. He also
-confirmed the memset note below: `_zero_kv_blocks_kernel` is vLLM's, and on this model family the page
-is shared with Mamba/KDA state, so the zeroing cannot be skipped
+The kernel-library half of that thread closed the same day, and it closed the whole stage rather than
+the one kernel. In **`62f53e6`** the author bounded what remains in `had_in`: a 128-point Hadamard
+implemented with warp shuffles is **ALU-bound at about half the unit's rate**, so the rest is work
+that has to be done, not traffic that can be removed — **≤2 % of prefill on this stack, and
+unreachable** `[reported]`. He also confirmed that `_zero_kv_blocks_kernel` is vLLM's, and that on
+this model family the page is shared with Mamba/KDA state so the zeroing cannot be skipped
 ([docs/11](docs/11-open-issues.md) §2.13). **We have no open item against `cuda-exl3`**, which is an
-unusual place for a dependency to end up and worth recording: two of our three reports produced
-upstream fixes, the third produced a bench that proved us wrong, and the fourth produced a bound that
-tells us to stop looking.
+unusual place for a dependency to end up: two of our three reports produced upstream fixes, the third
+produced a bench that proved us wrong, and the fourth produced a bound that tells us to stop looking.
 
-Two notes we owe that thread rather than the other way round: `_zero_kv_blocks_kernel` costs 14.7 ms
-per prefill chunk and belongs to vLLM, not to the kernel library; and a 128-token prefill chunk costs
-403 ms because 128 tokens at top-8 already touch every expert, which is a batched-token-budget fact
-worth knowing on any Spark.
+**Then we sent a real profiler trace, and the thread turned into the most valuable exchange in this
+repository.** Four things came back on it, and three of them make the author's side of the ledger
+longer rather than ours:
+
+- **MLA prefill, closed by him.** We had carried it for a week as "8.2 % of a chunk, efficiency not
+  measured, no denominator, needs its own bench". He measured it at our shapes — top-k 2,176,
+  head_dim 512, fp8 cache, and a **2 GB pool chosen specifically so it could not be L2-resident** —
+  and got **86–89 % of achievable**, 1,299–1,345 GB/s gathered against a 1,518 GB/s ruler in the same
+  run `[reported]`. Item closed with no work on our side. He also published that his *first* cut used
+  a 200k-row pool that fitted the card's L2 and reported a bandwidth above the DRAM ruler, caught only
+  because the number was impossible — the same failure our own model-free MoE bench had just
+  committed at small M, on the same day, from the other direction. **Synthetic benches flatter small
+  inputs**; that lesson is worth more than either measurement.
+- **A conclusion of his own, withdrawn against his own advice.** He had told us a cooperative
+  (`grid.sync`) MoE stage was never worth paying for, because "inside a CUDA graph a kernel boundary
+  is cheap enough". Our trace says production runs with **graphs off** — spec-decode plus FlashInfer
+  forces `cudagraph_mode=NONE` — so the premise did not hold on this stack, and our own uncaptured
+  measurement had the cooperative arm winning by up to 1.4 µs per boundary. He said so unprompted, and
+  then priced it honestly at ~0.2 ms of a 94.65 ms step and told us not to rush ([docs/11](docs/11-open-issues.md) §2.14).
+- **The largest number anyone has put on this stack, and it is not his code.** Reading our C1 split he
+  pointed at the row we had been treating as background: dense BF16 GEMM at **45 % of a decode step**,
+  because our checkpoint is `scope: glm53_routed_experts_only` and that stage streams 16-bit weights
+  at M=8. `Exl3LinearMethod` binds to any dense linear with EXL3 tensors present, so a broader-scope
+  checkpoint would put those layers on the same kernel **with no code change on either side** —
+  42.9 ms → ~11 ms, **~+34 % single-stream** `[estimate]`, against ~5 % for his whole column of our
+  target table. He framed it as a quality question rather than a speed one, named the head at vocab
+  154,880 as the place to look for damage first, and said he would want the numbers either way.
+- **And a mechanism for the TP=3 half of it that we did not have.** Our objection was that 64 heads
+  and a 154,880 vocab do not split three ways, and that `Exl3LinearMethod.create_weights` correctly
+  refuses to zero-extend an EXL3 tensor. His answer is the 2,304-sidecar property one level up: in
+  `had128_warp_out` the output Hadamard runs **first** and `svh` scales elementwise **afterwards**, so
+  zeroing `svh` on a padded output column makes that column exactly zero whatever the trellis holds —
+  the invariant already guarded by `test_exl3_moe_pad.py::test_padded_columns_are_exactly_zero`, and
+  mirrored for padded *input* dims by `test_output_ignores_w2_padded_row_codes`. A full-scope
+  checkpoint quantized **unpadded** can therefore be loaded into a padded parameter, bit-exact, with
+  no re-quantization — **provided the pad occupies whole 128-column blocks**. He then checked our two
+  tensors against that condition rather than asserting it: heads 64 → 66 = 256 columns = 2 whole
+  blocks, **works**; vocab `padding_size=192` = 1.5 blocks, **corrupts the real rows sharing the
+  block**. The fix is `padding_size=384`, one constant in our launcher. He has offered to add the
+  padded-load path behind a flag once our quality gate says whether it is worth building
+  ([docs/11](docs/11-open-issues.md) §2.22).
+
+Three notes we owe that thread rather than the other way round: a 128-token prefill chunk costs 403 ms
+because 128 tokens at top-8 already touch every expert, which is a batched-token-budget fact worth
+knowing on any Spark; a uniform-random top-8 microbenchmark overstates small-M MoE cost by
+**1.5–1.7×** against real clustered routing, which he accepted applies to his own `bench_moe_ep.py`
+and padding-skip benches; and two corrections against our own published numbers —
+`_zero_kv_blocks_kernel` from 14.7 ms to 0.86 ms, and the drafter from 19.5 % to 11.4 % of a C1 step —
+which he pointed out is the harder direction to publish.
 
 Our one surviving kernel change, `patches/kernel/0003-combine-smem-staging-on-a95e809.patch`, is
 offered upstream with its description in `patches/kernel/0003-PR-DESCRIPTION.md`.

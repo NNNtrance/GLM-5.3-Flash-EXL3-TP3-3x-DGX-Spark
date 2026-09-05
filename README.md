@@ -29,12 +29,12 @@ this repository is thin on those, that one is thorough.
 
 ## Headline results
 
-Settings for every row: image `exl3-zeus:9bf594c`, TP=3 + expert parallel, EXL3 4bpw weights,
+Settings for every row: image `exl3-zeus:62f53e6`, TP=3 + expert parallel, EXL3 4bpw weights,
 `kv-cache-dtype fp8` **and an fp8 draft cache** (`HAREM_DRAFT_KV_DTYPE=fp8`), DFlash2 draft at k=7,
 `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`, `--max-num-batched-tokens 2048`, `--max-num-seqs 8`,
 `NCCL_MAX_NCHANNELS=8`, `gpu-memory-utilization 0.80`, per-rank pre-sliced sidecar, warm MLA tuner
 cache, mesh plugin with both cables per peer and `NCCL_PTR_CUDA`, the launcher's memory settle gate,
-temperature 0, reasoning effort **low**, 5 September 2026. This is **production configuration 7**.
+temperature 0, reasoning effort **low**, 5 September 2026. This is **production configuration 8**.
 Speed is the median of three sweep rounds — the persisted tuner cache is what makes three enough; on
 an image without it the rule is still five rounds with two discarded
 ([docs/09](docs/09-measurement-protocol.md), [docs/12](docs/12-tuner-cache.md)).
@@ -43,28 +43,41 @@ an image without it the rule is still five rounds with two discarded
 |---|---|---|
 | Quality gates | correctness probe 10/10, code exam 12/12 | cold **and** after a full benchmark, every arm `[measured-here]` |
 | MMLU sample (35 questions per subject, 1,995 q) | 86.4 ±0.7 | measured at TP=2 on the same checkpoint; not re-run at TP=3 `[measured-here]` |
-| Speed, realistic (12 short English code prompts) | C1 **57.0** tok/s total (64.0 per stream) · C8 **175.1** tok/s total (26.9 per stream) | acceptance 61–64 %, 5.3–5.5 accepted tokens per step `[measured-here]` |
-| Prefill, fresh unseen ~8.5K prompts | **1,769** tok/s (warm repeated 7K prompt: 1,529) | a repeated prompt reads the prefix cache and lies — see [docs/09](docs/09-measurement-protocol.md) `[measured-here]` |
-| TTFT | 0.34 s at C1, 0.91 s at C8 | `[measured-here]` |
-| KV pool | **4,699,724 tokens** at `gpu-memory-utilization 0.80` | about 4.7 concurrent 1M-token requests; read from a load boot with a settled baseline `[measured-here]` |
+| Speed, realistic (12 short English code prompts) | C1 **56.8** tok/s total (63.9 per stream) · C8 **172.8** tok/s total (26.6 per stream) | acceptance 62–64 %, 5.3–5.5 accepted tokens per step `[measured-here]` |
+| Prefill, fresh unseen ~8.5K prompts | **1,780** tok/s (warm repeated 7K prompt: 1,529, production 7) | a repeated prompt reads the prefix cache and lies — see [docs/09](docs/09-measurement-protocol.md) `[measured-here]` |
+| TTFT | 0.34 s at C1, 0.91 s at C8 | production 7's; not re-read at production 8 `[measured-here]` |
+| KV pool | **4,674,931 tokens** at `gpu-memory-utilization 0.80` | about 4.7 concurrent 1M-token requests; read from a load boot with a settled baseline `[measured-here]` |
 | Weights per node | 54.9 GiB | against 81.5 GiB at TP=2 — the whole reason for the third node `[measured-here]` |
 | Cold boot, container start → API ready | **~274 s** (~4.5 min) | was 618 s before the loader work; itemised on the fast-boot arm, plus the settle gate's wait since `[measured-here, raw lost]` |
 | Free host RAM at rest / swap | 12.3 / 13.5 / 13.3 GiB · ~0.1 GiB | rule: never below 4 GiB free `[measured-here]` |
 | Speed by category, C1 | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 tok/s | acceptance 46 / 56 / 55 / **13 %** — prose is where a k=7 draft is wasted. **Measured three configurations earlier**; not re-run since `[not tested]` |
 
-**Production configuration 7 changed one number and one instrument.** For two configurations before it,
-a day of profiling, a MoE re-read bench, a hyper-connection analysis, a one-sided RDMA_WRITE transport,
-a fused hyper-connection kernel and a dual-batch-overlap design study moved **no** production number
-between them; each was a measurement and most closed an item
-([10](docs/10-results-and-roofline.md) §5, [06](docs/06-nccl-mesh.md) §9–§10,
-[11](docs/11-open-issues.md) §2.16–§2.19). Production 7 moves the **KV pool, +5.6 % to 4.70M**, by
-putting the DFlash2 drafter's own cache at fp8 — speed is unchanged inside its bands, TTFT is better at
-both ends, draft acceptance and the gates are where they were
-([07](docs/07-kv-and-draft-page.md) §7, [11](docs/11-open-issues.md) §2.18). Where a step goes is now
-measured rather than inferred: per 2,048-token prefill chunk, MoE trellis GEMM 26.4 %, NCCL all-reduce
-16.5 %, dense BF16 GEMM 16.2 %, hyper-connection mixing 11.7 %; per C1 decode step, dense BF16 GEMM
-44.8 % and the k=7 drafter 19.5 %. Both rulers those percentages are against were measured on the
-device — 225 GB/s and 97.3 TFLOP/s, not the 273 and ~125 the datasheet implies.
+**Production configuration 8 moves the image and nothing else, on purpose.** `62f53e6` carries
+upstream's `had_in` fix, which was priced at 0.2–0.3 % of prefill wall *before* it was built — below
+the noise floor of a serving benchmark. Measured: C1 56.8 against 57.0, C8 172.8 against 175.1,
+prefill 1,780 against 1,769, pool 4.67M against 4.70M, gates full. Four signs, every one inside its
+own band, which is exactly what a sub-noise change should look like and is the whole entry
+([10](docs/10-results-and-roofline.md) §1, [11](docs/11-open-issues.md) §2.19). The configuration
+before it, production 7, bought the **KV pool, +5.6 % to 4.70M**, by putting the DFlash2 drafter's own
+cache at fp8 — speed unchanged inside its bands, TTFT better at both ends
+([07](docs/07-kv-and-draft-page.md) §7, [11](docs/11-open-issues.md) §2.18).
+
+**Where a step goes is now measured, and the measurement deleted two of our own targets.** A torch
+profiler ran against the *live* server, all three ranks, no restart — one launcher flag that should
+have been set a week earlier ([09](docs/09-measurement-protocol.md) §4.1). Per steady prefill chunk,
+which turns out to be **1,792 tokens rather than 2,048**: MoE trellis GEMM 28.5 %, dense BF16 GEMM
+17.4 %, NCCL 14.5 %, hyper-connection mixing 12.0 %, MLA 8.3 %, KDA 8.1 %. Per C1 decode step: dense
+BF16 GEMM **45.3 %** and the k=7 drafter **11.4 %**. Per C8 step: the MoE stage **51.6 %**. Against
+that, the reconciliation it replaces had `exl3_moe_combine` at 1.5 % of a chunk — **the kernel does
+not exist in this build** — and `_zero_kv_blocks` at 1.3 %, which measures **0.09 %**. Both had been
+published as ranked targets. The NCCL class is **100 % exposed**: measured comm/compute overlap is
+0.00 ms per prefill step. And the "5.45 ms of GPU idle at C1" that looked like a CUDA-graph
+opportunity is **3.47 ms** once the profiler's own ~1 µs per kernel boundary is subtracted, of which
+77 % is per-kernel dispatch rather than the host — so graph coverage is worth +1.5–2 % single-stream,
+not the +6 % we had claimed ([10](docs/10-results-and-roofline.md) §5,
+[`results/profile/measured-prod7.md`](results/profile/measured-prod7.md)). Both rulers those
+percentages are against were measured on the device — 225 GB/s and 97.3 TFLOP/s, not the 273 and ~125
+the datasheet implies.
 
 **The other half of production 7 buys no tokens at all, and it is the part worth copying.** The KV
 pool number this stack has spent a dozen arms on turned out to be a *difference* between two readings
@@ -81,17 +94,32 @@ worth 8–26 % of pool; acting on it would have over-committed the head node
 ([07](docs/07-kv-and-draft-page.md) §1.1, [08](docs/08-fast-boot.md) §5.1,
 [11](docs/11-open-issues.md) §2.3).
 
-**Two `NCCL_ALGO` arms and one memory rung are the open edge.** `Tree` is measured and rejected on
-this fabric — 4–6× slower on the sizes that matter — while `Ring,Tree` came back *inside the sweep's
-own repeat spread* and is deferred to a five-round engine arm; `Ring` stays
-([06](docs/06-nccl-mesh.md) §12.2). The `gpu-memory-utilization 0.83` rung is designed and costed at
-about **+11 % of pool** for ~3.9 GB of host headroom, and it waits on the stack owner's approval rather
-than on a measurement ([11](docs/11-open-issues.md) §2.4). Upstream, the `cuda-exl3` MoE stage is now **closed**: `62f53e6`
+**The open edge has moved, and it is now the checkpoint rather than the kernels.** Dense BF16 GEMM is
+45 % of a single-stream decode step because our checkpoint is `scope: glm53_routed_experts_only` —
+attention, the shared experts and `lm_head` stay BF16, so at M=8 that stage streams 16-bit weights
+beside a 4-bit routed half. At 4 bpw the same stage would be bandwidth-bound on ~4× less traffic:
+42.9 ms → ~11 ms, **roughly +34 % single-stream** `[estimate]`, against about 5 % for everything in
+the `cuda-exl3` column of our target table put together. The blocker was TP=3 — 64 heads and a 154,880
+vocab do not split three ways, and an EXL3 trellis cannot be zero-extended — and it is softer than it
+looked: a checkpoint quantized *unpadded* can be loaded into a padded parameter with `svh = 0` on the
+pad, provided the pad occupies whole 128-column blocks. Our head pad already does (64 → 66 heads =
+256 columns); our vocab pad does not, and would at `padding_size=384`. **The question is quality, not
+speed**, and the experiment that decides it is a TP=2 trial of `turboderp/GLM-5.3-Flash-exl3` at
+4.05 bpw against our MMLU sample — running next, reported either way
+([11](docs/11-open-issues.md) §2.22, [01](docs/01-model-and-license.md) §3.2) `[not tested]`.
+
+Behind it, two `NCCL_ALGO` arms and one memory rung. `Tree` is measured and rejected on this fabric —
+4–6× slower on the sizes that matter — while `Ring,Tree` came back *inside the sweep's own repeat
+spread* and is deferred to a five-round engine arm; `Ring` stays ([06](docs/06-nccl-mesh.md) §12.2).
+The `gpu-memory-utilization 0.83` rung is designed and costed at about **+11 % of pool** for ~3.9 GB
+of host headroom, and it waits on the stack owner's approval rather than on a measurement
+([11](docs/11-open-issues.md) §2.4). Upstream, the `cuda-exl3` MoE stage is **closed**: `62f53e6`
 bounded what was left of `exl3_moe_had_in` at half-ALU work worth ≤2 % of prefill and unreachable in
-practice, so every remaining prefill lever on this stack belongs to vLLM, to the fabric, or to us.
+practice, and the author's own bench closed MLA prefill at 86–89 % of achievable — so every remaining
+prefill lever on this stack belongs to vLLM, to the fabric, or to us.
 
 For reference, our NVFP4 stack on the same three nodes reaches C1 57–60, C8 150, prefill 1,585 and a
-KV pool of 4.32M at `gpu-memory-utilization 0.88` — against this stack's 4.70M at 0.80. **EXL3 at TP=3 is now level on single-stream
+KV pool of 4.32M at `gpu-memory-utilization 0.88` — against this stack's 4.67M at 0.80. **EXL3 at TP=3 is now level on single-stream
 decode and ahead on aggregate throughput, prefill, memory and boot.** Read that with one caveat
 attached: three of the changes that got it there — the channel cap, the second cable and
 `NCCL_PTR_CUDA` — are **fabric-level, not format-level**, they use the same plugin over the same
@@ -119,7 +147,7 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 8. [07 — KV pool and the draft page](docs/07-kv-and-draft-page.md) — why the pool was capped by a counter, not by memory.
 9. [08 — Fast boot](docs/08-fast-boot.md) — 618 s → 274 s, and the bit-identity proof that makes it safe.
 10. [09 — Measurement protocol](docs/09-measurement-protocol.md) — five rounds, discard two; and four ways to measure a lie.
-11. [10 — Results and roofline](docs/10-results-and-roofline.md) — the full tables, the rulers measured rather than quoted, and where a prefill and a decode step actually go, class by class.
+11. [10 — Results and roofline](docs/10-results-and-roofline.md) — the full tables, the rulers measured rather than quoted, and where a prefill and a decode step actually go, class by class, from a profiler trace of the live server.
 12. [11 — Open issues](docs/11-open-issues.md) — what is unresolved, what we retracted, and what we never ran.
 13. [12 — The MLA tuner cache](docs/12-tuner-cache.md) — the measurement tax a process-local cache was charging, and the shorter protocol that removes it.
 14. [systemd](systemd/README.md) — a unit **template**, not installed anywhere, with the three things wrong with it named. This stack starts by hand; read this before a reboot.

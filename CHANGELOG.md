@@ -11,6 +11,94 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-05 (afternoon) — production configuration 8, and a profiler that deleted two of our own targets
+
+Two entries in one day, and the interesting one is not the production change.
+
+- **Production configuration 8** `[measured-here]`. Production 7 with the image moved to
+  `exl3-zeus:62f53e6` — upstream's `had_in` commit `a47da6e` plus the note that bounds what is left of
+  it. Sidecar re-dumped for the new image, `.env.tp3` promoted, **nothing else changed**:
+
+  | | production 7 | **production 8** |
+  |---|---|---|
+  | KV pool @ 0.80 | 4,699,724 | 4,674,931 |
+  | C1 / C2 / C4 / C6 / C8 aggregate tok/s | 57.0 / 80.9 / 120.0 / 143.4 / 175.1 | 56.8 / 83.5 / 119.5 / 146.0 / 172.8 |
+  | prefill-fresh (3 rounds) | 1,733 / 1,769 / 1,788 | 1,769 / 1,780 / 1,789 |
+  | draft acceptance | 60.8–64.3 % | 62–64 % |
+  | gates cold and warm | 10/10 · 12/12 | 10/10 · 12/12 |
+
+  **Every column is inside its own band and that is the entry.** The commit was priced at 0.2–0.3 % of
+  prefill wall *before* it was built — deliberately below what a serving benchmark can see — and it was
+  adopted to keep the image on upstream's head, not to buy tokens. Four signs in four directions, no
+  mechanism, three rounds each. A stack that publishes 1 % changes as wins would have called two of
+  these. [docs/10](docs/10-results-and-roofline.md) §1, [docs/11](docs/11-open-issues.md) §2.19.
+
+- **The step-time breakdown is now a measurement, and it cost one launcher flag** `[measured-here]`.
+  A torch profiler ran against the **live** production 7 server, all three ranks, with no restart and
+  no reconfiguration — only `/start_profile`, `/stop_profile` and ordinary requests. This vLLM takes
+  the profiler as `--profiler-config` and **not** as `VLLM_TORCH_PROFILER_DIR`; with the environment
+  variable alone the route is never attached and the endpoint answers 404, which is why
+  [docs/10](docs/10-results-and-roofline.md) §5 spent a week as a reconciliation with a 2.8 % residual.
+  The flag is now in `scripts/start-tp3.sh` behind `PROFILER_DIR`, off by default and free when unset.
+  Full tables: [`results/profile/measured-prod7.md`](results/profile/measured-prod7.md); how-to and the
+  traps: [docs/09](docs/09-measurement-protocol.md) §4.1.
+
+  What it found, in order of consequence:
+
+  | | re-derived | **measured** |
+  |---|---|---|
+  | prefill chunk size | 2,032–2,048 tokens | **1,792** (7 × 256; 12.5 % of the budget unused) |
+  | `exl3_moe_combine`, prefill | 1.5 % — ranked target #10 | **0 % — the kernel does not exist in this build** |
+  | `_zero_kv_blocks`, prefill | 1.3 % — ranked target #8 | **0.09 %** (0.86 ms, not 14.7) |
+  | DFlash2 drafter, C1 | 18.5 ms, 19.5 % | **10.78 ms, 11.4 %** |
+  | NCCL, prefill | 14–17 % band | **14.47 %** — the bottom of it |
+  | C8 decode split | `[not tested]` | MoE **51.6 %**, dense GEMM 21.1 %, NCCL 11.7 % |
+  | comm/compute overlap | assumed some | **0.00 ms/step at prefill** — every microsecond of NCCL is exposed |
+
+- **Retracted: "5.45 ms of C1 GPU idle" and "CUDA graphs would return ~6 % of single-stream"**
+  `[retracted]`. Both were published, one of them upstream. **~2.0 ms of that idle is CUPTI itself** —
+  about 1 µs per kernel boundary across ~1,873 of them — so the real budget is **3.47 ms = 3.75 %** of
+  a profiler-off step. And "CPU gap" was the wrong name: **77 % of it is per-kernel dispatch**
+  (2,332 kernels per step), 18 % the host, 5 % one blocking sync — with the host running 3.9 ms
+  *ahead* of the GPU at C1. Graph capture is worth **1.4–1.9 ms, +1.5–2.1 %**, and removes neither the
+  step head's `prepare_inputs` nor the sync. This also explains something that had been sitting
+  awkwardly: the previous configuration *did* capture graphs and read the same 57 tok/s. Retractions
+  26–28 in [docs/11](docs/11-open-issues.md) §1.9, story in §1.10.
+  **The rule this adds to the protocol:** never read an idle figure out of a trace — take
+  `busy(union)` from the trace and the wall from a profiler-off run of the same window.
+
+- **Closed by the kernel author, not by us: MLA prefill** `[reported]`. It had been carried as
+  "8.2 % of a chunk, efficiency not measured, no denominator" for a week. Measured at our shapes —
+  top-k 2,176, head_dim 512, fp8 cache, a 2 GB pool chosen so it could not sit in L2 — it runs at
+  **86–89 % of achievable**. It sits with the trellis GEMM: near the roof, no traffic to remove. Worth
+  recording that his first cut used a 200k-row pool that fitted L2 and duly reported a bandwidth above
+  the DRAM ruler; the same class of error as our own model-free MoE bench overstating small-M cost by
+  1.5–1.7×. **Synthetic benches flatter small inputs, and both of us hit it the same day.**
+
+- **New open item, and it is the largest one this repository has ever carried: the checkpoint's scope**
+  `[estimate]`. Dense BF16 GEMM is **45.3 % of a C1 step** because we run
+  `scope: glm53_routed_experts_only`. At 4 bpw that stage is bandwidth-bound on ~4× less traffic —
+  42.9 ms → ~11 ms, **~+34 % single-stream** — against about 5 % for the whole `cuda-exl3` column of
+  our target table. The TP=3 blocker is softer than [docs/01](docs/01-model-and-license.md) §3.1 said:
+  an EXL3 tensor still cannot be zero-extended, but a checkpoint quantized *unpadded* can be loaded
+  into a padded parameter with `svh = 0` on the pad — bit-exact, no re-quantization — **provided the
+  pad occupies whole 128-column blocks**. Our head pad does (64 → 66 heads = 256 columns = 2 blocks);
+  our vocab pad does not (`padding_size=192` = 1.5 blocks) and would at **`padding_size=384`**, which
+  is one constant in our launcher. Ordering agreed upstream: **quality first** — a TP=2 trial of
+  `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw against the MMLU sample, reported either way — then the
+  padded-load path behind a flag if the gate holds. [docs/11](docs/11-open-issues.md) §2.22.
+
+- **Docs.** `scripts/start-tp3.sh` gains the `PROFILER_DIR` arm — and with it a rule:
+  **one launcher, one copy.** Two copies of this file existed for two days; the one the nodes ran had
+  the profiler arm and the one in the tree did not, which is precisely the divergence that is invisible
+  because both copies produce a working server. [docs/08](docs/08-fast-boot.md) §12.
+  New: [docs/09](docs/09-measurement-protocol.md) §4.1 (profiling a live server, and verifying the
+  profiler), [docs/10](docs/10-results-and-roofline.md) §5.7–§5.8,
+  [docs/11](docs/11-open-issues.md) §1.10, §2.22, §2.23,
+  [`results/profile/measured-prod7.md`](results/profile/measured-prod7.md).
+
+---
+
 ## 2026-09-05 — production configuration 7: the draft cache at fp8, and a ruler that had been moving all along
 
 The pool moved for the first time in three configurations, and the more useful half of the entry is

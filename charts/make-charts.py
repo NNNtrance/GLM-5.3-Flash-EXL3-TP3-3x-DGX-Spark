@@ -136,7 +136,7 @@ def speed_by_configuration():
 
     sv.text(20, 428, "Configuration 9 is the only step that changed the checkpoint rather than a flag, an image or the fabric, and it is the largest single move here:",
             11.5, SUB)
-    sv.text(20, 444, "+22.9 % at C1 and +12.5 % at C8 against configuration 8. It cost 2.4 points of draft acceptance and a second patch tree to keep in step with the first.",
+    sv.text(20, 444, "+22.9 % at C1 and +12.5 % at C8 against configuration 8. Draft acceptance is unchanged once pooled by draft token (the 2.4-point gap first published was a harness artefact); the cost is a second patch tree.",
             11.5, SUB)
     sv.text(20, 460, "Image tag under each pair is the cuda-exl3 commit that configuration was built from.", 11.5, SUB)
     sv.save("speed-by-configuration.svg")
@@ -258,7 +258,7 @@ def step_breakdown_prod9():
 
     sv.text(20, y + 4, "The row this configuration was built to delete: the unquantized dense stage was 45.3 % of a C1 decode step on production 7, and is 25.9 % here -",
             11.5, SUB)
-    sv.text(20, y + 20, "42.90 ms down to 21.90 ms. That -21 ms is the whole of the +22 % - draft acceptance moved the wrong way and the arm still won.", 11.5, SUB)
+    sv.text(20, y + 20, "42.90 ms down to 21.90 ms. That -21 ms is the whole of the +22 %: draft acceptance is unchanged when pooled by draft token, so nothing else moved.", 11.5, SUB)
     sv.text(20, y + 36, "Read two numbers with care: NCCL and CPU-gap at C1 are inflated by CUPTI (2,738 kernel launches per step). With the profiler off the two",
             11.5, SUB)
     sv.text(20, y + 52, "together are <= 17.19 ms rather than 29.1. The NCCL class is 100 % exposed either way: measured comm/compute overlap is 0.00 ms.", 11.5, SUB)
@@ -290,7 +290,7 @@ def dense_stage():
         sv.text(cx, Y(pct) - 6, ms, 11, SUB, "middle")
         for j, part in enumerate(lab.split("\n")):
             sv.text(cx, bot + 18 + j * 14, part, 11.5, INK if j == 0 else SUB, "middle")
-    sv.text(20, 348, "Step time 88.2 -> 70.3 ms. Draft acceptance fell 2.4 points and accepted tokens per step fell 3 %, so none of the gain is drafter behaviour.", 11.5, SUB)
+    sv.text(20, 348, "Step time 88.2 -> 70.3 ms. Draft acceptance, pooled by draft token, is unchanged (+0.18 points), so none of the gain is drafter behaviour.", 11.5, SUB)
     sv.text(20, 364, "Prefill did not improve: the dense stage there went the other way, +10.4 %. The wall-clock prefill number stayed inside the +/-3 % band.", 11.5, SUB)
     sv.save("dense-stage-prod7-vs-prod9.svg")
 

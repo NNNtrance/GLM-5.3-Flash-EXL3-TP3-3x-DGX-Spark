@@ -373,5 +373,8 @@ The quality gate decides it, not the arithmetic, and the experiment is written u
 | `bench/prof-analyze7.py` | streaming trace reader: annotation merging, target/draft split, class taxonomy. Reads a 1 GB decode trace in a few hundred MB of RAM |
 | `bench/prof-gap7.py` | its sibling for §6: stream union, gap detection, launch matching by `correlation` (**including `cuda_driver`**), innermost `cpu_op`, phase segmentation |
 
+All four are in this repository under `bench/` (scrubbed: `API` is an environment variable defaulting
+to a documentation address, the prompt set is `$HIZSET` defaulting to `/var/tmp/hizset-v2.jsonl`).
+
 Traces are not in this repository (large binaries, and the engine logs beside them carry host names);
 the extracted tables are this file.

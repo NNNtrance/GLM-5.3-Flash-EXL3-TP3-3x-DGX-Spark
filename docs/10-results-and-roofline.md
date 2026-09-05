@@ -439,6 +439,11 @@ The largest single prefill class runs at **81–96 % of the measured 225 GB/s ru
 arm, one rank, per MoE layer (`w13 = [E, 4096, 4096]` at 4 bit = 8.389 MB per expert; traffic =
 `local_blocks × 8.389 MB`) `[measured-here]`:
 
+*Convention: each row is an independent bench call at that M (tokens fed to one call), not additive
+into a chunk total, and — shown below — this class does **not** scale linearly with M (L2 residency),
+so no rescaled row is given. The M=2048 row was measured at M=2048; production prefill chunk is
+1,792 tokens, 7×256 (§5.2).*
+
 | M | block_m | `local_blocks` | distinct local experts | `gemm_w13` µs | GB/s if per-block | GB/s if per-expert | % of 225 GB/s |
 |---|---|---|---|---|---|---|---|
 | 8 | 16 | 17 | ≤17 | 662 | 215 | 215 | **96 %** |
@@ -461,6 +466,9 @@ an expert-stationary schedule would be worth about 3.7 % of prefill wall.
 (`bench_moe_expert_reread.py`, `9b17ea9`); we ran it unmodified on GB10 against the production build,
 three times, with the ruler in the same process — 96 experts, `block_m=16`, N = 1…4 blocks per expert
 `[measured-here]`:
+
+*Convention: N sweeps blocks read per expert at a fixed 96-expert configuration; it has no M or
+chunk-length parameter, so the 1,792-vs-2,048-token chunk convention does not apply to this table.*
 
 | N | blocks | rows | µs (run 1 / 2 / 3) | GB/s per expert | GB/s per block |
 |---|---|---|---|---|---|
@@ -532,6 +540,10 @@ runs, median of 21 repetitions, CUDA graphs on, 90 calls = 45 layers × 2.
 
 Winning configuration in both runs: `BLOCK_M=16, BLOCK_H=64, SPLIT_H=2, warps=4, stages=2`.
 
+*Convention: per-call, per-layer cost at the fixed micro-benchmark M=2048 tokens — measured at
+M=2048; production prefill chunk is 1,792 tokens, 7×256 (§5.2). This class is memory-bound and
+near-linear in M (§5.5), so the 1,792-token chunk totals are recomputed in the next table.*
+
 | M = 2048 | run 1 µs/call | GB/s | run 2 µs/call | GB/s |
 |---|---|---|---|---|
 | k1 `mhc_post` | 670.7 | 225.4 | 674.3 | 224.2 |
@@ -539,17 +551,25 @@ Winning configuration in both runs: `BLOCK_M=16, BLOCK_H=64, SPLIT_H=2, warps=4,
 | k3 `pre_big_fuse` | 431.3 | 195.4 | 434.7 | 193.8 |
 | **kF, k1+k2 fused** | **815.7** | **187.7** | **815.2** | **187.9** |
 
-| route, 90 calls | traffic | run 1 | run 2 | time |
-|---|---|---|---|---|
-| k1 + k2 (today) | 220.05 MB | 86.293 ms | 86.783 ms | — |
-| **kF (fused)** | 153.14 MB (**−30.4 %**) | **73.416 ms** | **73.365 ms** | **−14.9 / −15.5 %** |
-| R3 (production, 3 kernels) | 304.31 MB | 123.914 ms | 124.960 ms | — |
-| **RF (fused, 2 kernels)** | 237.61 MB (−21.9 %) | **112.729 ms** | **112.649 ms** | **−9.0 / −9.9 %** |
+*Convention: totals for 90 calls (45 layers × 2) at the fixed micro-benchmark M=2048 — measured at
+M=2048, not the 1,792-token production chunk. The added column scales the mean of run 1/run 2 by
+1792/2048 = 0.875 `[estimate]`, since this class is memory-bound and near-linear in M (§5.5); the
+relative-savings columns (traffic %, time %) are unchanged because both arms scale together.*
 
-**On the prefill wall that is 11.2–12.3 ms of a 1,109 ms chunk: −1.01 to −1.11 %.** A second,
-independent route to the same figure agrees: this class is 11.7 % of a chunk (§5.2) and the route
-gets 9.4 % cheaper, which is −1.10 %. **The target was −2.1 to −2.8 %; the kernel delivered a little
-under half of it.**
+| route, 90 calls | traffic | run 1 | run 2 | time | ≈1,792-tok chunk `[estimate]` |
+|---|---|---|---|---|---|
+| k1 + k2 (today) | 220.05 MB | 86.293 ms | 86.783 ms | — | 75.72 ms |
+| **kF (fused)** | 153.14 MB (**−30.4 %**) | **73.416 ms** | **73.365 ms** | **−14.9 / −15.5 %** | 64.22 ms |
+| R3 (production, 3 kernels) | 304.31 MB | 123.914 ms | 124.960 ms | — | 108.88 ms |
+| **RF (fused, 2 kernels)** | 237.61 MB (−21.9 %) | **112.729 ms** | **112.649 ms** | **−9.0 / −9.9 %** | 98.60 ms |
+
+**On the prefill wall that is 11.2–12.3 ms of a 1,109 ms chunk: −1.01 to −1.11 %** — both figures
+assumed the old ~2,032–2,048-token chunk (§5.2). Scaled ×0.875 for the actual 1,792-token production
+chunk, that is **9.8–10.8 ms of a 970 ms chunk**, still **−1.01 to −1.11 %** because the savings and
+the chunk scale together `[estimate]`; against the real measured 962.55 ms prefill wall (§5.2) it is
+−1.02 to −1.12 %, materially the same conclusion. A second, independent route to the same figure
+agrees: this class is 11.7 % of a chunk (§5.2) and the route gets 9.4 % cheaper, which is −1.10 %.
+**The target was −2.1 to −2.8 %; the kernel delivered a little under half of it.**
 
 **Why it stopped there, and it is not the tiling.** The fused kernel runs at 187.7 GB/s where the
 k1+k2 route it replaces runs at 229.5 (220.05 MB in 958.8 µs). Traffic ratio 0.696 ÷ bandwidth ratio
@@ -565,11 +585,16 @@ host would remove that. Half an hour of work, **not measured, not claimed** `[no
 fits the 24 MiB L2, so k2's "re-read" was never going to DRAM and there is nothing to delete — the
 fusion pays its own cost for no saving `[measured-here]`:
 
+*Convention: each row is measured at its own M. The production prefill chunk is 1,792 tokens, 7×256
+(§5.2) — between the 512 and 2,048 rows; the 1,792 row is not a fresh measurement, it scales the
+M=2048 row (run 1) by 1792/2048 = 0.875 `[estimate]`.*
+
 | M | k1+k2, 90 calls | kF | |
 |---|---|---|---|
 | 8 | 0.633 ms | 3.541 ms | +459 % |
 | 64 | 0.803 ms | 4.458 ms | +455 % |
 | 512 | 13.859 ms | 19.090 ms | **+37.7 %** |
+| 1,792 `[estimate]` | 75.51 ms | 64.24 ms | **−14.9 %** |
 | 2048 | 86.293 ms | 73.416 ms | **−14.9 %** |
 | 4096 | 175.900 ms | 142.051 ms | **−19.2 %** |
 

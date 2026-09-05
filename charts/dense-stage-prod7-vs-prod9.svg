@@ -1,0 +1,31 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='960' height='380' viewBox='0 0 960 380' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>
+<rect width='960' height='380' fill='#ffffff'/>
+<text x='20.0' y='28.0' font-size='17' fill='#1c2430' text-anchor='start' font-weight='600'>The one number production 9 was built to move</text>
+<text x='20.0' y='46.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Dense (non-MoE) stage as a share of a single-stream decode step, same three nodes, same fabric, same drafter.</text>
+<text x='20.0' y='61.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Production 7: routed experts 4-bit beside a BF16 dense path. Production 9: the dense path is 5-6 bit EXL3 as well.</text>
+<text x='20.0' y='76.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Both measured with the torch profiler on the live server. Source: results/profile/step-breakdown.csv.</text>
+<line x1='96.0' y1='300.0' x2='930.0' y2='300.0' stroke='#d8dce3'/>
+<text x='88.0' y='304.0' font-size='10' fill='#5c6675' text-anchor='end'>0%</text>
+<line x1='96.0' y1='264.2' x2='930.0' y2='264.2' stroke='#d8dce3'/>
+<text x='88.0' y='268.2' font-size='10' fill='#5c6675' text-anchor='end'>10%</text>
+<line x1='96.0' y1='228.4' x2='930.0' y2='228.4' stroke='#d8dce3'/>
+<text x='88.0' y='232.4' font-size='10' fill='#5c6675' text-anchor='end'>20%</text>
+<line x1='96.0' y1='192.6' x2='930.0' y2='192.6' stroke='#d8dce3'/>
+<text x='88.0' y='196.6' font-size='10' fill='#5c6675' text-anchor='end'>30%</text>
+<line x1='96.0' y1='156.8' x2='930.0' y2='156.8' stroke='#d8dce3'/>
+<text x='88.0' y='160.8' font-size='10' fill='#5c6675' text-anchor='end'>40%</text>
+<line x1='96.0' y1='121.0' x2='930.0' y2='121.0' stroke='#d8dce3'/>
+<text x='88.0' y='125.0' font-size='10' fill='#5c6675' text-anchor='end'>50%</text>
+<rect x='236.0' y='137.8' width='120.0' height='162.2' rx='0' fill='#b8402f'/>
+<text x='296.0' y='117.8' font-size='19' fill='#1c2430' text-anchor='middle' font-weight='600'>45.3 %</text>
+<text x='296.0' y='131.8' font-size='11' fill='#5c6675' text-anchor='middle'>42.90 ms</text>
+<text x='296.0' y='318.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>production 7</text>
+<text x='296.0' y='332.0' font-size='11.5' fill='#5c6675' text-anchor='middle'>BF16 dense path</text>
+<rect x='636.0' y='207.3' width='120.0' height='92.7' rx='0' fill='#1f8a4c'/>
+<text x='696.0' y='187.3' font-size='19' fill='#1c2430' text-anchor='middle' font-weight='600'>25.9 %</text>
+<text x='696.0' y='201.3' font-size='11' fill='#5c6675' text-anchor='middle'>21.90 ms</text>
+<text x='696.0' y='318.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>production 9</text>
+<text x='696.0' y='332.0' font-size='11.5' fill='#5c6675' text-anchor='middle'>EXL3 dense path</text>
+<text x='20.0' y='348.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Step time 88.2 -&gt; 70.3 ms. Draft acceptance fell 2.4 points and accepted tokens per step fell 3 %, so none of the gain is drafter behaviour.</text>
+<text x='20.0' y='364.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Prefill did not improve: the dense stage there went the other way, +10.4 %. The wall-clock prefill number stayed inside the +/-3 % band.</text>
+</svg>

@@ -1,0 +1,76 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='940' height='480' viewBox='0 0 940 480' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>
+<rect width='940' height='480' fill='#ffffff'/>
+<text x='20.0' y='28.0' font-size='17' fill='#1c2430' text-anchor='start' font-weight='600'>KV pool by configuration, all at gpu-memory-utilization 0.80 unless marked</text>
+<text x='20.0' y='46.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Tokens in the pool, read from the engine's own 'GPU KV cache size' line on a load boot with a settled memory baseline.</text>
+<text x='20.0' y='61.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Source: results/configs/kv-pool-progression.csv, which carries every reading including the ones not plotted here.</text>
+<text x='20.0' y='76.0' font-size='11.5' fill='#5c6675' text-anchor='start'>max_model_len is 1,000,000, so the right-hand axis is how many full-length requests the pool holds at once.</text>
+<rect x='20.0' y='98.0' width='11.0' height='11.0' rx='2' fill='#2b5fd9'/>
+<text x='36.0' y='107.0' font-size='11' fill='#1c2430' text-anchor='start'>in production</text>
+<rect x='145.6' y='98.0' width='11.0' height='11.0' rx='2' fill='#1f8a4c'/>
+<text x='161.6' y='107.0' font-size='11' fill='#1c2430' text-anchor='start'>current production</text>
+<rect x='307.2' y='98.0' width='11.0' height='11.0' rx='2' fill='#5c6675'/>
+<text x='323.2' y='107.0' font-size='11' fill='#1c2430' text-anchor='start'>superseded</text>
+<rect x='411.2' y='98.0' width='11.0' height='11.0' rx='2' fill='#b8402f'/>
+<text x='427.2' y='107.0' font-size='11' fill='#1c2430' text-anchor='start'>measured and rejected</text>
+<line x1='66.0' y1='388.0' x2='866.0' y2='388.0' stroke='#d8dce3'/>
+<text x='58.0' y='392.0' font-size='10' fill='#5c6675' text-anchor='end'>0.0M</text>
+<text x='874.0' y='392.0' font-size='10' fill='#5c6675' text-anchor='start'>0.0x</text>
+<line x1='66.0' y1='335.8' x2='866.0' y2='335.8' stroke='#d8dce3'/>
+<text x='58.0' y='339.8' font-size='10' fill='#5c6675' text-anchor='end'>2.0M</text>
+<text x='874.0' y='339.8' font-size='10' fill='#5c6675' text-anchor='start'>1.9x</text>
+<line x1='66.0' y1='283.6' x2='866.0' y2='283.6' stroke='#d8dce3'/>
+<text x='58.0' y='287.6' font-size='10' fill='#5c6675' text-anchor='end'>4.0M</text>
+<text x='874.0' y='287.6' font-size='10' fill='#5c6675' text-anchor='start'>3.8x</text>
+<line x1='66.0' y1='231.4' x2='866.0' y2='231.4' stroke='#d8dce3'/>
+<text x='58.0' y='235.4' font-size='10' fill='#5c6675' text-anchor='end'>6.0M</text>
+<text x='874.0' y='235.4' font-size='10' fill='#5c6675' text-anchor='start'>5.7x</text>
+<line x1='66.0' y1='179.2' x2='866.0' y2='179.2' stroke='#d8dce3'/>
+<text x='58.0' y='183.2' font-size='10' fill='#5c6675' text-anchor='end'>8.0M</text>
+<text x='874.0' y='183.2' font-size='10' fill='#5c6675' text-anchor='start'>7.6x</text>
+<line x1='66.0' y1='127.0' x2='866.0' y2='127.0' stroke='#d8dce3'/>
+<text x='58.0' y='131.0' font-size='10' fill='#5c6675' text-anchor='end'>10.0M</text>
+<text x='874.0' y='131.0' font-size='10' fill='#5c6675' text-anchor='start'>9.5x</text>
+<rect x='83.0' y='366.5' width='46.0' height='21.5' rx='0' fill='#5c6675'/>
+<text x='106.0' y='360.5' font-size='10' fill='#1c2430' text-anchor='middle'>825 000</text>
+<text x='106.0' y='404.0' font-size='9.5' fill='#1c2430' text-anchor='middle'>TP=2, DFlash2 k=7,</text>
+<text x='106.0' y='416.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>draft page 16</text>
+<rect x='163.0' y='345.5' width='46.0' height='42.5' rx='0' fill='#5c6675'/>
+<text x='186.0' y='339.5' font-size='10' fill='#1c2430' text-anchor='middle'>1 627 170</text>
+<text x='186.0' y='404.0' font-size='9.5' fill='#1c2430' text-anchor='middle'>prod 1</text>
+<text x='186.0' y='416.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>bc0e0f6, MNBT 4096</text>
+<rect x='243.0' y='324.6' width='46.0' height='63.4' rx='0' fill='#2b5fd9'/>
+<text x='266.0' y='318.6' font-size='10' fill='#1c2430' text-anchor='middle'>2 428 769</text>
+<text x='266.0' y='404.0' font-size='9.5' fill='#1c2430' text-anchor='middle'>prod 2</text>
+<text x='266.0' y='416.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>f4987cf, MNBT 2048</text>
+<rect x='323.0' y='272.8' width='46.0' height='115.2' rx='0' fill='#2b5fd9'/>
+<text x='346.0' y='266.8' font-size='10' fill='#1c2430' text-anchor='middle'>4 413 223</text>
+<text x='346.0' y='404.0' font-size='9.5' fill='#1c2430' text-anchor='middle'>prod 3</text>
+<text x='346.0' y='416.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>draft page 256</text>
+<rect x='403.0' y='271.4' width='46.0' height='116.6' rx='0' fill='#2b5fd9'/>
+<text x='426.0' y='265.4' font-size='10' fill='#1c2430' text-anchor='middle'>4 468 319</text>
+<text x='426.0' y='404.0' font-size='9.5' fill='#1c2430' text-anchor='middle'>prod 4</text>
+<text x='426.0' y='416.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>fast-boot sidecar</text>
+<rect x='483.0' y='271.9' width='46.0' height='116.1' rx='0' fill='#2b5fd9'/>
+<text x='506.0' y='265.9' font-size='10' fill='#1c2430' text-anchor='middle'>4 449 035</text>
+<text x='506.0' y='404.0' font-size='9.5' fill='#1c2430' text-anchor='middle'>prod 6</text>
+<text x='506.0' y='416.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>dual link + PTR_CUDA</text>
+<rect x='563.0' y='265.3' width='46.0' height='122.7' rx='0' fill='#2b5fd9'/>
+<text x='586.0' y='259.3' font-size='10' fill='#1c2430' text-anchor='middle'>4 699 724</text>
+<text x='586.0' y='404.0' font-size='9.5' fill='#1c2430' text-anchor='middle'>prod 7</text>
+<text x='586.0' y='416.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>fp8 draft cache</text>
+<rect x='643.0' y='265.4' width='46.0' height='122.6' rx='0' fill='#2b5fd9'/>
+<text x='666.0' y='259.4' font-size='10' fill='#1c2430' text-anchor='middle'>4 696 969</text>
+<text x='666.0' y='404.0' font-size='9.5' fill='#1c2430' text-anchor='middle'>prod 8</text>
+<text x='666.0' y='416.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>image 62f53e6</text>
+<rect x='723.0' y='253.2' width='46.0' height='134.8' rx='0' fill='#1f8a4c'/>
+<text x='746.0' y='247.2' font-size='10' fill='#1c2430' text-anchor='middle'>5 165 289</text>
+<text x='746.0' y='404.0' font-size='9.5' fill='#1c2430' text-anchor='middle'>prod 9</text>
+<text x='746.0' y='416.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>full-scope checkpoint</text>
+<rect x='803.0' y='250.8' width='46.0' height='137.2' rx='0' fill='#b8402f'/>
+<text x='826.0' y='244.8' font-size='10' fill='#1c2430' text-anchor='middle'>5 256 198</text>
+<text x='826.0' y='404.0' font-size='9.5' fill='#1c2430' text-anchor='middle'>0.85 rung</text>
+<text x='826.0' y='416.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>REJECTED on free RAM</text>
+<text x='20.0' y='428.0' font-size='11.5' fill='#5c6675' text-anchor='start'>The 0.85 rung is the tallest bar and it is not in production: at 0.85 the head node had 1.9 GiB of free host RAM and 1.6 GB of swap in use.</text>
+<text x='20.0' y='444.0' font-size='11.5' fill='#5c6675' text-anchor='start'>On a unified-memory machine free host RAM is the safety margin, and the rule is 4 GiB. A pool you cannot serve from is not a pool.</text>
+<text x='20.0' y='460.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Production 9 gained its 10 % without moving the fraction at all: a full-scope checkpoint consumes 3.4 GiB less per node.</text>
+</svg>

@@ -33,7 +33,10 @@ because a fresh caching allocator hands out zeroed pages. See
 | tuner cache warm (`9bf594c`) | 10/10 | 12/12 | **10/10** | **12/12** |
 | production 6 (dual cable + `PTR_CUDA`) | 10/10 | 12/12 | **10/10** | **12/12** |
 | draft KV fp8, dump boot | 10/10 | 12/12 | **10/10** | **12/12** |
-| **production 7 (fp8 draft cache, load boot)** | **10/10** | **12/12** | **10/10** | **12/12** |
+| production 7 (fp8 draft cache, load boot) | 10/10 | 12/12 | 10/10 | 12/12 |
+| production 8 (image `62f53e6`) | 10/10 | 12/12 | 10/10 | 12/12 |
+| **production 9 (full-scope checkpoint, `754421f`)** | **10/10** | **12/12** | **10/10** | **12/12** |
+| **production 10 (production 9 at `gpu-memory-utilization` 0.83)** | **10/10** | **12/12** | **10/10** | **12/12** |
 
 Full marks everywhere, in every arm, in both states `[measured-here]`.
 

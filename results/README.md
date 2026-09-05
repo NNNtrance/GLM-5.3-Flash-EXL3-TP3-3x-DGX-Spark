@@ -5,8 +5,11 @@ rest of `docs/` traces to a file in here, or carries `[measured-here, raw lost]`
 `[estimate]`, `[not tested]` or `[retracted]` in the document.
 
 All of it was produced on 4–5 September 2026 on three DGX Spark (GB10) nodes: TP=3 with expert
-parallelism, EXL3 4bpw weights (`brandonmusic/GLM-5.3-Flash-tr3-4bpw` at revision `b20c49ba`), KV
-`fp8`, DFlash2 draft at k=7, temperature 0, thinking on at `reasoning_effort: low`. CUDA graphs are
+parallelism, KV `fp8`, DFlash2 draft at k=7, temperature 0, thinking on at `reasoning_effort: low`.
+**The checkpoint changed at production configuration 9:** everything up to and including production 8
+is `brandonmusic/GLM-5.3-Flash-tr3-4bpw` at revision `b20c49ba` (routed experts only); production 9
+and 10 are `turboderp/GLM-5.3-Flash-exl3` branch `4.05bpw` at `2a30229e` (full scope). Each file's
+header names which. CUDA graphs are
 **off** on the recent arms and were on earlier — not a setting of ours either way, see
 [docs/10](../docs/10-results-and-roofline.md) §5.8. The exact settings per arm are in each file's
 header.
@@ -26,6 +29,9 @@ header.
 | `mesh/multilink-sweep.csv` | The same sweep, every arm × operation × size, with the per-collective RNR counters. Machine-readable. |
 | `mesh/algo-sweep.md` | The `NCCL_ALGO` sweep: Ring against Ring,Tree against Tree, both repetitions printed, with the decode-step proxy, the RNR counters and the port deltas that show how a tree redistributes the traffic. |
 | `mesh/rdma-write-sweep.md` | The six-arm sweep of the one-sided `RDMA_WRITE` transport: RNR and out-of-buffer to exactly zero, throughput unmoved, the engine arm, and why it was not adopted. |
+| `configs/production-configurations.csv` | One row per production configuration 1–9: what changed, C1/C8 aggregate and per-stream, prefill, TTFT, KV pool, acceptance, boot time, MMLU. The source for `charts/speed-by-configuration.svg`. |
+| `configs/kv-pool-progression.csv` | Every KV pool reading on this stack, in order, including the rejected rungs, the dump-boot readings that must not be quoted as results, and the NVFP4 sibling's figures clearly labelled as the other stack. |
+| `profile/step-breakdown.csv` | **Production 9's measured step breakdown**, every class × prefill/C1/C8 with milliseconds, call counts and the CUPTI caveat per row. The source for `charts/step-breakdown-prod9.svg`. |
 | `profile/measured-prod7.md` | **The measured step-time breakdown** — torch profiler on the live server, all three ranks: prefill, C1 and C8 class by class, target versus draft, the collectives' zero overlap, rank arrival skew, and the C1 idle budget with the profiler's own cost subtracted. This is the one to read. |
 | `profile/step-breakdown.md` | The earlier *reconciliation* of the same question, plus the model-free work that stands on its own: the two rulers measured on the device, the MoE stage model-free, the expert re-read bench, the hyper-connection kernels, the KV-zeroing geometry. **Its §3 and §4 are superseded** by the file above. |
 

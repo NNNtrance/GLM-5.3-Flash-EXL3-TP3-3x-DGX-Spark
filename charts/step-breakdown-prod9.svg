@@ -1,0 +1,111 @@
+<svg xmlns='http://www.w3.org/2000/svg' width='960' height='520' viewBox='0 0 960 520' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>
+<rect width='960' height='520' fill='#ffffff'/>
+<text x='20.0' y='28.0' font-size='17' fill='#1c2430' text-anchor='start' font-weight='600'>Where a step actually goes - production 9, torch profiler on the live server, all three ranks</text>
+<text x='20.0' y='46.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Measured 5 September 2026, no restart and no reconfiguration: /start_profile and /stop_profile against the running engine.</text>
+<text x='20.0' y='61.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Image exl3-zeus:754421f, full-scope checkpoint, TP=3 + EP, DFlash2 k=7, fp8 KV and fp8 draft cache, gpu-memory-utilization 0.80.</text>
+<text x='20.0' y='76.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Source: results/profile/step-breakdown.csv. Bars are shares of wall time per step; classes under 2 % are pooled into 'other'.</text>
+<text x='20.0' y='117.0' font-size='12.5' fill='#1c2430' text-anchor='start' font-weight='600'>Prefill, per steady 1,792-token chunk</text>
+<rect x='20.0' y='129.0' width='257.4' height='30.0' rx='0' fill='#1f8a4c'/>
+<text x='148.7' y='148.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>28.1%</text>
+<rect x='277.4' y='129.0' width='128.1' height='30.0' rx='0' fill='#2b5fd9'/>
+<text x='341.5' y='148.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>14.0%</text>
+<rect x='405.5' y='129.0' width='122.5' height='30.0' rx='0' fill='#c07d10'/>
+<text x='466.8' y='148.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>13.3%</text>
+<rect x='528.0' y='129.0' width='108.8' height='30.0' rx='0' fill='#c04f8a'/>
+<text x='582.4' y='148.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>11.9%</text>
+<rect x='636.8' y='129.0' width='76.1' height='30.0' rx='0' fill='#0f9aa8'/>
+<text x='674.9' y='148.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>8.3%</text>
+<rect x='712.9' y='129.0' width='73.2' height='30.0' rx='0' fill='#d4682f'/>
+<text x='749.6' y='148.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>8.0%</text>
+<rect x='786.2' y='129.0' width='44.9' height='30.0' rx='0' fill='#6d8a2f'/>
+<text x='808.6' y='148.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>4.9%</text>
+<rect x='831.0' y='129.0' width='35.0' height='30.0' rx='0' fill='#7a8494'/>
+<rect x='866.0' y='129.0' width='34.8' height='30.0' rx='0' fill='#8a6fd0'/>
+<rect x='900.8' y='129.0' width='19.0' height='30.0' rx='0' fill='#a08850'/>
+<rect x='919.7' y='129.0' width='18.3' height='30.0' rx='0' fill='#c9ced6'/>
+<rect x='20.0' y='159.0' width='9.0' height='9.0' rx='2' fill='#1f8a4c'/>
+<text x='33.0' y='167.0' font-size='10' fill='#1c2430' text-anchor='start'>MoE trellis GEMM</text>
+<rect x='145.0' y='159.0' width='9.0' height='9.0' rx='2' fill='#2b5fd9'/>
+<text x='158.0' y='167.0' font-size='10' fill='#1c2430' text-anchor='start'>NCCL collectives</text>
+<rect x='270.0' y='159.0' width='9.0' height='9.0' rx='2' fill='#c07d10'/>
+<text x='283.0' y='167.0' font-size='10' fill='#1c2430' text-anchor='start'>Dense EXL3 GEMM</text>
+<rect x='389.0' y='159.0' width='9.0' height='9.0' rx='2' fill='#c04f8a'/>
+<text x='402.0' y='167.0' font-size='10' fill='#1c2430' text-anchor='start'>hyper-connection mixing</text>
+<rect x='556.0' y='159.0' width='9.0' height='9.0' rx='2' fill='#0f9aa8'/>
+<text x='569.0' y='167.0' font-size='10' fill='#1c2430' text-anchor='start'>MLA attention</text>
+<rect x='663.0' y='159.0' width='9.0' height='9.0' rx='2' fill='#d4682f'/>
+<text x='676.0' y='167.0' font-size='10' fill='#1c2430' text-anchor='start'>KDA/GDN linear-attn</text>
+<rect x='20.0' y='174.0' width='9.0' height='9.0' rx='2' fill='#6d8a2f'/>
+<text x='33.0' y='182.0' font-size='10' fill='#1c2430' text-anchor='start'>MoE hadamard</text>
+<rect x='121.0' y='174.0' width='9.0' height='9.0' rx='2' fill='#7a8494'/>
+<text x='134.0' y='182.0' font-size='10' fill='#1c2430' text-anchor='start'>norm / elementwise / copy</text>
+<rect x='300.0' y='174.0' width='9.0' height='9.0' rx='2' fill='#8a6fd0'/>
+<text x='313.0' y='182.0' font-size='10' fill='#1c2430' text-anchor='start'>remaining bf16 linears</text>
+<rect x='461.0' y='174.0' width='9.0' height='9.0' rx='2' fill='#a08850'/>
+<text x='474.0' y='182.0' font-size='10' fill='#1c2430' text-anchor='start'>Dense EXL3 hadamard</text>
+<rect x='604.0' y='174.0' width='9.0' height='9.0' rx='2' fill='#c9ced6'/>
+<text x='617.0' y='182.0' font-size='10' fill='#1c2430' text-anchor='start'>other (each &lt; 2 %)</text>
+<text x='20.0' y='212.0' font-size='12.5' fill='#1c2430' text-anchor='start' font-weight='600'>Decode step, concurrency 1</text>
+<rect x='20.0' y='224.0' width='291.6' height='30.0' rx='0' fill='#1f8a4c'/>
+<text x='165.8' y='243.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>32.5%</text>
+<rect x='311.6' y='224.0' width='234.0' height='30.0' rx='0' fill='#2b5fd9'/>
+<text x='428.6' y='243.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>26.1%</text>
+<rect x='545.7' y='224.0' width='134.5' height='30.0' rx='0' fill='#c07d10'/>
+<text x='612.9' y='243.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>15.0%</text>
+<rect x='680.2' y='224.0' width='92.5' height='30.0' rx='0' fill='#8a6fd0'/>
+<text x='726.4' y='243.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>10.3%</text>
+<rect x='772.7' y='224.0' width='75.7' height='30.0' rx='0' fill='#b0b6c0'/>
+<text x='810.6' y='243.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>8.4%</text>
+<rect x='848.4' y='224.0' width='23.7' height='30.0' rx='0' fill='#c04f8a'/>
+<rect x='872.1' y='224.0' width='19.9' height='30.0' rx='0' fill='#7a8494'/>
+<rect x='892.0' y='224.0' width='46.0' height='30.0' rx='0' fill='#c9ced6'/>
+<text x='915.0' y='243.0' font-size='11' fill='#1c2430' text-anchor='middle'>5.1%</text>
+<rect x='20.0' y='254.0' width='9.0' height='9.0' rx='2' fill='#1f8a4c'/>
+<text x='33.0' y='262.0' font-size='10' fill='#1c2430' text-anchor='start'>MoE trellis GEMM</text>
+<rect x='145.0' y='254.0' width='9.0' height='9.0' rx='2' fill='#2b5fd9'/>
+<text x='158.0' y='262.0' font-size='10' fill='#1c2430' text-anchor='start'>NCCL collectives</text>
+<rect x='270.0' y='254.0' width='9.0' height='9.0' rx='2' fill='#c07d10'/>
+<text x='283.0' y='262.0' font-size='10' fill='#1c2430' text-anchor='start'>Dense EXL3 GEMM</text>
+<rect x='389.0' y='254.0' width='9.0' height='9.0' rx='2' fill='#8a6fd0'/>
+<text x='402.0' y='262.0' font-size='10' fill='#1c2430' text-anchor='start'>remaining bf16 linears</text>
+<rect x='550.0' y='254.0' width='9.0' height='9.0' rx='2' fill='#b0b6c0'/>
+<text x='563.0' y='262.0' font-size='10' fill='#1c2430' text-anchor='start'>CPU gap</text>
+<rect x='621.0' y='254.0' width='9.0' height='9.0' rx='2' fill='#c04f8a'/>
+<text x='634.0' y='262.0' font-size='10' fill='#1c2430' text-anchor='start'>hyper-connection mixing</text>
+<rect x='20.0' y='269.0' width='9.0' height='9.0' rx='2' fill='#7a8494'/>
+<text x='33.0' y='277.0' font-size='10' fill='#1c2430' text-anchor='start'>norm / elementwise / copy</text>
+<rect x='199.0' y='269.0' width='9.0' height='9.0' rx='2' fill='#c9ced6'/>
+<text x='212.0' y='277.0' font-size='10' fill='#1c2430' text-anchor='start'>other (each &lt; 2 %)</text>
+<text x='20.0' y='307.0' font-size='12.5' fill='#1c2430' text-anchor='start' font-weight='600'>Decode step, concurrency 8</text>
+<rect x='20.0' y='319.0' width='511.0' height='30.0' rx='0' fill='#1f8a4c'/>
+<text x='275.5' y='338.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>56.3%</text>
+<rect x='531.0' y='319.0' width='116.8' height='30.0' rx='0' fill='#2b5fd9'/>
+<text x='589.4' y='338.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>12.9%</text>
+<rect x='647.8' y='319.0' width='78.7' height='30.0' rx='0' fill='#d4682f'/>
+<text x='687.1' y='338.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>8.7%</text>
+<rect x='726.5' y='319.0' width='72.6' height='30.0' rx='0' fill='#c07d10'/>
+<text x='762.8' y='338.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>8.0%</text>
+<rect x='799.1' y='319.0' width='41.6' height='30.0' rx='0' fill='#8a6fd0'/>
+<text x='819.8' y='338.0' font-size='11' fill='#ffffff' text-anchor='middle' font-weight='600'>4.6%</text>
+<rect x='840.6' y='319.0' width='25.0' height='30.0' rx='0' fill='#b0b6c0'/>
+<rect x='865.6' y='319.0' width='72.4' height='30.0' rx='0' fill='#c9ced6'/>
+<text x='901.8' y='338.0' font-size='11' fill='#1c2430' text-anchor='middle'>8.0%</text>
+<rect x='20.0' y='349.0' width='9.0' height='9.0' rx='2' fill='#1f8a4c'/>
+<text x='33.0' y='357.0' font-size='10' fill='#1c2430' text-anchor='start'>MoE trellis GEMM</text>
+<rect x='145.0' y='349.0' width='9.0' height='9.0' rx='2' fill='#2b5fd9'/>
+<text x='158.0' y='357.0' font-size='10' fill='#1c2430' text-anchor='start'>NCCL collectives</text>
+<rect x='270.0' y='349.0' width='9.0' height='9.0' rx='2' fill='#d4682f'/>
+<text x='283.0' y='357.0' font-size='10' fill='#1c2430' text-anchor='start'>KDA/GDN linear-attn</text>
+<rect x='413.0' y='349.0' width='9.0' height='9.0' rx='2' fill='#c07d10'/>
+<text x='426.0' y='357.0' font-size='10' fill='#1c2430' text-anchor='start'>Dense EXL3 GEMM</text>
+<rect x='532.0' y='349.0' width='9.0' height='9.0' rx='2' fill='#8a6fd0'/>
+<text x='545.0' y='357.0' font-size='10' fill='#1c2430' text-anchor='start'>remaining bf16 linears</text>
+<rect x='693.0' y='349.0' width='9.0' height='9.0' rx='2' fill='#b0b6c0'/>
+<text x='706.0' y='357.0' font-size='10' fill='#1c2430' text-anchor='start'>CPU gap</text>
+<rect x='764.0' y='349.0' width='9.0' height='9.0' rx='2' fill='#c9ced6'/>
+<text x='777.0' y='357.0' font-size='10' fill='#1c2430' text-anchor='start'>other (each &lt; 2 %)</text>
+<text x='20.0' y='391.0' font-size='11.5' fill='#5c6675' text-anchor='start'>The row this configuration was built to delete: the unquantized dense stage was 45.3 % of a C1 decode step on production 7, and is 25.9 % here -</text>
+<text x='20.0' y='407.0' font-size='11.5' fill='#5c6675' text-anchor='start'>42.90 ms down to 21.90 ms. That -21 ms is the whole of the +22 % - draft acceptance moved the wrong way and the arm still won.</text>
+<text x='20.0' y='423.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Read two numbers with care: NCCL and CPU-gap at C1 are inflated by CUPTI (2,738 kernel launches per step). With the profiler off the two</text>
+<text x='20.0' y='439.0' font-size='11.5' fill='#5c6675' text-anchor='start'>together are &lt;= 17.19 ms rather than 29.1. The NCCL class is 100 % exposed either way: measured comm/compute overlap is 0.00 ms.</text>
+</svg>

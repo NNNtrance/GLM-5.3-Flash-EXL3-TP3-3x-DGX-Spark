@@ -99,6 +99,7 @@ Commits this recipe built, measured or depends on:
 | `3cad1d2` | `3cad1d2` | Document the environment variables that exist | not built here; read while preparing the bench below |
 | `9b17ea9` | `9b17ea9` | Add the expert-reread bench, and close the duplicate-read question here | **the author's answer to our profile.** We ran his script unmodified on GB10 against the production build; it closed our own open item ([docs/10](docs/10-results-and-roofline.md) §5.4, [docs/11](docs/11-open-issues.md) §2.12) |
 | `a47da6e` | `a47da6e` | Remove the 64-bit division in `had_in`, deriving the index from the grid | the follow-up to the same profile: **−10 to −18 %** on `exl3_moe_had_in`, roofline 57 % → 63 % `[reported]`. Worth ~0.2–0.3 % of prefill here — real, and not worth an image rebuild alone. **Not in the production image**; queued for the next build ([docs/11](docs/11-open-issues.md) §2.19) |
+| `62f53e6` | `62f53e6` | Bound what is left in `had_in` | the answer to "is there more here": the remaining gap is a **half-ALU** limit — a 128-point Hadamard done with warp shuffles — so it is arithmetic that has to happen rather than traffic that can be removed, worth **≤2 % of prefill** on this stack and unreachable in practice `[reported]`. With it the **`cuda-exl3` MoE stage is closed as an optimisation target here** ([docs/10](docs/10-results-and-roofline.md) §6, [docs/11](docs/11-open-issues.md) §2.19) |
 
 Four things we reported to that project and their outcome:
 
@@ -129,6 +130,17 @@ verify, wrote **`9b17ea9`, a bench that settles it**, and reported 1.16× on his
 ran that bench unmodified on GB10 and measured 1.11×: the trellis stays resident, the item is closed,
 and our estimate was wrong because the model behind it was wrong. He then took the item that
 *was* real — `exl3_moe_had_in` at 37–57 % of the ruler — in **`a47da6e`**.
+
+The thread closed the same day, and it closed the whole stage rather than the one kernel. In
+**`62f53e6`** the author bounded what remains in `had_in`: a 128-point Hadamard implemented with warp
+shuffles is **ALU-bound at about half the unit's rate**, so the rest is work that has to be done, not
+traffic that can be removed — **≤2 % of prefill on this stack, and unreachable** `[reported]`. He also
+confirmed the memset note below: `_zero_kv_blocks_kernel` is vLLM's, and on this model family the page
+is shared with Mamba/KDA state, so the zeroing cannot be skipped
+([docs/11](docs/11-open-issues.md) §2.13). **We have no open item against `cuda-exl3`**, which is an
+unusual place for a dependency to end up and worth recording: two of our three reports produced
+upstream fixes, the third produced a bench that proved us wrong, and the fourth produced a bound that
+tells us to stop looking.
 
 Two notes we owe that thread rather than the other way round: `_zero_kv_blocks_kernel` costs 14.7 ms
 per prefill chunk and belongs to vLLM, not to the kernel library; and a 128-token prefill chunk costs

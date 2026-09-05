@@ -30,10 +30,11 @@ this repository is thin on those, that one is thorough.
 ## Headline results
 
 Settings for every row: image `exl3-zeus:9bf594c`, TP=3 + expert parallel, EXL3 4bpw weights,
-`kv-cache-dtype fp8`, DFlash2 draft at k=7, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`,
-`--max-num-batched-tokens 2048`, `--max-num-seqs 8`, `NCCL_MAX_NCHANNELS=8`,
-`gpu-memory-utilization 0.80`, per-rank pre-sliced sidecar, warm MLA tuner cache, mesh plugin with
-both cables per peer and `NCCL_PTR_CUDA`, temperature 0, reasoning effort **low**, 5 September 2026.
+`kv-cache-dtype fp8` **and an fp8 draft cache** (`HAREM_DRAFT_KV_DTYPE=fp8`), DFlash2 draft at k=7,
+`--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`, `--max-num-batched-tokens 2048`, `--max-num-seqs 8`,
+`NCCL_MAX_NCHANNELS=8`, `gpu-memory-utilization 0.80`, per-rank pre-sliced sidecar, warm MLA tuner
+cache, mesh plugin with both cables per peer and `NCCL_PTR_CUDA`, the launcher's memory settle gate,
+temperature 0, reasoning effort **low**, 5 September 2026. This is **production configuration 7**.
 Speed is the median of three sweep rounds — the persisted tuner cache is what makes three enough; on
 an image without it the rule is still five rounds with two discarded
 ([docs/09](docs/09-measurement-protocol.md), [docs/12](docs/12-tuner-cache.md)).
@@ -42,35 +43,55 @@ an image without it the rule is still five rounds with two discarded
 |---|---|---|
 | Quality gates | correctness probe 10/10, code exam 12/12 | cold **and** after a full benchmark, every arm `[measured-here]` |
 | MMLU sample (35 questions per subject, 1,995 q) | 86.4 ±0.7 | measured at TP=2 on the same checkpoint; not re-run at TP=3 `[measured-here]` |
-| Speed, realistic (12 short English code prompts) | C1 **56.9** tok/s total (63.6 per stream) · C8 **168.9** tok/s total (26.0 per stream) | acceptance 61–65 %, 5.3–5.5 accepted tokens per step `[measured-here]` |
-| Prefill, fresh unseen ~8.3K prompts | **1,792** tok/s (warm repeated 7K prompt: 1,506) | a repeated prompt reads the prefix cache and lies — see [docs/09](docs/09-measurement-protocol.md) `[measured-here]` |
-| TTFT | 0.41 s at C1, 1.01 s at C8 | `[measured-here]` |
-| KV pool | **4,449,035 tokens** at `gpu-memory-utilization 0.80` | about 4.4 concurrent 1M-token requests `[measured-here]` |
+| Speed, realistic (12 short English code prompts) | C1 **57.0** tok/s total (64.0 per stream) · C8 **175.1** tok/s total (26.9 per stream) | acceptance 61–64 %, 5.3–5.5 accepted tokens per step `[measured-here]` |
+| Prefill, fresh unseen ~8.5K prompts | **1,769** tok/s (warm repeated 7K prompt: 1,529) | a repeated prompt reads the prefix cache and lies — see [docs/09](docs/09-measurement-protocol.md) `[measured-here]` |
+| TTFT | 0.34 s at C1, 0.91 s at C8 | `[measured-here]` |
+| KV pool | **4,699,724 tokens** at `gpu-memory-utilization 0.80` | about 4.7 concurrent 1M-token requests; read from a load boot with a settled baseline `[measured-here]` |
 | Weights per node | 54.9 GiB | against 81.5 GiB at TP=2 — the whole reason for the third node `[measured-here]` |
-| Cold boot, container start → API ready | **274 s** (~4.5 min) | was 618 s before the loader work; itemised on the fast-boot arm and unchanged since `[measured-here]` |
-| Free host RAM at rest / swap | 11.3 / 12.6 / 12.5 GiB · ~0.1 GiB | rule: never below 4 GiB free `[measured-here]` |
-| Speed by category, C1 | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 tok/s | acceptance 46 / 56 / 55 / **13 %** — prose is where a k=7 draft is wasted. **Measured one configuration earlier**; not re-run since `[not tested]` |
+| Cold boot, container start → API ready | **~274 s** (~4.5 min) | was 618 s before the loader work; itemised on the fast-boot arm, plus the settle gate's wait since `[measured-here, raw lost]` |
+| Free host RAM at rest / swap | 12.3 / 13.5 / 13.3 GiB · ~0.1 GiB | rule: never below 4 GiB free `[measured-here]` |
+| Speed by category, C1 | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 tok/s | acceptance 46 / 56 / 55 / **13 %** — prose is where a k=7 draft is wasted. **Measured three configurations earlier**; not re-run since `[not tested]` |
 
-**Production configuration 6 is unchanged since it was set.** A day of profiling, a MoE re-read
-bench, a hyper-connection analysis, a one-sided RDMA_WRITE transport, a fused hyper-connection kernel,
-a dual-batch-overlap design study and a draft-cache precision arm have all followed it; every one was
-a measurement, five of them closed an item, and **none of them moved a production number**
+**Production configuration 7 changed one number and one instrument.** For two configurations before it,
+a day of profiling, a MoE re-read bench, a hyper-connection analysis, a one-sided RDMA_WRITE transport,
+a fused hyper-connection kernel and a dual-batch-overlap design study moved **no** production number
+between them; each was a measurement and most closed an item
 ([10](docs/10-results-and-roofline.md) §5, [06](docs/06-nccl-mesh.md) §9–§10,
-[11](docs/11-open-issues.md) §2.16–§2.18). Where a step goes is
-now measured rather than inferred: per 2,048-token prefill chunk, MoE trellis GEMM 26.4 %, NCCL
-all-reduce 16.5 %, dense BF16 GEMM 16.2 %, hyper-connection mixing 11.7 %; per C1 decode step, dense
-BF16 GEMM 44.8 % and the k=7 drafter 19.5 %. Both rulers those percentages are against were measured
-on the device — 225 GB/s and 97.3 TFLOP/s, not the 273 and ~125 the datasheet implies.
+[11](docs/11-open-issues.md) §2.16–§2.19). Production 7 moves the **KV pool, +5.6 % to 4.70M**, by
+putting the DFlash2 drafter's own cache at fp8 — speed is unchanged inside its bands, TTFT is better at
+both ends, draft acceptance and the gates are where they were
+([07](docs/07-kv-and-draft-page.md) §7, [11](docs/11-open-issues.md) §2.18). Where a step goes is now
+measured rather than inferred: per 2,048-token prefill chunk, MoE trellis GEMM 26.4 %, NCCL all-reduce
+16.5 %, dense BF16 GEMM 16.2 %, hyper-connection mixing 11.7 %; per C1 decode step, dense BF16 GEMM
+44.8 % and the k=7 drafter 19.5 %. Both rulers those percentages are against were measured on the
+device — 225 GB/s and 97.3 TFLOP/s, not the 273 and ~125 the datasheet implies.
 
-**One change is measured, validated and waiting.** Moving the DFlash2 drafter's own KV cache to fp8
-should grow the pool by **+4.7 %**, to about 4.66M tokens. The arm has booted: the draft backend
-accepts fp8, draft acceptance is unchanged at 60–64 %, and the gates are full marks cold and warm.
-But it ran on a **dump boot**, whose KV pool figure is meaningless, so **the number that would promote
-it does not exist yet**. Production stays on the bf16 draft cache until an ordinary load boot supplies
-it ([07](docs/07-kv-and-draft-page.md) §7, [11](docs/11-open-issues.md) §2.18).
+**The other half of production 7 buys no tokens at all, and it is the part worth copying.** The KV
+pool number this stack has spent a dozen arms on turned out to be a *difference* between two readings
+of `/proc/meminfo`, taken minutes apart — and it runs backwards: a node that starts with less memory
+free awards itself a **larger** pool. Because the launcher killed a ~90 GiB container and started the
+next one immediately, and the nodes start in a fixed order, the last node started was systematically
+9 GiB short — **27 % of a rank's KV allowance** sitting inside the measurement. No published figure
+here is known to be wrong: the pool takes the minimum over ranks and the polluted node happened never
+to be the binding one, which is luck rather than design. A host-side wait for memory to settle, before
+`docker run`, took the per-rank spread from 9 GiB to 1.4 GiB and made the difference between an
+explanation and an artefact checkable. It also refuted this repository's
+largest open item, which had claimed 8.2 GiB per worker was stranded and that equalising the ranks was
+worth 8–26 % of pool; acting on it would have over-committed the head node
+([07](docs/07-kv-and-draft-page.md) §1.1, [08](docs/08-fast-boot.md) §5.1,
+[11](docs/11-open-issues.md) §2.3).
+
+**Two `NCCL_ALGO` arms and one memory rung are the open edge.** `Tree` is measured and rejected on
+this fabric — 4–6× slower on the sizes that matter — while `Ring,Tree` came back *inside the sweep's
+own repeat spread* and is deferred to a five-round engine arm; `Ring` stays
+([06](docs/06-nccl-mesh.md) §12.2). The `gpu-memory-utilization 0.83` rung is designed and costed at
+about **+11 % of pool** for ~3.9 GB of host headroom, and it waits on the stack owner's approval rather
+than on a measurement ([11](docs/11-open-issues.md) §2.4). Upstream, the `cuda-exl3` MoE stage is now **closed**: `62f53e6`
+bounded what was left of `exl3_moe_had_in` at half-ALU work worth ≤2 % of prefill and unreachable in
+practice, so every remaining prefill lever on this stack belongs to vLLM, to the fabric, or to us.
 
 For reference, our NVFP4 stack on the same three nodes reaches C1 57–60, C8 150, prefill 1,585 and a
-KV pool of 4.32M at `gpu-memory-utilization 0.88`. **EXL3 at TP=3 is now level on single-stream
+KV pool of 4.32M at `gpu-memory-utilization 0.88` — against this stack's 4.70M at 0.80. **EXL3 at TP=3 is now level on single-stream
 decode and ahead on aggregate throughput, prefill, memory and boot.** Read that with one caveat
 attached: three of the changes that got it there — the channel cap, the second cable and
 `NCCL_PTR_CUDA` — are **fabric-level, not format-level**, they use the same plugin over the same

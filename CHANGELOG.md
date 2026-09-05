@@ -11,6 +11,87 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-05 — production configuration 7: the draft cache at fp8, and a ruler that had been moving all along
+
+The pool moved for the first time in three configurations, and the more useful half of the entry is
+that we found out why it had been moving on its own.
+
+- **Production configuration 7** `[measured-here]`. Production 6 plus an **fp8 DFlash2 draft cache**
+  (`HAREM_DRAFT_KV_DTYPE=fp8`), a tilelang fail-loud guard, a FlashInfer warm-up, an idle profiler
+  endpoint, the launcher's new memory settle gate and a fresh per-rank sidecar. Read from an ordinary
+  load boot:
+
+  | | production 6 | **production 7** |
+  |---|---|---|
+  | KV pool @ 0.80 | 4,449,035 | **4,699,724 (+5.6 %)** |
+  | C1 / C2 / C4 / C6 / C8 aggregate tok/s | 56.9 / 84.2 / 118.5 / 142.9 / 168.9 | 57.0 / 80.9 / 120.0 / 143.4 / 175.1 |
+  | TTFT C1 / C8 | 0.41 / 1.01 s | **0.34 / 0.91 s** |
+  | draft acceptance (per-concurrency medians) | 61–65 % | 60.8–64.3 % |
+  | prefill-fresh / warm 7K repeat | 1,792 / 1,506 | 1,769 / 1,529 |
+  | gates cold and warm | 10/10 · 12/12 | 10/10 · 12/12 |
+  | free RAM / swap | 11.3 / 12.6 / 12.5 GiB · ~0.1 | 12.3 / 13.5 / 13.3 GiB · ~0.1 |
+
+  **Speed is unchanged and is not the claim.** C8 reads +3.7 % and C2 −3.9 % on the same three rounds:
+  opposite signs, both inside their own bands, and no mechanism by which a smaller draft cache would
+  make decoding faster. The claim is the pool, at **+5.6 % against +4.7 % predicted**, and a TTFT that
+  improved at both ends. [docs/07](docs/07-kv-and-draft-page.md) §7,
+  [docs/10](docs/10-results-and-roofline.md) §1 and §2.1, [docs/11](docs/11-open-issues.md) §2.18.
+
+- **The KV pool number was never a memory reading** `[measured-here]`. On this integrated-GPU part vLLM's "free GPU memory" is `/proc/meminfo`
+  `MemAvailable`, and "consumed memory (weights + non-torch)" is the *difference* between two such
+  readings taken minutes apart. The instrument therefore runs backwards — a node that starts dirty
+  computes itself a **larger** pool — and the launcher made it systematic by killing a ~90 GiB
+  container and starting the next immediately, in a fixed node order, so the last node started was
+  always ~9 GiB short — **27 % of a rank's KV allowance** sitting inside the measurement. **Fix: a
+  host-side settle gate** in `scripts/start-tp3.sh`, which waits after `docker rm -f` until
+  `MemAvailable` is back over `SETTLE_MIN_GIB` (112) before `docker run`. Per-rank startup free memory:
+  spread **9 GiB → 1.4 GiB**. KV tokens bought: **zero**, and **no published figure is corrected** —
+  the pool takes the minimum over ranks and the polluted node happened never to be the binding one,
+  which is luck, not design. Two rules now stand with it: **read a pool only from a load boot**, and
+  **check all three ranks agree within 1 GiB before quoting one**.
+  [docs/07](docs/07-kv-and-draft-page.md) §1.1, [docs/08](docs/08-fast-boot.md) §5.1,
+  [docs/09](docs/09-measurement-protocol.md) §11.1.
+
+- **Retracted, and it was the largest open item on the page: "8.2 GiB per worker is stranded"**
+  `[retracted]`. Yesterday's entry priced equalising the ranks at 8–26 % of pool. There is no stranded
+  KV. The three ranks start 9.00 GiB apart and finish the profile **0.99 GiB** apart, so the gap was
+  never an allocation; live readings during the same boot have the head node with *less* free memory
+  than the workers, where the profile had given it 8.2 GiB more; and the pool is sized on the minimum
+  over ranks, which is the correct figure. Acting on the claim would have over-committed the head node
+  by ~8 GiB — the exact recipe for the 0.85 boot that swapped. This is retraction 25 in
+  [docs/11](docs/11-open-issues.md) §1.9, and it is the same failure as the datasheet rulers with a
+  better disguise: **the number was printed by the engine itself, about its own memory, and it was
+  still an unverified ruler.** [docs/11](docs/11-open-issues.md) §2.3.
+
+- **`NCCL_ALGO` swept model-free: `Tree` rejected, `Ring,Tree` unresolved** `[measured-here]`. Three
+  arms, two repetitions, production plugin and environment. `Tree` is 4–6× slower than Ring at 16 and
+  64 MB all-reduce (3.15/3.36 against 20.23/18.30 GB/s at 16 MB), 23–96 % worse on the decode-step
+  proxy, its RNR retries are an order of magnitude higher, and the port counters show it
+  redistributing traffic asymmetrically across three nodes that have no hierarchy to reward it.
+  `Ring,Tree` is 3.6 % better on the step proxy and worse on `sendrecv` at 64 MB — **and the sweep's
+  own repeat-to-repeat spread is up to 1.7× at 1 MB**, so model-free cannot settle it. Deferred to a
+  five-round engine arm worth an expected −1…3 % of a decode step; `Ring` stays in the launcher.
+  [docs/06](docs/06-nccl-mesh.md) §12.2, raw in
+  [`results/mesh/algo-sweep.md`](results/mesh/algo-sweep.md).
+
+- **The `cuda-exl3` MoE stage is closed upstream** `[reported]`. After taking `exl3_moe_had_in` in
+  `a47da6e`, the author bounded the remainder in `62f53e6`: what is left is a half-ALU limit — a
+  128-point Hadamard done with warp shuffles — so it is arithmetic that has to happen rather than
+  traffic that can be removed, worth **≤2 % of prefill** here and unreachable in practice. He also
+  confirmed our reading that `_zero_kv_blocks_kernel` belongs to vLLM rather than to the kernel
+  library. Every remaining prefill lever on this stack now belongs to vLLM, to the fabric, or to us.
+  [CREDITS](CREDITS.md), [docs/10](docs/10-results-and-roofline.md) §6,
+  [docs/11](docs/11-open-issues.md) §2.19.
+
+- **New open item, and it is a decision rather than a measurement:** `gpu-memory-utilization 0.83`.
+  The knob multiplies `MemTotal`, so it is the one pool input the baseline cannot corrupt: +3.65 GiB
+  of budget landing whole on the binding rank, pool ~4.70M → about **5.2M (+11 %)**. Price stated:
+  the OS share falls 20 % → 17 % and the head node goes from ~12.3 to ~8.4 GB free under load, still
+  clear of the 4 GiB rule. One boot, reversible in one line, **held for the stack owner's approval**
+  `[not tested]`. [docs/11](docs/11-open-issues.md) §2.4, [docs/07](docs/07-kv-and-draft-page.md) §6.
+
+---
+
 ## 2026-09-05 — a kernel that half-worked, an overlap that does not pay, and a stricter definition of "equal"
 
 Production configuration 6 is **unchanged**, for the second entry running. One change is validated and
@@ -90,6 +171,11 @@ about what counts as a difference.
   by the worst rank, so equalising it would be worth **8–26 % of pool**. Larger than every kernel item
   left. Nobody knows yet what that memory is `[measured-here]`.
   [docs/11](docs/11-open-issues.md) §2.3.
+  **Correction, same day** `[retracted]`: it is not memory, it is the instrument. "Non-torch" is a
+  delta between two `MemAvailable` readings and the last node started is the one given least time to
+  reclaim the previous container; the three ranks finish the profile 0.99 GiB apart. No KV was
+  stranded, and equalising the ranks would have over-committed the head node by ~8 GiB. See the entry
+  for production configuration 7.
 - **The memory ladder is re-opened rather than settled.** The 0.85 rejection predates the fast-load
   work that removed the page-cache spike; the same configuration now sits at 11–12 GiB free with zero
   swap, and 0.82–0.83 was never tried. `--kv-cache-memory` — sizing the pool in bytes rather than as a

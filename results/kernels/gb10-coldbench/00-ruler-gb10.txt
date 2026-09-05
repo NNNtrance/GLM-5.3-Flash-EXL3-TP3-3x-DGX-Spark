@@ -1,0 +1,34 @@
+USDT:2026-09-05 20:18:19 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start
+USDT:2026-09-05 20:18:19 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop
+USDT:2026-09-05 20:18:19 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start
+USDT:2026-09-05 20:18:19 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop
+USDT:2026-09-05 20:18:19 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start
+USDT:2026-09-05 20:18:19 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop
+USDT:2026-09-05 20:18:19 1:1 SyncActivityProfilerHandler.cpp:52] profiler_start
+USDT:2026-09-05 20:18:19 1:1 SyncActivityProfilerHandler.cpp:59] profiler_stop
+# NVIDIA GB10 cc=12.1 SMs=48 L2=24.0 MiB  torch=2.13.0+cu130 backend=native
+
+## 1. bf16 arm: single resident weight vs 96 MiB rotating bank (peak 225 GB/s read, 97.3 TFLOPS)
+     k      n     m     N   warm us  warm GB/s   cold us  cold GB/s  cold/warm
+   512  32768     8     3    147.17        232    144.14        236      0.979
+   512  32768    64     3    159.32        237    153.85        246      0.966
+  4096   4096     8     3    143.94        234    143.75        234      0.999
+  4096   4096    64     3    145.78        237    141.52        245      0.971
+  4096    256     8    48     39.15         55     38.68         56      0.988
+  4096    256    64    48     42.74         62     42.53         62      0.995
+   128   2816     8   140     35.17         22     35.29         22      1.003
+   128   2816    64   140     39.34         28     39.17         28      0.996
+
+## 2/3. EXL3 kernel self-consistency (cb=2 = mul1, production codebook)
+   k=128    n=2816   4b  finite=True  mean|y|=0.006397  shard-split relerr=0.00e+00  bf16-vs-fp16 relerr=3.82e-02
+   k=128    n=2816   6b  finite=True  mean|y|=0.006638  shard-split relerr=0.00e+00  bf16-vs-fp16 relerr=3.68e-02
+   k=4096   n=256    6b  finite=True  mean|y|=0.006356  shard-split relerr=1.50e-04  bf16-vs-fp16 relerr=1.92e-02
+   k=512    n=32768  4b  finite=True  mean|y|=0.006104  shard-split relerr=0.00e+00  bf16-vs-fp16 relerr=4.00e-02
+   k=512    n=32768  6b  finite=True  mean|y|=0.006274  shard-split relerr=0.00e+00  bf16-vs-fp16 relerr=3.89e-02
+   k=4096   n=4096   6b  finite=True  mean|y|=0.006339  shard-split relerr=9.63e-03  bf16-vs-fp16 relerr=3.85e-02
+
+## 4. kernel launch count per exl3_linear call (split-k epilogue check)
+   k=128 n=2816 6b M=8: void cuda_exl3::exl3_gemm_m_kernel<6, 2, 16, 128, 64, 8, 2, false, __nv_bfloat16, 16, false>(__half const*, unsigned short const*, __nv_bfloat16*, __half const*, int, int, int, int, int, int, float*, int, cuda_exl3::ShardMap, int const*, long, long, int const*, int const*, float const*, int, int) x1, void cuda_exl3::exl3_had_in_kernel<__nv_bfloat16>(__nv_bfloat16 const*, __half*, __half const*, int, int, int) x1
+   k=512 n=32768 6b M=8: void cuda_exl3::exl3_gemm_m_kernel<6, 2, 16, 128, 64, 8, 2, false, __nv_bfloat16, 16, false>(__half const*, unsigned short const*, __nv_bfloat16*, __half const*, int, int, int, int, int, int, float*, int, cuda_exl3::ShardMap, int const*, long, long, int const*, int const*, float const*, int, int) x1, void cuda_exl3::exl3_had_in_kernel<__nv_bfloat16>(__nv_bfloat16 const*, __half*, __half const*, int, int, int) x1
+   k=4096 n=4096 6b M=8: void cuda_exl3::exl3_epilogue_kernel<__nv_bfloat16>(float*, __nv_bfloat16*, __half const*, int, int, int, int, int const*, int const*, int, long) x1, void cuda_exl3::exl3_gemm_m_kernel<6, 2, 16, 128, 64, 8, 2, true, __nv_bfloat16, 16, false>(__half const*, unsigned short const*, __nv_bfloat16*, __half const*, int, int, int, int, int, int, float*, int, cuda_exl3::ShardMap, int const*, long, long, int const*, int const*, float const*, int, int) x1, void cuda_exl3::exl3_had_in_kernel<__nv_bfloat16>(__nv_bfloat16 const*, __half*, __half const*, int, int, int) x1
+   k=4096 n=4096 6b M=64: void cuda_exl3::exl3_epilogue_kernel<__nv_bfloat16>(float*, __nv_bfloat16*, __half const*, int, int, int, int, int const*, int const*, int, long) x1, void cuda_exl3::exl3_gemm_m_kernel<6, 2, 64, 128, 64, 8, 3, true, __nv_bfloat16, 16, false>(__half const*, unsigned short const*, __nv_bfloat16*, __half const*, int, int, int, int, int, int, float*, int, cuda_exl3::ShardMap, int const*, long, long, int const*, int const*, float const*, int, int) x1, void cuda_exl3::exl3_had_in_kernel<__nv_bfloat16>(__nv_bfloat16 const*, __half*, __half const*, int, int, int) x1

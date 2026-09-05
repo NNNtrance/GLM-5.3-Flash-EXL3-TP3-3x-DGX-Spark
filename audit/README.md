@@ -343,7 +343,8 @@ Named so you do not mistake silence for a pass:
 | Production 10, host memory under load | `MemAvailable` 8.8 / 10.0 / 10.1 GB; swap ~0.1 GB flat | prod 10 | 5 Sep 2026 | `results/configs/kv-pool-progression.csv` |
 | `NCCL_ALGO=Ring,Tree`, five-round engine arm, boot `ALG5` | C1 70.6 / C4 143.4 / C8 195.6, all within ±1 % of `Ring`; KV 5,702,479 (+1.5 %) | prod 10 | 5 Sep 2026 | `results/mesh/algo-sweep.md`, `docs/06` §12.3 |
 | Boot from power-on, all three rebooted, autostart enabled | units finished +98/+98/+103 s; `/health` 200 at +242 s by the harness, **+315 s** by the log's wall clock; KV 5,652,892; gates 10/10 · 12/12 | prod 10 | 5 Sep 2026 | `results/boot/boot-ledger.md`, `systemd/README.md` |
-| KDA/MLA quantization gate bench | KDA arms EXL3/bf16 **1.58–1.76×** at M=8; whole family 0.851 ms of a 72.5 ms step; `kv_b_proj` 0.391× but no batched kernel exists | model-free, **workstation GPU** | 5 Sep 2026 | `results/kernels/kda-gate-bench.md`, `bench/kda_gate_bench.py` |
+| KDA/MLA quantization gate bench, **cold, on the target GPU** — **this is the live row** | KDA arms EXL3/bf16 **1.023** at M=8 (neutral, +0.050 ms/step); `kv_b_proj` **0.291×**; three families together **+1.368 ms/step** against a 1.5 ms gate; prefill not re-measured | model-free, **GB10**, both arms rotated over ≥ 4× L2 | 5 Sep 2026 | `results/kernels/kda-gate-bench-gb10.md`, `results/kernels/gb10-coldbench/`, `bench/kda_gate_bench_gb10.py` |
+| KDA/MLA quantization gate bench, first pass | KDA arms EXL3/bf16 1.58–1.76× at M=8; whole family 0.851 ms of a 72.5 ms step; `kv_b_proj` 0.391× but no batched kernel exists — **the ratios are `[retracted]`, warm; the file is kept as published** | model-free, **workstation GPU** | 5 Sep 2026 | `results/kernels/kda-gate-bench.md`, `bench/kda_gate_bench.py`, `docs/11` §1.11 |
 | Device read bandwidth ruler | 225.2 GB/s | model-free | 5 Sep 2026 | `bench/bw.py`, `results/profile/step-breakdown.md` |
 | BF16 GEMM ruler | 97.3 TFLOP/s | model-free | 5 Sep 2026 | `bench/gemmpeak.py`, `results/profile/step-breakdown.md` |
 | Mesh all-reduce, channel sweep | see `results/mesh/` | model-free | 4–5 Sep 2026 | `results/mesh/all-reduce-sweep.md` |
@@ -401,12 +402,18 @@ see the shape of our error rate in one place.
 | 2.22 | The checkpoint's scope was a quality decision | It was never a quality decision — the premise was wrong |
 | **new** | **Production 9 cost 2.4 points of draft acceptance — "this is the cost"** | **A harness artefact.** Pooled by draft token over five levels and three boots it is **+0.18 points**. `bench-sweep.py` cycles `prompts[i % 12]`, so C1/C2 see 8 of 12 prompts and C4–C8 see all twelve; a two-group model explains all five levels at R² = 0.97, and the sign reverses at C6. Net effect on tok/s: **+0.24 %** |
 | **new** | Full scope is "equal both ways" on prefill | True of the **wall** and it hides the class underneath: the dense stage in prefill is **+17.3 ms, +10.4 %** at M=1,792. The plugin author reproduced it on his own card and withdrew a "cuBLAS parity" claim from his README |
+| 1.11 | **"EXL3 is 1.58–1.76× slower than BF16 on the KDA shapes at M=8" — the sentence that closed the quantization item** | **A warm number, on the wrong card.** The ~300 MB weight bank was sized for the large shapes and left the 0.72 MB KDA arm resident in a 101 MB L2. Cold on the **target** GPU the same shape reads **1.023**; GB10's own warm arm reproduces the withdrawn 1.596 at **1.605**. Seven of nine shapes reverse sign and the family goes from **−0.584 to +0.050 ms/step**. Two companions go with it: "GB10's ratios will be worse" (every family came out **better**) and "not bandwidth-bound, so bytes are not the cost" (right, but the cost is **two dependent launches**, so the remedy is a fusion). **The closure survives, re-scoped:** the arms stay BF16 for want of a gain, `kv_b_proj` still holds 96 % of it and still needs a kernel, and prefill was never re-measured |
 
 **Two retractions of the same number in two days** (1.6 and 1.7) is its own lesson, and it is the one
 worth carrying away from this folder: **the ruler gets measured too.** "Two links × port rate" is not
 a ceiling, it is the capacity of the wire; the path the card uses to reach the machine has to be
 counted before a roofline is written. The same class of mistake put a 273 GB/s catalogue figure in
 place of the 225 GB/s the device actually delivers.
+
+Row 1.11 is that lesson a third time and in its hardest form: the ruler **was** measured, the artefact
+**was** found — it read 210 % of peak — and a weight bank was added because of it. The bank was then
+sized against the wrong shape on the wrong card, and the conclusion it protected was about the one
+shape it did not cover. **Measuring the instrument once is not a property the instrument keeps.**
 
 Nothing in `results/` was edited to match a retraction. The mistakes stay on the record with the
 measurement that overturned them next to them.

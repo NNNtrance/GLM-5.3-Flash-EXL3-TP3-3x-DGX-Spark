@@ -1,5 +1,15 @@
 # Model-free gate bench: would quantizing the remaining BF16 families help?
 
+> **The ratios on this page have been superseded** `[retracted]`. They were measured on a workstation
+> GPU and, for the small KDA arms, they are **warm** numbers: the 0.72 MB weight sat in that card's
+> 101 MB L2 for the whole run despite the ~300 MB bank, which was sized for the large shapes. Cold on
+> the target GPU the same shape reads **1.023**, not 1.596, and seven of nine shapes reverse sign.
+> Use [`kda-gate-bench-gb10.md`](kda-gate-bench-gb10.md) for the numbers, and read
+> [docs/11](../../docs/11-open-issues.md) §1.11 for what was wrong and §2.25 for what the item says
+> now. **The verdict below did not change** — the arms stay BF16 — but it now rests on the gain being
+> *neutral* rather than negative. **Nothing on this page has been edited to match the correction**; it
+> is the record of what we published.
+
 The question this answers: production 9 and 10 leave **113 linears per rank in BF16** — KDA
 `f_b_proj` (34), `g_b_proj` (34), `in_proj_bfg_a` (34) and MLA `kv_b_proj` (11)
 ([docs/13](../../docs/13-full-scope-checkpoint.md) §4.3). Their FP16 weights are already inside the

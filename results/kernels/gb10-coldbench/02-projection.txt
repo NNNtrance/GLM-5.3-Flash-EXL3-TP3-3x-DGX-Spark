@@ -1,0 +1,36 @@
+== per-call us at M=8, GB10, CUDA graph, median of 3 ==
+shape                     bf16 F.lin   bf16 mm   exl3-4b   exl3-5b   exl3-6b   (cold / warm)
+f_b_proj  TP3/rank coldB        4.99      5.24      5.10      5.30      5.78
+f_b_proj  TP3/rank warm         2.21      2.61      3.54      3.61      4.13
+in_proj_bfg_a TODAY coldB       15.51     16.51         -         -         -
+in_proj_bfg_a TODAY warm        6.52      8.17         -         -         -
+in_proj_fg_a (fa+ga) coldB       12.25     14.54      8.02      8.73      9.18
+in_proj_fg_a (fa+ga) warm        5.27      5.44      6.01      6.41      6.40
+in_proj_b  TP3/rank coldB        5.63     37.76         -         -         -
+in_proj_b  TP3/rank warm        4.06     37.50         -         -         -
+kv_b_proj replicated coldB      139.33    270.54     40.56     45.08     53.46
+kv_b_proj replicated warm      136.61    293.15     17.64     20.71     20.93
+
+===== projection, EXL3 4-bit, M=8 COLD ratios (bf16 F.linear denominator)
+family                    ms/step  trace us bench cold   ratio    after    delta
+f_b_proj + g_b_proj         0.368      5.41       4.99   1.023    0.376   -0.008
+in_proj_bfg_a               0.483     14.20      15.51   0.880    0.425   +0.058
+kv_b_proj / MLA A           1.860    169.14     139.33   0.291    0.542   +1.318
+MEASURED SUBTOTAL           2.711                        0.495    1.343   +1.368
+  -> C1 step 72.52 -> 71.15 ms   gain +1.92 % tok/s
+  task formula on the full 4.10 ms target bf16 budget, cost-weighted cold ratio 0.495:
+     gain = 4.10 x (1 - 0.495) = +2.07 ms  -> 72.52 -> 70.45 ms = +2.94 % C1
+  (unmeasured remainder of the 4.10 ms budget: 1.389 ms of MLA/DSA kernels)
+  GATE (decision 8): delta >= 1.50 ms/step -> measured subtotal FAIL (+1.368), 4.10-formula PASS (+2.07)
+
+===== projection, EXL3 6-bit, M=8 COLD ratios (bf16 F.linear denominator)
+family                    ms/step  trace us bench cold   ratio    after    delta
+f_b_proj + g_b_proj         0.368      5.41       4.99   1.158    0.426   -0.058
+in_proj_bfg_a               0.483     14.20      15.51   0.955    0.461   +0.022
+kv_b_proj / MLA A           1.860    169.14     139.33   0.384    0.714   +1.146
+MEASURED SUBTOTAL           2.711                        0.591    1.601   +1.110
+  -> C1 step 72.52 -> 71.41 ms   gain +1.55 % tok/s
+  task formula on the full 4.10 ms target bf16 budget, cost-weighted cold ratio 0.591:
+     gain = 4.10 x (1 - 0.591) = +1.68 ms  -> 72.52 -> 70.84 ms = +2.37 % C1
+  (unmeasured remainder of the 4.10 ms budget: 1.389 ms of MLA/DSA kernels)
+  GATE (decision 8): delta >= 1.50 ms/step -> measured subtotal FAIL (+1.110), 4.10-formula PASS (+1.68)

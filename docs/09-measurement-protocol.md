@@ -215,6 +215,16 @@ and read the achieved bandwidth — a number above the machine's measured peak i
 not the kernel. A warm ratio is not wrong, it is a different question: it answers "what if the weight
 were resident", which at decode it is not.
 
+**And banked on the wrong card is the same as not banked at all** — row 3 above is in this table
+twice, because the bank that caught it was sized for the large shapes on a 101 MB-L2 workstation and
+left the 0.72 MB arm the conclusion was actually about resident from first replay to last, producing a
+ratio that reversed when it was re-taken cold on the 24 MiB-L2 part production runs
+([11](11-open-issues.md) §1.11). Three consequences, all cheap: size the bank **per shape** and
+against **the card you will serve on**; rotate **both** arms over it, since a 4-bit bank is a quarter
+of a bf16 one and the artefact's *sign* depends on which arm fits, so it does not cancel in a ratio;
+and where a production trace already holds the same call, use it as the referee — cold reproduced ours
+to ±20 %, warm was out by 2.2–2.4×.
+
 ## 5. The gates come before the numbers
 
 Two cheap tests, run **cold** after every boot and again **after** the full benchmark. Nothing else

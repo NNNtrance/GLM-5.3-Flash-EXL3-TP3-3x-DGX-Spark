@@ -450,73 +450,139 @@ which is what `scope: glm53_routed_experts_only` means.
 The right-hand column above is **113 linears per rank** and, once production 9 was serving, the
 obvious next arm was to quantize them ourselves: the shapes are legal, the FP16 weights are already
 inside the checkpoint, and a surgical pass over four families is hours rather than the 30–70 hours a
-full requantization would take. **It was closed by measurement before any of that was spent, and the
-answer is that it would make the engine slower** `[measured-here]`.
+full requantization would take. **It was closed by measurement before any of that was spent** — and
+then the measurement was re-taken on the target GPU the same night, **which left the closure standing
+and destroyed the reason we had given for it** `[measured-here]`.
 
-**First, the author's decision, which is in the source rather than inferred.** `exllamav3` builds the
-five KDA gating projections with `qmap = None` — excluded from quantization — and the comment gives
-the reason: the model author's own FP8 release lists those families in
-`modules_to_not_convert`, which it reads as a sensitivity signal. `kv_b_proj` goes further and is not
-a `Linear` at all: attention never applies it as that GEMM, its halves fold into the query and output
-path at decode, so it is carried unquantized by construction. And the exclusion was applied with
-judgement rather than copied — the same list also names KDA `qkv_proj` and `o_proj`, and those **are**
-quantized at 6 bit in this checkpoint, with no measurable quality cost (§5). What is left BF16 is the
-subset the author decided was not worth the risk for the size.
+Read this section in that order: the author's decision, then the bench and what was wrong with it,
+then what the corrected numbers say.
 
-**Second, the bench, model-free and on the real shapes.** `cuda-exl3` at `754421f` built for the
-workstation GPU, `exl3_linear` against `F.linear`, CUDA graphs on, median of 60 replays, at the TP=3
-per-rank widths. The ruler was verified first, and it caught itself: on a card with 101 MB of L2 a
-single-tensor read of the `kv_b` shape reports **3,488 GB/s — 210 % of the machine's own peak** — so
-every arm runs against a **~300 MB weight bank**, at which the same shape reads 1,526 GB/s, 92 % of
-peak. `ratio` is `exl3 / bf16`; **above 1 means EXL3 is slower**:
+**First, the author's decision, which is in the source rather than inferred, and which no bench
+touches.** `exllamav3` builds the five KDA gating projections with `qmap = None` — excluded from
+quantization — and the comment gives the reason: the model author's own FP8 release lists those
+families in `modules_to_not_convert`, which it reads as a sensitivity signal. `kv_b_proj` goes further
+and is not a `Linear` at all: attention never applies it as that GEMM, its halves fold into the query
+and output path at decode, so it is carried unquantized by construction. And the exclusion was applied
+with judgement rather than copied — the same list also names KDA `qkv_proj` and `o_proj`, and those
+**are** quantized at 6 bit in this checkpoint, with no measurable quality cost (§5). What is left BF16
+is the subset the author decided was not worth the risk for the size.
 
-| shape (TP=3 per rank) | k | n | M=8 ratio, 4 bit | M=1,792 ratio, 4 bit |
-|---|---:|---:|---:|---:|
-| `f_b_proj` | 128 | 2,816 | **1.596** | 0.896 |
-| `g_b_proj` | 128 | 2,816 | **1.580** | 0.900 |
-| `f_a_proj` / `g_a_proj` (replicated) | 4,096 | 128 | 1.171 | **3.534** |
-| `in_proj_fg_a` (fused) | 4,096 | 256 | 1.060 | 2.141 |
-| `kv_b_proj` (replicated) | 512 | 32,768 | **0.391** | 1.083 |
+**Second, the bench — model-free, on the real shapes, and measured twice.** `cuda-exl3` at `754421f`,
+`exl3_linear` against `F.linear`, CUDA graphs on, at the TP=3 per-rank widths, `cb=2` (`mul1`, this
+checkpoint's codebook). It was first run on a **workstation** GPU (101 MB L2, 170 SMs), median of 60
+replays, and then re-run on **GB10** (24.0 MiB L2, 48 SMs) — the part production actually runs on —
+with each shape timed twice: **warm**, the same weight every call, and **cold**, rotating both arms
+over a bank of at least 4× L2.
 
-Carried to the GB10 costs measured in the production-9 trace, the projection is a **loss**: the KDA
-gating families cost 0.851 ms of a 72.52 ms step today and would cost **1.435 ms** quantized,
-**−0.584 ms/step**. The `in_proj_bfg_a` fusion has to be split in two — `b_proj` is 22 columns per
-rank and cannot be a 128-aligned EXL3 shard — which adds a launch per layer that the projection above
-does not even charge.
+The ruler was verified on both machines, and on the workstation it caught itself: a single-tensor read
+of the `kv_b` shape reported **3,488 GB/s — 210 % of that machine's own peak** — so every arm there
+ran against a **~300 MB weight bank**, at which the same shape reads 1,526 GB/s, 92 % of peak. **That
+bank was still not enough**, and the reason is the whole of what follows: 300 MB is three times a
+101 MB L2 for the *large* shapes and completely irrelevant to a **0.72 MB** KDA arm, which stayed
+resident from the first replay to the last.
 
-**Third, the arithmetic does not survive its own ceiling.** If every KDA gating linear took **zero**
-time the step would gain 0.851 ms, **+1.2 % of C1** — under the ±1 % to 3 % noise floor in
-[10](10-results-and-roofline.md) §1.1 and far under the 1.5 ms/step gate the arm was given. The one
-family that would genuinely gain, `kv_b_proj` at 0.391× and +1.13 ms/step, needs a **per-head batched
-EXL3 GEMM that does not exist**: a source scan of `754421f` finds none, and finds no `M`-threshold
-reconstruct path either, so the prefill mitigation `exllamav3` has (`AUTO_RECONSTRUCT_THRESHOLD = 144`)
-has no counterpart here.
+`ratio` is `exl3 / bf16`; **above 1 means EXL3 is slower**. At M=8, 4 bit `[measured-here]`:
 
-**One lever survived, and it is not a quantization lever.** The same trace shows the MLA
-strided-batched family running in **fp32** — 11 calls per step, 0.757 ms. Moving it to bf16 measures
+| shape (TP=3 per rank) | k | n | workstation, as published | GB10 warm | **GB10 cold** |
+|---|---:|---:|---:|---:|---:|
+| `f_b_proj` | 128 | 2,816 | **1.596** | 1.605 | **1.023** |
+| `g_b_proj` | 128 | 2,816 | **1.580** | 1.613 | **1.025** |
+| `f_a_proj` / `g_a_proj` (replicated) | 4,096 | 128 | 1.171 | 1.270 | **0.853** |
+| `in_proj_fg_a` (fused) | 4,096 | 256 | 1.060 | 1.139 | **0.655** |
+| `kv_b_proj` (replicated) | 512 | 32,768 | **0.391** | 0.129 | **0.291** |
+
+**The published column is a warm measurement, and GB10 proves it by reproducing it: 1.605 against
+1.596.** Seven of the nine shapes in the full table reverse sign once both arms are rotated.
+`[retracted]` — the withdrawn sentence, its two companions and the account of how it happened are in
+[11](11-open-issues.md) §1.11 and §2.25; the corrected tables, the ruler, the trace referee and the
+projection are in
+[`../results/kernels/kda-gate-bench-gb10.md`](../results/kernels/kda-gate-bench-gb10.md).
+
+**Which regime is real was decided by measurement, not by argument.** The same kernels' per-call costs
+were already in the production-9 C1 trace, so the trace refereed the bench `[measured-here]`:
+
+| family | trace µs/call | bench warm | bench cold | warm ÷ trace | **cold ÷ trace** |
+|---|---:|---:|---:|---:|---:|
+| `f_b_proj` + `g_b_proj` | 5.41 | 2.21 | 4.99 | 0.41 | **0.92** |
+| `in_proj_bfg_a` | 14.20 | 6.52 | 15.51 | 0.46 | **1.09** |
+| MLA A / `kv_b_proj` | 169.14 | 136.61 | 139.33 | 0.81 | **0.82** |
+
+Cold reproduces the engine within ±20 %; warm is out by 2.2–2.4× on the small shapes. The mechanism
+is plain: tens of GiB of weights stream through L2 per rank per decode step, so between two touches of
+the same `f_b_proj` the whole active weight set has passed. **In production that tensor is never
+resident.**
+
+**Third, what the corrected arithmetic says — and it is a smaller change to the decision than to the
+numbers.** Carried to the GB10 costs from the production-9 trace, against a 72.52 ms step:
+
+| family | calls/step | ms/step now | cold ratio | projected | **Δ, + = faster** | as published |
+|---|---:|---:|---:|---:|---:|---:|
+| `f_b_proj` + `g_b_proj` | 68 | 0.368 | 1.023 | 0.376 | −0.008 | −0.218 |
+| `in_proj_bfg_a` → split | 34 | 0.483 | 0.880 | 0.425 | +0.058 | −0.366 |
+| **KDA gating arms** | 102 | **0.851** | 0.942 | 0.801 | **+0.050** | **−0.584** |
+| `kv_b_proj` / MLA A | 11 | 1.860 | 0.291 | 0.542 | **+1.318** | +1.132 |
+| **measured subtotal** | | **2.711** | 0.495 | 1.343 | **+1.368** | +0.547 |
+
+The gate is `Δ ≥ 1.5 ms/step` at decode **and** `Δ ≤ +5 ms/chunk` at prefill. **The decode half now
+fails narrowly rather than by an order of magnitude**, and applied to the whole **4.10 ms** the trace
+attributes to the target's four unquantized families it would pass at **+2.07 ms** `[estimate]` —
+which we do not claim, because 1.389 ms of that budget is MLA/DSA kernels the bench never touched.
+**Prefill was not re-measured at all**, so the item is **re-scoped, not passed**.
+
+**And the work list inverted rather than grew, which is why nothing is being built.** **96 %** of the
+gain (+1.318 of +1.368) is `kv_b_proj` alone, and `cuda-exl3` at `754421f` still has **no per-head
+batched EXL3 GEMM** (`exl3_linear` is a single `[M,k] → [M,n]`) and no `M`-threshold reconstruct path
+— the mitigation `exllamav3` has (`AUTO_RECONSTRUCT_THRESHOLD = 144`) has no counterpart here. Both
+re-verified by source scan. The one item worth doing is a **kernel** job. The KDA gating arms, the
+families this section is named for, are not harmful and not useful: **+0.050 ms/step is 0.07 % of
+C1**, which does not buy the multiplicative quality risk on `f_b_proj`'s decay term.
+
+**The lever on those arms is not the bit width.** Cold, `f_b_proj` in bf16 reads 154 GB/s of a
+235–240 GB/s peak; at 4 bit it reads **45.7 GB/s — 19 % of peak — and takes the same time**. It is not
+bandwidth-bound in either format: it sits on a **~5 µs floor made of two dependent launches**,
+`exl3_had_in_kernel` then `exl3_gemm_m_kernel`, where bf16 launches one. Fusing `had_in` into the GEMM
+for narrow inputs is the thing to ask for, and it has been asked for `[not tested]`.
+
+**One lever survived both passes, and it is not a quantization lever.** The workstation bench found
+the MLA strided-batched family running in **fp32** — 11 calls per step, 0.757 ms — and bf16 measures
 **0.684×**: **+0.24 ms/step, about +0.3 % of C1**, plus more than half of that family's prefill cost.
-No requantization, no checkpoint change, no new kernel — a dtype. It is filed as future and minor, and
-it is gated on `needle` at 1M rather than on speed, because this is the tensor that decodes the KV
-latent and an error in it touches the whole of history `[not tested]`.
+No requantization, no checkpoint change, no new kernel — a dtype. The cold re-measurement does not
+touch it in direction or size. It is filed as future and minor, and gated on `needle` at 1M rather
+than on speed, because this is the tensor that decodes the KV latent and an error in it touches the
+whole of history `[not tested]`.
 
-**Three transferable lessons, all about the instrument** — because none of the above needed the
-engine, and the whole study cost about an hour of a workstation GPU against the four to eight hours,
-two engine patches and blind quality risk it prevented:
+**Four transferable lessons, all about the instrument** — because none of this needed the engine, and
+the two runs together cost about an hour of a workstation GPU and 90 s of one node's GPU against the
+four to eight hours, two engine patches and blind quality risk they prevented:
 
-1. **Bench a GEMM without a weight bank on a large-L2 card and it will read faster than the machine
-   can physically fetch.** The number that gave it away was 210 % of peak; had the shapes been a
-   little larger it would have read 95 % of peak and lied quietly.
-2. **"Quantizing a small tensor makes it faster" is false whenever the call was never
-   bandwidth-bound.** A 0.72 MB arm is fixed-cost-bound on every machine we measured, and the smaller,
-   compute-poorer part is the one where the ratio is *worse*.
-3. **The EXL3 prefill penalty is a property of shape, not of format.** A narrow input (k=128) makes
-   EXL3 **faster** at M=1,792; a narrow output (n=128) makes it **3.5× slower**. "EXL3 is expensive in
-   prefill" is a sentence with a missing clause.
+1. **Bench a GEMM without a weight bank and it will read faster than the machine can physically
+   fetch.** The number that gave it away was 210 % of peak; had the shapes been a little larger it
+   would have read 95 % of peak and lied quietly.
+2. **A bank sized against the wrong card, or the wrong shape, is the same mistake as no bank at all.**
+   This is the one that cost us the sentence. 300 MB was a real bank for the large shapes on the
+   machine it was written for, and no bank whatsoever for a 0.72 MB arm — which is precisely the arm
+   the conclusion was about.
+3. **The artefact's sign depends on which arm fits the cache, so it does not cancel in a ratio.** On a
+   101–128 MiB L2 both the bf16 weight and the trellis fit, and EXL3 reads **slow**; on GB10's
+   24 MiB only the trellis fits, and EXL3 reads **too fast** (0.129 warm against 0.291 cold). Only
+   cold is honest on either card.
+4. **The EXL3 prefill penalty is a property of shape, not of format.** A narrow input (k=128) makes
+   EXL3 **faster** at M=1,792; a narrow output (n=128) makes it 3.5× slower. "EXL3 is expensive in
+   prefill" is a sentence with a missing clause. This one is from the workstation prefill table, which
+   **has not been re-measured cold** and is carried as it was `[not tested]`.
 
-Raw tables, the ruler checks and the projection:
-[`../results/kernels/kda-gate-bench.md`](../results/kernels/kda-gate-bench.md). Both scripts ship —
-`bench/ruler_check.py` and `bench/kda_gate_bench.py` — and neither needs a node or a checkpoint.
-Tracked as closed in [11](11-open-issues.md) §2.25.
+A fifth is not about the instrument: **"quantizing a small tensor makes it faster" is false whenever
+the call was never bandwidth-bound** — the original bench said this and it is right, but its stated
+reason (bytes that were never the cost) is only half of it. The cost is **launch count**, which is why
+the remedy is a fusion.
+
+Raw tables, the ruler checks and the projections: the workstation run in
+[`../results/kernels/kda-gate-bench.md`](../results/kernels/kda-gate-bench.md), the target-GPU
+re-measurement that supersedes its ratios in
+[`../results/kernels/kda-gate-bench-gb10.md`](../results/kernels/kda-gate-bench-gb10.md) with the raw
+logs beside it. All three scripts ship — `bench/ruler_check.py`, `bench/kda_gate_bench.py` and
+`bench/kda_gate_bench_gb10.py` — and none of them needs a node or a checkpoint.
+Tracked as closed in [11](11-open-issues.md) §2.25, retraction in §1.11.
 
 ---
 

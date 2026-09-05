@@ -11,6 +11,59 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-05 (after the release pass) — the quantization gate bench, re-measured on the target GPU: the closure stands, the reason we gave for it does not
+
+**`[retracted]`: "on the KDA shapes EXL3 is 1.58–1.76× slower than BF16 at M=8".** That sentence
+closed the item above, and it went upstream. It is a **warm** number. The workstation bench did run
+against a ~300 MB weight bank — the ruler had caught a 210 %-of-peak reading and that is why the bank
+exists — but the bank was sized for the large shapes, and the arm the sentence is about is **0.72 MB**
+and sat in that card's 101 MB L2 from the first replay to the last.
+
+**Re-measured cold on GB10, same shapes, same `cuda-exl3` `754421f` build, both arms rotated over a
+bank of at least 4× L2** `[measured-here]`. `f_b_proj` at M=8 reads **1.023**, not 1.596 — and GB10's
+own *warm* arm reproduces the withdrawn figure at **1.605**, which is how we know what the workstation
+was measuring. **Seven of nine shapes reverse sign**; `kv_b_proj` improves from 0.391 to **0.291**.
+**The production trace refereed it**: per-call costs from the production-9 C1 profile are `f_b_proj`
+5.41 µs against 4.99 cold and 2.21 warm, `in_proj_bfg_a` 14.20 against 15.51 and 6.52 — **cold
+reproduces the engine to ±20 %, warm is out by 2.2–2.4×**, so which regime is honest is a measurement
+and not a preference.
+
+**What it changes, and what it does not.** The KDA gating arms move from "quantizing them costs
+0.584 ms/step" to **+0.050 ms/step — neutral — 0.07 % of C1**. They stay BF16, now for want of a gain
+rather than for a loss, and the lever on them is not the bit width at all: cold, `f_b_proj` reads
+**45.7 GB/s, 19 % of peak, in either format**, because it sits on a ~5 µs floor made of **two
+dependent kernel launches** where bf16 has one. Fusing `had_in` into the GEMM at narrow inputs is what
+those shapes want, and it has been asked for upstream. The three measured families together go from
++0.547 to **+1.368 ms/step** against a 1.5 ms gate — a narrow miss rather than an order of magnitude —
+and **96 % of that is still `kv_b_proj` alone**, which still needs the per-head batched EXL3 kernel
+`754421f` does not have. **Prefill (M = 1,792) was not re-measured and the gate is an *and*, so the
+item is re-scoped, not passed.** The MLA fp32 → bf16 lever is untouched and is still the cheapest
+thing on the board.
+
+**A second claim of the same report goes with the first** `[retracted]`: it warned its ratios were
+*optimistic* for GB10. **Every family came out better on GB10** — machine balance about 416 flop/byte
+against the workstation's 141 is exactly the condition a trellis is built for, and on the control
+shapes EXL3 delivers 0.272 against the pure bit-ratio limit of 0.250.
+
+**The lesson, and it is the third time this stack has learned a version of it.** The artefact's
+**sign depends on which arm fits the cache**: on a 101–128 MiB L2 both fit and EXL3 reads slow, on
+GB10's 24 MiB only the trellis fits and EXL3 reads too fast. It therefore does **not** cancel in a
+ratio, and only cold is honest on either card. **A bank sized against the wrong card, or the wrong
+shape, is the same mistake as no bank at all.** The rule is now in
+[docs/09](docs/09-measurement-protocol.md) §4.2: size the bank per shape and against the card you will
+serve on, rotate both arms over it, and let a production trace referee the regime where one exists.
+
+**Cost:** 90 s of one node's GPU, 1.47 GiB peak, in a throwaway container beside an idle engine. No
+restart, no configuration change, nothing on the cluster touched. Posted to the upstream thread the
+original went to. [docs/11](docs/11-open-issues.md) §1.11 and §2.25,
+[docs/13](docs/13-full-scope-checkpoint.md) §4.4,
+[`results/kernels/kda-gate-bench-gb10.md`](results/kernels/kda-gate-bench-gb10.md) with its raw under
+[`results/kernels/gb10-coldbench/`](results/kernels/gb10-coldbench/), the script as
+`bench/kda_gate_bench_gb10.py`, and the retraction indexed in [`audit/`](audit/README.md) §6. The
+workstation file is kept exactly as published, with a banner.
+
+---
+
 ## 2026-09-05 (late) — release: autostart, three open items closed by measurement, and a spread we had mis-attributed
 
 **Status moves from release candidate to release**, on production configuration 10.
@@ -71,6 +124,9 @@ machine's own peak** before a weight bank was added. [docs/13](docs/13-full-scop
 [docs/11](docs/11-open-issues.md) §2.25,
 [`results/kernels/kda-gate-bench.md`](results/kernels/kda-gate-bench.md), and both scripts ship
 (`bench/ruler_check.py`, `bench/kda_gate_bench.py`).
+**Corrected the same night, and the entry above is the correction:** the 1.6–1.8× is a warm number
+that the weight bank did not reach on a 0.72 MB arm, the item still closes, and it closes because
+quantizing those arms is **neutral** rather than because it is a loss `[retracted]`.
 
 **A spread we had mis-attributed, corrected against the raw sweeps** `[retracted]`. Our field log
 recorded a "C1 run-to-run spread of 59.9 … 70.6 across boots" for production 9 and 10. It is wrong:

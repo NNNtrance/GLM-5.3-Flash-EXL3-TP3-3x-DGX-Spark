@@ -9,8 +9,9 @@ elsewhere.
 ## 1. Retracted
 
 Seven things we wrote down as findings and later measured properly, plus two smaller ones, plus the
-step-time breakdown that a real profiler run corrected in three places (§1.10), plus a full audit of
-every claim of ours that a later measurement overturned (§1.9 — **32 of them**). Each was published —
+step-time breakdown that a real profiler run corrected in three places (§1.10), plus a kernel ratio
+withdrawn the same night it was published (§1.11), plus a full audit of every claim of ours that a
+later measurement overturned (§1.9 — **32 of them**, as of the 5 September pass). Each was published —
 in a report, an upstream issue, or both — before it was corrected. Two of them (§1.6 and §1.7) are the
 same number, corrected twice, in opposite directions.
 
@@ -118,6 +119,38 @@ blocking sync. The corrected figure was posted to the same thread the original w
 the profiler flag costs nothing when unset, so carry it in production; measure the profiler's own
 overhead in the same windows; and never read an idle figure straight out of a trace — take
 `busy(union)` from the trace and the wall from a profiler-off run.
+
+### 1.11 "EXL3 is 1.58–1.76× slower than BF16 on the KDA shapes at M=8"
+
+The sentence that closed §2.25, published here and posted upstream, and **withdrawn the same night**
+`[retracted]`. It was measured on a workstation GPU against a ~300 MB weight bank — a bank that is
+three times a 101 MB L2 for the *large* shapes in the table and irrelevant to the 0.72 MB arm the
+sentence is about, which stayed cache-resident throughout. Re-measured on the **target** GPU with the
+same shapes and the same `cuda-exl3` `754421f` build, rotating **both** arms over at least 4× L2,
+`f_b_proj` at M=8 reads **1.023**; GB10's own warm arm reproduces the withdrawn number at **1.605**,
+which is the proof of what was being measured. Seven of nine shapes reverse sign, and the family
+verdict moves from **−0.584 ms/step** to **+0.050**.
+
+Two more sentences from the same pass go with it: that GB10's ratios would be **worse** than the
+workstation's (every family came out **better**), and that these arms are "not bandwidth-bound on any
+machine" *because of bytes* — they are not bandwidth-bound, and the cost is **two dependent kernel
+launches**, which points at a fusion rather than at a bit width.
+
+**The conclusion did not move: the arms stay BF16 and the item stays closed** — now because
+quantizing them is worth nothing rather than because it costs something, and with prefill
+unre-measured, so it is re-scoped rather than passed. Full account in §2.25, tables in
+[`../results/kernels/kda-gate-bench-gb10.md`](../results/kernels/kda-gate-bench-gb10.md).
+
+**Why it belongs in this list rather than in a footnote.** It is the *third* time on this stack that
+a ruler produced the finding (§1.6, §1.7, §1.10 row 4), and the first time the instrument was one we
+had already caught once: the workstation ruler read **210 % of peak**, we added a bank, and we sized
+it against the wrong shape on the wrong card. The person who found the same artefact in his own table
+and withdrew his own claim over it is the kernel author, in the thread ours had been posted to
+([issue #5](https://github.com/Zeuss5/cuda-exl3/issues/5)) — we ran his check because he asked, and it
+corrected us and not him. The rule that came out of it is in
+[09](09-measurement-protocol.md) §4.2: **size the bank against the card you will run on, per shape,
+and check the achieved bandwidth of both arms** — the artefact's *sign* depends on which arm fits the
+cache, so it is not a constant offset that cancels in a ratio.
 
 ### 1.9 The full audit: every claim of ours that a measurement overturned
 
@@ -807,7 +840,8 @@ The whole account, including the loader work and the padded-load port, is
   codebooks, zero non-finite, bounded ranges `[reported]`.
 
 **Three things it left behind, each with its own item:** the two patch trees and the second sidecar
-(§2.24), the KDA gating arms that stay BF16 — now closed by measurement (§2.25) — and the 2.4 points
+(§2.24), the KDA gating arms that stay BF16 — closed by measurement, then closed again for a
+different reason when that measurement was re-taken on the target GPU (§2.25) — and the 2.4 points
 of draft acceptance, which was ours rather than the checkpoint's (§2.26).
 
 ### 2.23 The remaining C1 idle: 3.75 %, and the four things inside it
@@ -872,26 +906,97 @@ that a sidecar may be deleted only after its env file has been retired, because
 `FASTLOAD_MODE=load` with the directory gone refuses the boot loudly and correctly
 ([08](08-fast-boot.md) §9 step 6). **Not written.**
 
-### 2.25 The 113 linears that are still BF16 — CLOSED by measurement: quantizing them would be slower
+### 2.25 The 113 linears that are still BF16 — closed, and **the reason we gave was wrong**
 
 `CUDA_EXL3_DEBUG_NAMES` on the production boot reads **203 EXL3 / 113 bf16** per rank
 `[measured-here]`. The 113 are four families and nothing else: KDA `f_b_proj` (34), `g_b_proj` (34),
 `in_proj_bfg_a` (34) and MLA `kv_b_proj` (11). They are what makes the measured gain 17.8 ms rather
 than the ~32 ms the estimate implied ([13](13-full-scope-checkpoint.md) §4.2).
 
-This item used to ask what they were worth and note that we had not measured it. **We have now, on a
+This item asked what they were worth, answered it on 5 September with a model-free bench on a
+**workstation** GPU — and got the answer's *reason* wrong. **The headline sentence is withdrawn:**
+
+> **"On the KDA shapes, EXL3 is slower than BF16 at decode: 1.58–1.76× at M=8."** `[retracted]`
+
+That is a **warm** number. Re-measured the same night on the target GPU with the same shapes and the
+same `cuda-exl3` `754421f` build, rotating **both** arms over a bank of at least 4× L2, `f_b_proj` at
+M=8 reads **1.023** — level. GB10's *warm* arm reproduces the withdrawn figure almost exactly
+(**1.605** against the published 1.596), which is how we know what the workstation was measuring.
+Seven of the nine shapes reverse sign. Tables, method and projection:
+[`../results/kernels/kda-gate-bench-gb10.md`](../results/kernels/kda-gate-bench-gb10.md); raw under
+[`../results/kernels/gb10-coldbench/`](../results/kernels/gb10-coldbench/); the script ships as
+`bench/kda_gate_bench_gb10.py`. Posted to the same upstream thread the original went to
+([issue #5](https://github.com/Zeuss5/cuda-exl3/issues/5)).
+
+**The closure survives. It is re-scoped, not passed, and it now reads like this** `[measured-here]`:
+
+1. **The checkpoint author left them BF16 on purpose, and said so in code.** Unchanged and
+   independent of any bench. `exllamav3`'s `gated_delta_net.py` builds the five KDA gating arms with
+   `qmap = None` and the comment names the reason — the model author's own FP8 release excludes those
+   families from conversion, which it reads as a sensitivity signal. `kv_b_proj` is not even a
+   `Linear`: attention never applies it as that GEMM, so it is carried unquantized by construction.
+   The same author quantized `qkv_proj` and `o_proj` to 6 bit from the same exclusion list, so it was
+   a discriminating decision rather than a copied one.
+2. **The KDA gating arms stay BF16 because quantizing them is worth nothing, not because it costs.**
+   Cold on GB10 the family moves from **−0.584 ms/step** to **+0.050 ms/step at 4 bit** —
+   **0.07 % of C1**, and −0.036 ms at 6 bit. Neutral either way, and far too little to pay for a
+   multiplicative quality risk on `f_b_proj`'s decay term. **The lever on these shapes is not the bit
+   width.** Cold, `f_b_proj` reads **45.7 GB/s — 19 % of peak — in either format**: the arm is not
+   bandwidth-bound, it is sitting on a ~5 µs floor made of **two dependent launches**
+   (`exl3_had_in_kernel` + `exl3_gemm_m_kernel`) where bf16 has one. Fusing `had_in` into the GEMM at
+   narrow inputs is the thing worth asking for, and it has been asked for `[not tested]`.
+3. **The arithmetic no longer fails by an order of magnitude — it fails narrowly, and only on the
+   part we measured.** The three measured families are **+1.368 ms/step at 4 bit** against a
+   `Δ ≥ 1.5 ms/step` gate: 2.5× the workstation's +0.547, and still short. Applied to the whole
+   **4.10 ms** the production-9 trace attributes to the target's four unquantized families, at the
+   cost-weighted cold ratio 0.495, it is **+2.07 ms — which would pass** `[estimate]`. We do not claim
+   the pass: **1.389 ms of that budget is MLA/DSA kernels this bench never touched.**
+4. **The work list inverted rather than grew, and this is why the item stays shut.** **96 %** of the
+   gain (+1.318 of +1.368) is still `kv_b_proj` alone, and `cuda-exl3` at `754421f` still has **no
+   per-head batched EXL3 GEMM** and no `M`-threshold reconstruct path, both re-verified by source
+   scan. The one item worth doing is a **kernel** job, not a quantization job.
+5. **Prefill was not re-measured.** M = 1, 8 and 64 only; M = 1,792 was not run, and the gate is an
+   **and**. The workstation prefill verdict is less exposed to the artefact — those shapes are
+   compute-bound — but it stands unconfirmed `[not tested]`.
+
+**What survives unchanged is not a quantization item at all.** The workstation bench found the MLA
+strided-batched family running in **fp32** — 11 calls per step, 0.757 ms — and bf16 measures
+**0.684×**, worth **+0.24 ms/step, about +0.3 % of C1**, with more than half of that family's prefill
+cost as well. No quantization, no checkpoint change, no new kernel: a dtype. The cold re-measurement
+does not touch it in direction or size, and it is still the cheapest item on the board. It is gated on
+`needle` at 1M rather than on speed, because this is the tensor that decodes the KV latent and its
+error would touch the whole of history. **Filed as future and minor** `[not tested]`.
+
+**A second workstation claim goes with the first** `[retracted]`. That report warned its ratios were
+*optimistic* for GB10 — "at M=8 GB10's fixed cost is larger, so its ratios will be worse" — and rested
+the verdict on failing a gate with optimistic numbers. **Every family came out better on GB10.** This
+part is a rare thing on this page: an error whose correction makes the stack look *better* and the
+conclusion no weaker.
+
+**The instrument lesson, restated, because ours moved as well as upstream's.** The original closure
+already knew a resident weight lies — its own ruler read **210 % of the workstation's peak** before a
+bank was added, and that is why a ~300 MB bank exists in `bench/kda_gate_bench.py` at all. It was
+still not enough, for a reason worth carrying: **a bank sized against the wrong card is the same
+mistake as no bank at all.** 300 MB is three times a 101 MB L2 for the *large* shapes and irrelevant
+to a 0.72 MB one, which stayed resident throughout. And the artefact's **sign depends on which arm
+fits**: on a 101–128 MiB L2 both arms fit and EXL3 reads slow; on GB10's 24 MiB only the trellis fits
+and EXL3 reads fast; only cold is honest on either. Written into
+[09](09-measurement-protocol.md) §4.2.
+
+**What the re-measurement cost:** 90 s of one GPU, 1.47 GiB peak, in a throwaway container beside an
+idle production engine. No restart, no configuration change, nothing on the cluster touched.
+
+<details>
+<summary>The original closure, as published on 5 September, before the target-GPU re-measurement</summary>
+
+**This item used to ask what they were worth and note that we had not measured it. We have now, on a
 model-free bench, and the answer is that quantizing them makes the engine slower** `[measured-here]`.
 The bench and the arithmetic are in [13](13-full-scope-checkpoint.md) §4.4, the raw tables in
 [`../results/kernels/kda-gate-bench.md`](../results/kernels/kda-gate-bench.md), and both scripts ship
 (`bench/ruler_check.py`, `bench/kda_gate_bench.py`). The four things that close the item:
 
-1. **The checkpoint author left them BF16 on purpose, and said so in code.** `exllamav3`'s
-   `gated_delta_net.py` builds the five KDA gating arms with `qmap = None` and the comment names the
-   reason — the model author's own FP8 release excludes those families from conversion, which it reads
-   as a sensitivity signal. `kv_b_proj` is not even a `Linear`: attention never applies it as that
-   GEMM, so it is carried unquantized by construction. **This is not an omission we can fix; it is a
-   decision, and the same author quantized `qkv_proj` and `o_proj` to 6 bit from the same exclusion
-   list, so it was a discriminating one.**
+1. **The checkpoint author left them BF16 on purpose, and said so in code.** [unchanged — point 1
+   above.]
 2. **On the KDA shapes, EXL3 is slower than BF16 at decode.** Measured at the TP=3 per-rank widths,
    M=8, CUDA graphs on, against a weight bank three times L2 so nothing reads out of cache: EXL3 4-bit
    is **1.58–1.76×** the BF16 time on `f_b_proj`, `g_b_proj` and the `in_proj` split. These arms are
@@ -904,23 +1009,17 @@ The bench and the arithmetic are in [13](13-full-scope-checkpoint.md) §4.4, the
 4. **The one family that would genuinely gain needs a kernel that does not exist.** `kv_b_proj` is
    bandwidth-bound and measures **0.391×** at 4 bit, worth +1.13 ms/step — but `cuda-exl3` at `754421f`
    has no per-head batched EXL3 GEMM (`exl3_linear` is a single `[M,k] → [M,n]`), and no `M`-threshold
-   reconstruct path either, both verified by source scan. Taking it means writing a kernel, and it
-   still would not clear the gate alone.
+   reconstruct path either, both verified by source scan.
 
-**What survives is not a quantization item at all.** The same bench found that the MLA
-strided-batched family runs in **fp32** — 11 calls per step, 0.757 ms — and moving it to bf16 measures
-**0.684×**, worth **+0.24 ms/step, about +0.3 % of C1**, with more than half of that family's prefill
-cost as well. No quantization, no checkpoint change, no new kernel: a dtype. It is small, it is real,
-and it is gated on `needle` at 1M rather than on speed, because this is the tensor that decodes the KV
-latent and its error would touch the whole of history. **Filed as future and minor** `[not tested]`.
+Of those four, **point 1 stands, point 4 stands and got larger (0.391 → 0.291), point 2 is
+withdrawn, and point 3 is withdrawn as stated**: the ceiling argument was sound but it was built on
+the KDA family alone, which is exactly the family that turned out to be worth nothing either way.
+Two more sentences from the same pass are withdrawn with them: that these arms are "not
+bandwidth-bound **on any machine**" — true, and the conclusion drawn from it was still wrong, because
+the cost is launches rather than bytes — and that GB10's ratios would be *worse* than the
+workstation's.
 
-**What the closure cost: about an hour of a workstation GPU, and it bought back four to eight hours of
-surgical requantization, two engine-side patches and a quality risk we would have taken blind.** Three
-lessons came with it, all instrument-shaped: on a card with 101 MB of L2, a GEMM bench without a
-weight bank reads **210 % of the machine's own peak read bandwidth** and every ratio in the table would
-have been wrong; "quantizing a small tensor makes it faster" is false whenever the call was never
-bandwidth-bound; and the EXL3 prefill penalty is a property of **shape**, not of format — a narrow
-input (k=128) makes EXL3 *faster* while a narrow output (n=128) makes it 3.5× slower.
+</details>
 
 A second, smaller half of the same item survives from §2.1: whatever dense BF16 remains runs on
 Ampere-class `cutlass_80_*` kernels on an sm_121 part, at **79 %** of what `torch.matmul` reaches on
@@ -999,8 +1098,9 @@ on its own; it is worth carrying into the next arm that touches the drafter.
 | **A profiler-off re-run of the same decode window** | The CUPTI subtraction that turns 5.45 ms of C1 idle into 3.47 ms is an inference from two walls (§1.10), not a direct measurement. Separating it cleanly needs the profiler off and the window re-opened: one boot, and the answer would move a 3.75 % figure by a fraction of itself. |
 | **A watchdog on the running container** | A 60-second `docker ps` plus `/health` poll that dumps `docker logs --tail 40` when the container is gone. Few lines, no root, independent of the unit — and it would have caught the one-hour outage the autostart unit does nothing about. §2.20. |
 | **A rank-ordered start under systemd** | The unit starts all three ranks concurrently and the reboot test passed on the rendezvous retrying, not on ordering. One trial. A rank-dependent delay or peer-port poll in `ExecStartPre` is the guarantee; not written. §2.20. |
-| **Quantizing the four BF16 families ourselves** | Ruled out rather than untried: on a model-free bench at the TP=3 shapes, EXL3 is **1.6–1.8× slower** than BF16 on the KDA arms at M=8, the whole family is 0.851 ms of a 72.5 ms step, and the one family that would gain needs a batched EXL3 kernel that does not exist. §2.25, [13](13-full-scope-checkpoint.md) §4.4. |
-| **The MLA fp32 → bf16 dtype change** | The one lever that survived that bench: +0.24 ms/step, about +0.3 % of C1, no quantization and no new kernel. Small, and gated on `needle` at 1M rather than on speed. §2.25. |
+| **Quantizing the four BF16 families ourselves** | Ruled out rather than untried, and the reason changed on re-measurement: cold on the target GPU the KDA gating arms are **neutral** (+0.050 ms/step, 0.07 % of C1) rather than 1.6–1.8× slower, so they stay BF16 for want of a gain rather than for a loss. The three measured families together are **+1.368 ms/step** against a 1.5 ms gate, **96 % of it in `kv_b_proj` alone**, which needs a batched EXL3 kernel that does not exist. Prefill was not re-measured and the gate is an *and*. §2.25, [13](13-full-scope-checkpoint.md) §4.4, [`../results/kernels/kda-gate-bench-gb10.md`](../results/kernels/kda-gate-bench-gb10.md). |
+| **The MLA fp32 → bf16 dtype change** | The one lever that survived that bench, and the cold re-measurement did not touch it: +0.24 ms/step, about +0.3 % of C1, no quantization and no new kernel. Small, and gated on `needle` at 1M rather than on speed. Its own numbers have never been re-taken cold either. §2.25. |
+| **The prefill half of the quantization gate, re-measured cold** (M = 1,792) | The decode half was re-taken on the target GPU and moved by 2.5×; the prefill half was not, so half of an **and** is carried on a workstation warm bench. Those shapes are compute-bound and so less exposed to the cache artefact, which is an argument, not a measurement. One throwaway container beside an idle engine, about two minutes. §2.25. |
 | **Whether the full-scope arm's TP=2 memory reading has a mechanism at all** | It said ~10 GiB heavier; TP=3 says 3.4 GiB lighter. The confound is named (different checkpoints *and* different `max_model_len`) and the `ops.reserve` hypothesis is still untested. Recorded as not reproduced, not explained. §1.9 row 32. |
 | **`mtp.safetensors`, the MIT-licensed MTP drafter that ships with that checkpoint** | 3.79 GB, not in the index, never read by vLLM. It is a candidate replacement for DFlash2 whose licence would transfer to a reader, unlike ours ([01](01-model-and-license.md) §4). Not evaluated. |
 | **`gpu-memory-utilization 0.85` on this stack** | The rung above production 10. It will not be attempted: 0.85 was measured once and rejected on swap growth, and at 0.83 `MemFree` already sits at 0.9–1.2 GiB. The next thing this stack needs at that end is a soak, not another rung. §2.4. |

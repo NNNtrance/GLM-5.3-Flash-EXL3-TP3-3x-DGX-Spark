@@ -1,0 +1,568 @@
+# NVIDIA GB10  cc=12.1  SMs=48  L2=24.0 MiB (25165824 B)  torch=2.13.0+cu130
+# backend=native  cold target=4xL2=96 MiB  rounds=3  graph=on  bits=[4, 5, 6]
+#   env CUDA_EXL3_SPLIT_TARGET=<unset>
+#   env CUDA_EXL3_SPLIT_BUDGET=<unset>
+#   env CUDA_EXL3_TUNE_CACHE=<unset>
+#   env CUDA_EXL3_DEBUG_NAMES=<unset>
+
+===== f_b_proj  TP3/rank   k=128 n=2816  |  N_bf16=140 N_full=559 G=559  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [8192->8448 pad, /3 = 22x128]
+  bf16 F.linear   M=1    warm       3.132 us     232.0 GB/s   raw=['3.135', '3.132', '3.128']
+  bf16 F.linear   M=1    coldA      4.635 us     156.8 GB/s   raw=['4.636', '4.632', '4.635']
+  bf16 F.linear   M=1    coldB      4.631 us     156.9 GB/s   raw=['4.645', '4.629', '4.631']
+  bf16 F.linear   M=8    warm       2.208 us     347.9 GB/s   raw=['2.210', '2.207', '2.208']
+  bf16 F.linear   M=8    coldA      4.984 us     154.1 GB/s   raw=['4.982', '4.990', '4.984']
+  bf16 F.linear   M=8    coldB      4.988 us     154.0 GB/s   raw=['4.994', '4.983', '4.988']
+  bf16 F.linear   M=64   warm       4.468 us     245.7 GB/s   raw=['4.469', '4.468', '4.466']
+  bf16 F.linear   M=64   coldA      5.974 us     183.7 GB/s   raw=['5.967', '5.974', '5.987']
+  bf16 F.linear   M=64   coldB      5.976 us     183.7 GB/s   raw=['5.973', '5.976', '5.986']
+  bf16 matmul     M=1    warm       2.474 us     293.8 GB/s
+  bf16 matmul     M=1    coldA      5.366 us     135.4 GB/s
+  bf16 matmul     M=1    coldB      5.353 us     135.8 GB/s
+  bf16 matmul     M=8    warm       2.609 us     294.4 GB/s
+  bf16 matmul     M=8    coldA      5.279 us     145.5 GB/s
+  bf16 matmul     M=8    coldB      5.237 us     146.6 GB/s
+  bf16 matmul     M=64   warm       2.916 us     376.5 GB/s
+  bf16 matmul     M=64   coldA      5.226 us     210.0 GB/s
+  bf16 matmul     M=64   coldB      5.245 us     209.3 GB/s
+  exl3-4b        M=1    warm       4.952 us      38.8 GB/s   ratio= 1.581
+  exl3-4b        M=1    coldA      6.215 us      30.9 GB/s   ratio= 1.341
+  exl3-4b        M=1    coldB      6.589 us      29.1 GB/s   ratio= 1.423
+  exl3-4b        M=8    warm       3.542 us      65.8 GB/s   ratio= 1.605
+  exl3-4b        M=8    coldA      4.579 us      50.9 GB/s   ratio= 0.919  <-- trellis wins
+  exl3-4b        M=8    coldB      5.102 us      45.7 GB/s   ratio= 1.023
+  exl3-4b        M=64   warm       4.928 us     114.2 GB/s   ratio= 1.103
+  exl3-4b        M=64   coldA      5.617 us     100.2 GB/s   ratio= 0.940  <-- trellis wins
+  exl3-4b        M=64   coldB      5.946 us      94.7 GB/s   ratio= 0.995  <-- trellis wins
+  exl3-5b        M=1    warm       4.266 us      55.6 GB/s   ratio= 1.362
+  exl3-5b        M=1    coldA      6.031 us      39.3 GB/s   ratio= 1.301
+  exl3-5b        M=1    coldB      6.071 us      39.0 GB/s   ratio= 1.311
+  exl3-5b        M=8    warm       3.610 us      77.1 GB/s   ratio= 1.635
+  exl3-5b        M=8    coldA      5.238 us      53.1 GB/s   ratio= 1.051
+  exl3-5b        M=8    coldB      5.297 us      52.5 GB/s   ratio= 1.062
+  exl3-5b        M=64   warm       5.485 us     110.8 GB/s   ratio= 1.228
+  exl3-5b        M=64   coldA      6.288 us      96.7 GB/s   ratio= 1.053
+  exl3-5b        M=64   coldB      6.307 us      96.4 GB/s   ratio= 1.055
+  exl3-6b        M=1    warm       4.287 us      65.8 GB/s   ratio= 1.368
+  exl3-6b        M=1    coldA      6.225 us      45.3 GB/s   ratio= 1.343
+  exl3-6b        M=1    coldB      6.219 us      45.4 GB/s   ratio= 1.343
+  exl3-6b        M=8    warm       4.130 us      78.3 GB/s   ratio= 1.871
+  exl3-6b        M=8    coldA      5.780 us      55.9 GB/s   ratio= 1.160
+  exl3-6b        M=8    coldB      5.775 us      56.0 GB/s   ratio= 1.158
+  exl3-6b        M=64   warm       5.237 us     124.7 GB/s   ratio= 1.172
+  exl3-6b        M=64   coldA      6.537 us      99.9 GB/s   ratio= 1.094
+  exl3-6b        M=64   coldB      6.547 us      99.8 GB/s   ratio= 1.096
+
+===== g_b_proj  TP3/rank   k=128 n=2816  |  N_bf16=140 N_full=559 G=559  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [identical shape to f_b]
+  bf16 F.linear   M=1    warm       3.098 us     234.6 GB/s   raw=['3.097', '3.098', '3.101']
+  bf16 F.linear   M=1    coldA      4.636 us     156.8 GB/s   raw=['4.655', '4.636', '4.630']
+  bf16 F.linear   M=1    coldB      4.627 us     157.1 GB/s   raw=['4.627', '4.629', '4.627']
+  bf16 F.linear   M=8    warm       2.198 us     349.4 GB/s   raw=['2.269', '2.198', '2.192']
+  bf16 F.linear   M=8    coldA      4.988 us     154.0 GB/s   raw=['4.985', '4.991', '4.988']
+  bf16 F.linear   M=8    coldB      4.984 us     154.1 GB/s   raw=['4.984', '4.981', '4.985']
+  bf16 F.linear   M=64   warm       4.472 us     245.4 GB/s   raw=['4.472', '4.473', '4.466']
+  bf16 F.linear   M=64   coldA      5.978 us     183.6 GB/s   raw=['5.978', '5.977', '5.981']
+  bf16 F.linear   M=64   coldB      5.980 us     183.6 GB/s   raw=['5.973', '5.980', '5.985']
+  bf16 matmul     M=1    warm       2.471 us     294.2 GB/s
+  bf16 matmul     M=1    coldA      5.384 us     135.0 GB/s
+  bf16 matmul     M=1    coldB      5.358 us     135.6 GB/s
+  bf16 matmul     M=8    warm       2.579 us     297.8 GB/s
+  bf16 matmul     M=8    coldA      5.294 us     145.1 GB/s
+  bf16 matmul     M=8    coldB      5.244 us     146.4 GB/s
+  bf16 matmul     M=64   warm       2.955 us     371.5 GB/s
+  bf16 matmul     M=64   coldA      5.216 us     210.5 GB/s
+  bf16 matmul     M=64   coldB      5.238 us     209.6 GB/s
+  exl3-4b        M=1    warm       4.955 us      38.7 GB/s   ratio= 1.600
+  exl3-4b        M=1    coldA      5.909 us      32.5 GB/s   ratio= 1.275
+  exl3-4b        M=1    coldB      6.597 us      29.1 GB/s   ratio= 1.426
+  exl3-4b        M=8    warm       3.544 us      65.8 GB/s   ratio= 1.613
+  exl3-4b        M=8    coldA      4.301 us      54.2 GB/s   ratio= 0.862  <-- trellis wins
+  exl3-4b        M=8    coldB      5.111 us      45.6 GB/s   ratio= 1.025
+  exl3-4b        M=64   warm       4.947 us     113.8 GB/s   ratio= 1.106
+  exl3-4b        M=64   coldA      5.331 us     105.6 GB/s   ratio= 0.892  <-- trellis wins
+  exl3-4b        M=64   coldB      5.967 us      94.4 GB/s   ratio= 0.998  <-- trellis wins
+  exl3-5b        M=1    warm       4.263 us      55.6 GB/s   ratio= 1.376
+  exl3-5b        M=1    coldA      5.932 us      40.0 GB/s   ratio= 1.280
+  exl3-5b        M=1    coldB      6.069 us      39.1 GB/s   ratio= 1.312
+  exl3-5b        M=8    warm       3.631 us      76.6 GB/s   ratio= 1.652
+  exl3-5b        M=8    coldA      5.139 us      54.1 GB/s   ratio= 1.030
+  exl3-5b        M=8    coldB      5.312 us      52.4 GB/s   ratio= 1.066
+  exl3-5b        M=64   warm       5.478 us     111.0 GB/s   ratio= 1.225
+  exl3-5b        M=64   coldA      6.236 us      97.5 GB/s   ratio= 1.043
+  exl3-5b        M=64   coldB      6.306 us      96.4 GB/s   ratio= 1.054
+  exl3-6b        M=1    warm       4.290 us      65.8 GB/s   ratio= 1.385
+  exl3-6b        M=1    coldA      6.216 us      45.4 GB/s   ratio= 1.341
+  exl3-6b        M=1    coldB      6.218 us      45.4 GB/s   ratio= 1.344
+  exl3-6b        M=8    warm       4.171 us      77.5 GB/s   ratio= 1.898
+  exl3-6b        M=8    coldA      5.793 us      55.8 GB/s   ratio= 1.161
+  exl3-6b        M=8    coldB      5.797 us      55.8 GB/s   ratio= 1.163
+  exl3-6b        M=64   warm       5.249 us     124.4 GB/s   ratio= 1.174
+  exl3-6b        M=64   coldA      6.560 us      99.5 GB/s   ratio= 1.097
+  exl3-6b        M=64   coldB      6.544 us      99.8 GB/s   ratio= 1.094
+
+===== f_b_proj  unsharded   k=128 n=8192  |  N_bf16=48 N_full=192 G=200  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [doc shape, replicated ref]
+  bf16 F.linear   M=1    warm       6.120 us     345.4 GB/s   raw=['6.120', '6.124', '6.111']
+  bf16 F.linear   M=1    coldA      9.553 us     221.3 GB/s   raw=['9.990', '9.553', '9.529']
+  bf16 F.linear   M=1    coldB      9.513 us     222.2 GB/s   raw=['9.561', '9.504', '9.513']
+  bf16 F.linear   M=8    warm       3.335 us     668.8 GB/s   raw=['3.335', '3.320', '3.340']
+  bf16 F.linear   M=8    coldA      9.971 us     223.7 GB/s   raw=['9.971', '9.980', '9.958']
+  bf16 F.linear   M=8    coldB      9.936 us     224.5 GB/s   raw=['9.937', '9.916', '9.936']
+  bf16 F.linear   M=64   warm       6.405 us     493.7 GB/s   raw=['6.412', '6.404', '6.405']
+  bf16 F.linear   M=64   coldA     10.347 us     305.6 GB/s   raw=['10.347', '10.319', '10.361']
+  bf16 F.linear   M=64   coldB     10.335 us     306.0 GB/s   raw=['10.335', '10.290', '10.361']
+  bf16 matmul     M=1    warm       3.329 us     634.9 GB/s
+  bf16 matmul     M=1    coldA     11.906 us     177.5 GB/s
+  bf16 matmul     M=1    coldB     11.883 us     177.9 GB/s
+  bf16 matmul     M=8    warm       4.698 us     474.7 GB/s
+  bf16 matmul     M=8    coldA     10.939 us     203.9 GB/s
+  bf16 matmul     M=8    coldB     11.055 us     201.7 GB/s
+  bf16 matmul     M=64   warm       7.908 us     399.9 GB/s
+  bf16 matmul     M=64   coldA     11.432 us     276.6 GB/s
+  bf16 matmul     M=64   coldB     11.313 us     279.5 GB/s
+  exl3-4b        M=1    warm       4.316 us     129.2 GB/s   ratio= 0.705  <-- trellis wins
+  exl3-4b        M=1    coldA      5.234 us     106.5 GB/s   ratio= 0.548  <-- trellis wins
+  exl3-4b        M=1    coldB      6.133 us      90.9 GB/s   ratio= 0.645  <-- trellis wins
+  exl3-4b        M=8    warm       4.932 us     136.7 GB/s   ratio= 1.479
+  exl3-4b        M=8    coldA      5.588 us     120.6 GB/s   ratio= 0.560  <-- trellis wins
+  exl3-4b        M=8    coldB      6.387 us     105.5 GB/s   ratio= 0.643  <-- trellis wins
+  exl3-4b        M=64   warm       8.294 us     193.6 GB/s   ratio= 1.295
+  exl3-4b        M=64   coldA      9.289 us     172.9 GB/s   ratio= 0.898  <-- trellis wins
+  exl3-4b        M=64   coldB      9.831 us     163.4 GB/s   ratio= 0.951  <-- trellis wins
+  exl3-5b        M=1    warm       4.569 us     150.7 GB/s   ratio= 0.747  <-- trellis wins
+  exl3-5b        M=1    coldA      7.888 us      87.3 GB/s   ratio= 0.826  <-- trellis wins
+  exl3-5b        M=1    coldB      6.790 us     101.4 GB/s   ratio= 0.714  <-- trellis wins
+  exl3-5b        M=8    warm       4.834 us     166.6 GB/s   ratio= 1.449
+  exl3-5b        M=8    coldA      6.438 us     125.1 GB/s   ratio= 0.646  <-- trellis wins
+  exl3-5b        M=8    coldB      7.042 us     114.3 GB/s   ratio= 0.709  <-- trellis wins
+  exl3-5b        M=64   warm       8.865 us     195.9 GB/s   ratio= 1.384
+  exl3-5b        M=64   coldA     10.342 us     168.0 GB/s   ratio= 1.000  <-- trellis wins
+  exl3-5b        M=64   coldB     10.699 us     162.4 GB/s   ratio= 1.035
+  exl3-6b        M=1    warm       4.578 us     179.1 GB/s   ratio= 0.748  <-- trellis wins
+  exl3-6b        M=1    coldA      7.304 us     112.2 GB/s   ratio= 0.765  <-- trellis wins
+  exl3-6b        M=1    coldB      7.333 us     111.8 GB/s   ratio= 0.771  <-- trellis wins
+  exl3-6b        M=8    warm       4.917 us     190.4 GB/s   ratio= 1.474
+  exl3-6b        M=8    coldA      7.522 us     124.5 GB/s   ratio= 0.754  <-- trellis wins
+  exl3-6b        M=8    coldB      7.504 us     124.8 GB/s   ratio= 0.755  <-- trellis wins
+  exl3-6b        M=64   warm       8.967 us     208.3 GB/s   ratio= 1.400
+  exl3-6b        M=64   coldA     11.184 us     167.0 GB/s   ratio= 1.081
+  exl3-6b        M=64   coldB     11.191 us     166.9 GB/s   ratio= 1.083
+
+===== f_a_proj  replicated   k=4096 n=128  |  N_bf16=96 N_full=384 G=384  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [in_proj half, 128 wide]
+  bf16 F.linear   M=1    warm       3.115 us     339.3 GB/s   raw=['3.351', '3.115', '3.058']
+  bf16 F.linear   M=1    coldA      5.917 us     178.6 GB/s   raw=['5.916', '5.917', '5.921']
+  bf16 F.linear   M=1    coldB      5.939 us     178.0 GB/s   raw=['5.963', '5.939', '5.932']
+  bf16 F.linear   M=8    warm       4.583 us     243.6 GB/s   raw=['4.588', '4.583', '4.581']
+  bf16 F.linear   M=8    coldA      8.513 us     131.1 GB/s   raw=['8.492', '8.546', '8.513']
+  bf16 F.linear   M=8    coldB      8.490 us     131.5 GB/s   raw=['8.484', '8.490', '8.532']
+  bf16 F.linear   M=64   warm       6.368 us     249.6 GB/s   raw=['6.368', '6.360', '6.371']
+  bf16 F.linear   M=64   coldA      7.931 us     200.4 GB/s   raw=['8.018', '7.924', '7.931']
+  bf16 F.linear   M=64   coldB      7.883 us     201.6 GB/s   raw=['7.876', '7.884', '7.883']
+  bf16 matmul     M=1    warm       4.451 us     237.5 GB/s
+  bf16 matmul     M=1    coldA      7.124 us     148.4 GB/s
+  bf16 matmul     M=1    coldB      7.007 us     150.9 GB/s
+  bf16 matmul     M=8    warm       4.495 us     248.3 GB/s
+  bf16 matmul     M=8    coldA      8.779 us     127.1 GB/s
+  bf16 matmul     M=8    coldB      8.612 us     129.6 GB/s
+  bf16 matmul     M=64   warm       6.335 us     250.9 GB/s
+  bf16 matmul     M=64   coldA      8.107 us     196.0 GB/s
+  bf16 matmul     M=64   coldB      8.341 us     190.5 GB/s
+  exl3-4b        M=1    warm       5.559 us      50.2 GB/s   ratio= 1.784
+  exl3-4b        M=1    coldA      6.546 us      42.6 GB/s   ratio= 1.106
+  exl3-4b        M=1    coldB      7.076 us      39.4 GB/s   ratio= 1.192
+  exl3-4b        M=8    warm       5.821 us      58.1 GB/s   ratio= 1.270
+  exl3-4b        M=8    coldA      6.816 us      49.6 GB/s   ratio= 0.801  <-- trellis wins
+  exl3-4b        M=8    coldB      7.246 us      46.7 GB/s   ratio= 0.853  <-- trellis wins
+  exl3-4b        M=64   warm       9.180 us      88.4 GB/s   ratio= 1.442
+  exl3-4b        M=64   coldA     12.346 us      65.7 GB/s   ratio= 1.557
+  exl3-4b        M=64   coldB     12.815 us      63.3 GB/s   ratio= 1.626
+  exl3-5b        M=1    warm       6.972 us      49.4 GB/s   ratio= 2.238
+  exl3-5b        M=1    coldA      9.356 us      36.8 GB/s   ratio= 1.581
+  exl3-5b        M=1    coldB      9.581 us      36.0 GB/s   ratio= 1.613
+  exl3-5b        M=8    warm       7.134 us      56.6 GB/s   ratio= 1.557
+  exl3-5b        M=8    coldA      8.746 us      46.2 GB/s   ratio= 1.027
+  exl3-5b        M=8    coldB      9.261 us      43.6 GB/s   ratio= 1.091
+  exl3-5b        M=64   warm       8.820 us      99.4 GB/s   ratio= 1.385
+  exl3-5b        M=64   coldA     11.422 us      76.8 GB/s   ratio= 1.440
+  exl3-5b        M=64   coldB     12.057 us      72.7 GB/s   ratio= 1.530
+  exl3-6b        M=1    warm       5.330 us      76.9 GB/s   ratio= 1.711
+  exl3-6b        M=1    coldA      7.911 us      51.8 GB/s   ratio= 1.337
+  exl3-6b        M=1    coldB      7.884 us      52.0 GB/s   ratio= 1.328
+  exl3-6b        M=8    warm       6.203 us      75.6 GB/s   ratio= 1.354
+  exl3-6b        M=8    coldA      7.977 us      58.8 GB/s   ratio= 0.937  <-- trellis wins
+  exl3-6b        M=8    coldB      7.951 us      59.0 GB/s   ratio= 0.937  <-- trellis wins
+  exl3-6b        M=64   warm       8.788 us     107.2 GB/s   ratio= 1.380
+  exl3-6b        M=64   coldA     11.426 us      82.5 GB/s   ratio= 1.441
+  exl3-6b        M=64   coldB     11.406 us      82.6 GB/s   ratio= 1.447
+
+===== g_a_proj  replicated   k=4096 n=128  |  N_bf16=96 N_full=384 G=384  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [identical to f_a]
+  bf16 F.linear   M=1    warm       3.165 us     334.0 GB/s   raw=['3.166', '3.165', '3.164']
+  bf16 F.linear   M=1    coldA      5.950 us     177.6 GB/s   raw=['5.972', '5.950', '5.943']
+  bf16 F.linear   M=1    coldB      5.941 us     177.9 GB/s   raw=['5.942', '5.941', '5.936']
+  bf16 F.linear   M=8    warm       5.036 us     221.6 GB/s   raw=['4.610', '5.183', '5.036']
+  bf16 F.linear   M=8    coldA      8.476 us     131.7 GB/s   raw=['8.483', '8.476', '8.470']
+  bf16 F.linear   M=8    coldB      8.472 us     131.8 GB/s   raw=['8.494', '8.472', '8.466']
+  bf16 F.linear   M=64   warm       6.416 us     247.7 GB/s   raw=['6.406', '6.419', '6.416']
+  bf16 F.linear   M=64   coldA      7.987 us     199.0 GB/s   raw=['7.995', '7.986', '7.987']
+  bf16 F.linear   M=64   coldB      7.893 us     201.4 GB/s   raw=['7.893', '7.889', '7.902']
+  bf16 matmul     M=1    warm       4.438 us     238.2 GB/s
+  bf16 matmul     M=1    coldA      7.141 us     148.0 GB/s
+  bf16 matmul     M=1    coldB      7.042 us     150.1 GB/s
+  bf16 matmul     M=8    warm       4.581 us     243.6 GB/s
+  bf16 matmul     M=8    coldA      8.842 us     126.2 GB/s
+  bf16 matmul     M=8    coldB      8.608 us     129.7 GB/s
+  bf16 matmul     M=64   warm       6.334 us     250.9 GB/s
+  bf16 matmul     M=64   coldA      8.121 us     195.7 GB/s
+  bf16 matmul     M=64   coldB      8.561 us     185.6 GB/s
+  exl3-4b        M=1    warm       5.562 us      50.2 GB/s   ratio= 1.757
+  exl3-4b        M=1    coldA      6.667 us      41.9 GB/s   ratio= 1.120
+  exl3-4b        M=1    coldB      7.084 us      39.4 GB/s   ratio= 1.193
+  exl3-4b        M=8    warm       5.817 us      58.1 GB/s   ratio= 1.155
+  exl3-4b        M=8    coldA      6.877 us      49.2 GB/s   ratio= 0.811  <-- trellis wins
+  exl3-4b        M=8    coldB      7.230 us      46.8 GB/s   ratio= 0.853  <-- trellis wins
+  exl3-4b        M=64   warm       9.230 us      87.9 GB/s   ratio= 1.439
+  exl3-4b        M=64   coldA     13.136 us      61.8 GB/s   ratio= 1.645
+  exl3-4b        M=64   coldB     12.478 us      65.0 GB/s   ratio= 1.581
+  exl3-5b        M=1    warm       6.981 us      49.4 GB/s   ratio= 2.205
+  exl3-5b        M=1    coldA      8.552 us      40.3 GB/s   ratio= 1.437
+  exl3-5b        M=1    coldB      8.702 us      39.6 GB/s   ratio= 1.465
+  exl3-5b        M=8    warm       7.146 us      56.5 GB/s   ratio= 1.419
+  exl3-5b        M=8    coldA      8.723 us      46.3 GB/s   ratio= 1.029
+  exl3-5b        M=8    coldB      9.217 us      43.8 GB/s   ratio= 1.088
+  exl3-5b        M=64   warm       9.147 us      95.9 GB/s   ratio= 1.426
+  exl3-5b        M=64   coldA     12.415 us      70.6 GB/s   ratio= 1.554
+  exl3-5b        M=64   coldB     11.491 us      76.3 GB/s   ratio= 1.456
+  exl3-6b        M=1    warm       5.324 us      77.0 GB/s   ratio= 1.682
+  exl3-6b        M=1    coldA      7.922 us      51.8 GB/s   ratio= 1.331
+  exl3-6b        M=1    coldB      7.874 us      52.1 GB/s   ratio= 1.326
+  exl3-6b        M=8    warm       6.208 us      75.6 GB/s   ratio= 1.233
+  exl3-6b        M=8    coldA      7.979 us      58.8 GB/s   ratio= 0.941  <-- trellis wins
+  exl3-6b        M=8    coldB      7.952 us      59.0 GB/s   ratio= 0.939  <-- trellis wins
+  exl3-6b        M=64   warm       8.859 us     106.4 GB/s   ratio= 1.381
+  exl3-6b        M=64   coldA     12.518 us      75.3 GB/s   ratio= 1.567
+  exl3-6b        M=64   coldB     11.483 us      82.1 GB/s   ratio= 1.455
+
+===== in_proj_fg_a (fa+ga)   k=4096 n=256  |  N_bf16=48 N_full=192 G=200  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [EXL3 arm of the split]
+  bf16 F.linear   M=1    warm       4.235 us     497.2 GB/s   raw=['4.458', '4.235', '4.002']
+  bf16 F.linear   M=1    coldA      9.741 us     216.2 GB/s   raw=['9.767', '9.741', '9.734']
+  bf16 F.linear   M=1    coldB      9.720 us     216.6 GB/s   raw=['9.771', '9.720', '9.717']
+  bf16 F.linear   M=8    warm       5.273 us     410.9 GB/s   raw=['5.281', '5.272', '5.273']
+  bf16 F.linear   M=8    coldA     12.079 us     179.4 GB/s   raw=['12.081', '12.078', '12.079']
+  bf16 F.linear   M=8    coldB     12.248 us     176.9 GB/s   raw=['12.248', '12.255', '12.248']
+  bf16 F.linear   M=64   warm       6.605 us     401.9 GB/s   raw=['6.594', '6.605', '6.607']
+  bf16 F.linear   M=64   coldA     11.959 us     221.9 GB/s   raw=['11.959', '13.133', '11.500']
+  bf16 F.linear   M=64   coldB     11.498 us     230.8 GB/s   raw=['11.506', '11.471', '11.498']
+  bf16 matmul     M=1    warm       7.064 us     298.1 GB/s
+  bf16 matmul     M=1    coldA     11.122 us     189.3 GB/s
+  bf16 matmul     M=1    coldB     10.868 us     193.8 GB/s
+  bf16 matmul     M=8    warm       5.440 us     398.3 GB/s
+  bf16 matmul     M=8    coldA     13.871 us     156.2 GB/s
+  bf16 matmul     M=8    coldB     14.539 us     149.0 GB/s
+  bf16 matmul     M=64   warm       6.771 us     392.0 GB/s
+  bf16 matmul     M=64   coldA     11.527 us     230.3 GB/s
+  bf16 matmul     M=64   coldB     11.657 us     227.7 GB/s
+  exl3-4b        M=1    warm       5.748 us      94.2 GB/s   ratio= 1.357
+  exl3-4b        M=1    coldA      8.057 us      67.2 GB/s   ratio= 0.827  <-- trellis wins
+  exl3-4b        M=1    coldB      7.876 us      68.8 GB/s   ratio= 0.810  <-- trellis wins
+  exl3-4b        M=8    warm       6.007 us     100.3 GB/s   ratio= 1.139
+  exl3-4b        M=8    coldA      6.641 us      90.7 GB/s   ratio= 0.550  <-- trellis wins
+  exl3-4b        M=8    coldB      8.021 us      75.1 GB/s   ratio= 0.655  <-- trellis wins
+  exl3-4b        M=64   warm      10.449 us     104.3 GB/s   ratio= 1.582
+  exl3-4b        M=64   coldA     11.580 us      94.1 GB/s   ratio= 0.968  <-- trellis wins
+  exl3-4b        M=64   coldB     11.806 us      92.3 GB/s   ratio= 1.027
+  exl3-5b        M=1    warm       6.945 us      96.9 GB/s   ratio= 1.640
+  exl3-5b        M=1    coldA      9.992 us      67.3 GB/s   ratio= 1.026
+  exl3-5b        M=1    coldB     10.263 us      65.6 GB/s   ratio= 1.056
+  exl3-5b        M=8    warm       6.410 us     114.5 GB/s   ratio= 1.215
+  exl3-5b        M=8    coldA      8.438 us      87.0 GB/s   ratio= 0.699  <-- trellis wins
+  exl3-5b        M=8    coldB      8.727 us      84.1 GB/s   ratio= 0.712  <-- trellis wins
+  exl3-5b        M=64   warm      12.086 us     101.0 GB/s   ratio= 1.830
+  exl3-5b        M=64   coldA     13.511 us      90.4 GB/s   ratio= 1.130
+  exl3-5b        M=64   coldB     13.531 us      90.2 GB/s   ratio= 1.177
+  exl3-6b        M=1    warm       6.107 us     131.6 GB/s   ratio= 1.442
+  exl3-6b        M=1    coldA      8.969 us      89.6 GB/s   ratio= 0.921  <-- trellis wins
+  exl3-6b        M=1    coldB      9.013 us      89.2 GB/s   ratio= 0.927  <-- trellis wins
+  exl3-6b        M=8    warm       6.404 us     135.0 GB/s   ratio= 1.214
+  exl3-6b        M=8    coldA      9.144 us      94.6 GB/s   ratio= 0.757  <-- trellis wins
+  exl3-6b        M=8    coldB      9.178 us      94.2 GB/s   ratio= 0.749  <-- trellis wins
+  exl3-6b        M=64   warm      10.288 us     131.4 GB/s   ratio= 1.558
+  exl3-6b        M=64   coldA     11.802 us     114.6 GB/s   ratio= 0.987  <-- trellis wins
+  exl3-6b        M=64   coldB     12.667 us     106.7 GB/s   ratio= 1.102
+
+===== in_proj_bfg_a TODAY   k=4096 n=278  |  N_bf16=45 N_full=177 G=200  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [256 fg_a + 22 b_proj, bf16]
+  bf16 F.linear   M=1    warm       4.351 us     525.4 GB/s   raw=['4.353', '4.351', '4.351']
+  bf16 F.linear   M=1    coldA     10.612 us     215.4 GB/s   raw=['10.628', '10.612', '10.607']
+  bf16 F.linear   M=1    coldB     10.627 us     215.1 GB/s   raw=['10.657', '10.627', '10.614']
+  bf16 F.linear   M=8    warm       6.520 us     360.0 GB/s   raw=['6.520', '6.504', '6.521']
+  bf16 F.linear   M=8    coldA     13.634 us     172.2 GB/s   raw=['13.634', '13.551', '15.993']
+  bf16 F.linear   M=8    coldB     15.512 us     151.3 GB/s   raw=['16.279', '15.512', '14.285']
+  bf16 F.linear   M=64   warm      10.343 us     274.3 GB/s   raw=['10.336', '10.353', '10.343']
+  bf16 F.linear   M=64   coldA     14.286 us     198.6 GB/s   raw=['14.286', '14.243', '14.289']
+  bf16 F.linear   M=64   coldB     15.016 us     188.9 GB/s   raw=['14.990', '15.048', '15.016']
+  bf16 matmul     M=1    warm       5.998 us     381.2 GB/s
+  bf16 matmul     M=1    coldA     14.327 us     159.6 GB/s
+  bf16 matmul     M=1    coldB     13.584 us     168.3 GB/s
+  bf16 matmul     M=8    warm       8.174 us     287.2 GB/s
+  bf16 matmul     M=8    coldA     16.619 us     141.2 GB/s
+  bf16 matmul     M=8    coldB     16.511 us     142.2 GB/s
+  bf16 matmul     M=64   warm       9.476 us     299.4 GB/s
+  bf16 matmul     M=64   coldA     16.143 us     175.8 GB/s
+  bf16 matmul     M=64   coldB     16.273 us     174.4 GB/s
+  exl3            n=278 not a multiple of 16 -> no trellis, bf16 only
+
+===== in_proj_b  TP3/rank   k=4096 n=22  |  N_bf16=559 N_full=2235 G=2235  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [64->66 pad /3 = 22, not 128-aligned]
+  bf16 F.linear   M=1    warm       2.575 us      73.2 GB/s   raw=['2.576', '2.575', '2.575']
+  bf16 F.linear   M=1    coldA      3.608 us      52.2 GB/s   raw=['3.609', '3.605', '3.608']
+  bf16 F.linear   M=1    coldB      3.596 us      52.4 GB/s   raw=['3.595', '3.601', '3.596']
+  bf16 F.linear   M=8    warm       4.059 us      60.6 GB/s   raw=['4.059', '4.059', '4.057']
+  bf16 F.linear   M=8    coldA      5.634 us      43.7 GB/s   raw=['5.635', '5.634', '5.630']
+  bf16 F.linear   M=8    coldB      5.630 us      43.7 GB/s   raw=['5.630', '5.625', '5.739']
+  bf16 F.linear   M=64   warm       4.644 us     152.3 GB/s   raw=['4.649', '4.481', '4.644']
+  bf16 F.linear   M=64   coldA      6.220 us     113.7 GB/s   raw=['6.225', '6.220', '5.829']
+  bf16 F.linear   M=64   coldB      6.198 us     114.1 GB/s   raw=['6.198', '5.816', '6.220']
+  bf16 matmul     M=1    warm       3.967 us      47.5 GB/s
+  bf16 matmul     M=1    coldA      5.413 us      34.8 GB/s
+  bf16 matmul     M=1    coldB      5.403 us      34.9 GB/s
+  bf16 matmul     M=8    warm      37.502 us       6.6 GB/s
+  bf16 matmul     M=8    coldA     37.759 us       6.5 GB/s
+  bf16 matmul     M=8    coldB     37.764 us       6.5 GB/s
+  bf16 matmul     M=64   warm       5.545 us     127.6 GB/s
+  bf16 matmul     M=64   coldA      7.182 us      98.5 GB/s
+  bf16 matmul     M=64   coldB      7.181 us      98.5 GB/s
+  exl3            n=22 not a multiple of 16 -> no trellis, bf16 only
+
+===== b_proj replicated   k=4096 n=128  |  N_bf16=96 N_full=384 G=384  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [64 -> 128 pad if replicated]
+  bf16 F.linear   M=1    warm       3.802 us     278.0 GB/s   raw=['3.802', '4.439', '3.776']
+  bf16 F.linear   M=1    coldA      5.935 us     178.1 GB/s   raw=['5.936', '5.935', '5.935']
+  bf16 F.linear   M=1    coldB      6.150 us     171.9 GB/s   raw=['5.961', '6.150', '7.139']
+  bf16 F.linear   M=8    warm       4.618 us     241.7 GB/s   raw=['4.619', '4.618', '4.611']
+  bf16 F.linear   M=8    coldA      8.485 us     131.5 GB/s   raw=['8.492', '8.485', '8.485']
+  bf16 F.linear   M=8    coldB      8.471 us     131.8 GB/s   raw=['8.473', '8.454', '8.471']
+  bf16 F.linear   M=64   warm       6.276 us     253.2 GB/s   raw=['6.276', '6.273', '6.292']
+  bf16 F.linear   M=64   coldA      8.362 us     190.0 GB/s   raw=['7.916', '8.362', '9.423']
+  bf16 F.linear   M=64   coldB      7.866 us     202.0 GB/s   raw=['7.868', '7.866', '7.859']
+  bf16 matmul     M=1    warm       4.497 us     235.0 GB/s
+  bf16 matmul     M=1    coldA      7.144 us     148.0 GB/s
+  bf16 matmul     M=1    coldB      7.009 us     150.8 GB/s
+  bf16 matmul     M=8    warm       4.472 us     249.6 GB/s
+  bf16 matmul     M=8    coldA      8.768 us     127.3 GB/s
+  bf16 matmul     M=8    coldB      8.614 us     129.6 GB/s
+  bf16 matmul     M=64   warm       6.463 us     245.9 GB/s
+  bf16 matmul     M=64   coldA      8.178 us     194.3 GB/s
+  bf16 matmul     M=64   coldB      8.387 us     189.5 GB/s
+  exl3-4b        M=1    warm       5.577 us      50.0 GB/s   ratio= 1.467
+  exl3-4b        M=1    coldA      6.854 us      40.7 GB/s   ratio= 1.155
+  exl3-4b        M=1    coldB      7.104 us      39.3 GB/s   ratio= 1.155
+  exl3-4b        M=8    warm       5.864 us      57.7 GB/s   ratio= 1.270
+  exl3-4b        M=8    coldA      6.741 us      50.2 GB/s   ratio= 0.794  <-- trellis wins
+  exl3-4b        M=8    coldB      7.263 us      46.6 GB/s   ratio= 0.857  <-- trellis wins
+  exl3-4b        M=64   warm       9.168 us      88.5 GB/s   ratio= 1.461
+  exl3-4b        M=64   coldA     12.083 us      67.1 GB/s   ratio= 1.445
+  exl3-4b        M=64   coldB     13.493 us      60.1 GB/s   ratio= 1.715
+  exl3-5b        M=1    warm       7.257 us      47.5 GB/s   ratio= 1.909
+  exl3-5b        M=1    coldA      8.387 us      41.1 GB/s   ratio= 1.413
+  exl3-5b        M=1    coldB      8.694 us      39.6 GB/s   ratio= 1.414
+  exl3-5b        M=8    warm       7.156 us      56.4 GB/s   ratio= 1.550
+  exl3-5b        M=8    coldA      8.564 us      47.1 GB/s   ratio= 1.009
+  exl3-5b        M=8    coldB      8.867 us      45.5 GB/s   ratio= 1.047
+  exl3-5b        M=64   warm       8.863 us      98.9 GB/s   ratio= 1.412
+  exl3-5b        M=64   coldA     11.342 us      77.3 GB/s   ratio= 1.356
+  exl3-5b        M=64   coldB     11.491 us      76.3 GB/s   ratio= 1.461
+  exl3-6b        M=1    warm       5.345 us      76.7 GB/s   ratio= 1.406
+  exl3-6b        M=1    coldA      7.861 us      52.2 GB/s   ratio= 1.324
+  exl3-6b        M=1    coldB      7.917 us      51.8 GB/s   ratio= 1.287
+  exl3-6b        M=8    warm       6.219 us      75.5 GB/s   ratio= 1.347
+  exl3-6b        M=8    coldA      7.937 us      59.1 GB/s   ratio= 0.935  <-- trellis wins
+  exl3-6b        M=8    coldB      8.050 us      58.3 GB/s   ratio= 0.950  <-- trellis wins
+  exl3-6b        M=64   warm       8.937 us     105.4 GB/s   ratio= 1.424
+  exl3-6b        M=64   coldA     11.739 us      80.3 GB/s   ratio= 1.404
+  exl3-6b        M=64   coldB     11.433 us      82.4 GB/s   ratio= 1.453
+
+===== kv_b_proj replicated   k=512 n=32768  |  N_bf16=3 N_full=12 G=200  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [kernel would be needed (per-head batched)]
+  bf16 F.linear   M=1    warm     131.655 us     255.4 GB/s   raw=['131.655', '130.260', '132.244']
+  bf16 F.linear   M=1    coldA    131.230 us     256.2 GB/s   raw=['134.666', '131.217', '131.230']
+  bf16 F.linear   M=1    coldB    132.004 us     254.7 GB/s   raw=['131.893', '132.011', '132.004']
+  bf16 F.linear   M=8    warm     136.610 us     249.5 GB/s   raw=['136.934', '136.610', '135.174']
+  bf16 F.linear   M=8    coldA    136.403 us     249.9 GB/s   raw=['136.913', '136.403', '136.309']
+  bf16 F.linear   M=8    coldB    139.326 us     244.7 GB/s   raw=['139.886', '139.326', '139.181']
+  bf16 F.linear   M=64   warm     156.488 us     241.6 GB/s   raw=['156.488', '160.547', '153.721']
+  bf16 F.linear   M=64   coldA    155.045 us     243.9 GB/s   raw=['155.045', '153.010', '157.615']
+  bf16 F.linear   M=64   coldB    154.092 us     245.4 GB/s   raw=['154.092', '157.763', '152.725']
+  bf16 matmul     M=1    warm     138.392 us     242.9 GB/s
+  bf16 matmul     M=1    coldA    139.024 us     241.8 GB/s
+  bf16 matmul     M=1    coldB    137.722 us     244.1 GB/s
+  bf16 matmul     M=8    warm     293.149 us     116.3 GB/s
+  bf16 matmul     M=8    coldA    281.018 us     121.3 GB/s
+  bf16 matmul     M=8    coldB    270.541 us     126.0 GB/s
+  bf16 matmul     M=64   warm     158.461 us     238.6 GB/s
+  bf16 matmul     M=64   coldA    158.384 us     238.8 GB/s
+  bf16 matmul     M=64   coldB    157.771 us     239.7 GB/s
+  exl3-4b        M=1    warm      16.883 us     504.8 GB/s   ratio= 0.128  <-- trellis wins
+  exl3-4b        M=1    coldA     29.508 us     288.8 GB/s   ratio= 0.225  <-- trellis wins
+  exl3-4b        M=1    coldB     40.584 us     210.0 GB/s   ratio= 0.307  <-- trellis wins
+  exl3-4b        M=8    warm      17.644 us     509.4 GB/s   ratio= 0.129  <-- trellis wins
+  exl3-4b        M=8    coldA     28.977 us     310.2 GB/s   ratio= 0.212  <-- trellis wins
+  exl3-4b        M=8    coldB     40.564 us     221.6 GB/s   ratio= 0.291  <-- trellis wins
+  exl3-4b        M=64   warm      42.355 us     300.2 GB/s   ratio= 0.271  <-- trellis wins
+  exl3-4b        M=64   coldA     51.524 us     246.8 GB/s   ratio= 0.332  <-- trellis wins
+  exl3-4b        M=64   coldB     59.846 us     212.5 GB/s   ratio= 0.388  <-- trellis wins
+  exl3-5b        M=1    warm      19.856 us     534.8 GB/s   ratio= 0.151  <-- trellis wins
+  exl3-5b        M=1    coldA     42.156 us     251.9 GB/s   ratio= 0.321  <-- trellis wins
+  exl3-5b        M=1    coldB     44.752 us     237.3 GB/s   ratio= 0.339  <-- trellis wins
+  exl3-5b        M=8    warm      20.706 us     535.3 GB/s   ratio= 0.152  <-- trellis wins
+  exl3-5b        M=8    coldA     42.249 us     262.4 GB/s   ratio= 0.310  <-- trellis wins
+  exl3-5b        M=8    coldB     45.078 us     245.9 GB/s   ratio= 0.324  <-- trellis wins
+  exl3-5b        M=64   warm      44.098 us     335.9 GB/s   ratio= 0.282  <-- trellis wins
+  exl3-5b        M=64   coldA     54.169 us     273.4 GB/s   ratio= 0.349  <-- trellis wins
+  exl3-5b        M=64   coldB     58.023 us     255.3 GB/s   ratio= 0.377  <-- trellis wins
+  exl3-6b        M=1    warm      20.168 us     630.5 GB/s   ratio= 0.153  <-- trellis wins
+  exl3-6b        M=1    coldA     54.055 us     235.2 GB/s   ratio= 0.412  <-- trellis wins
+  exl3-6b        M=1    coldB     52.672 us     241.4 GB/s   ratio= 0.399  <-- trellis wins
+  exl3-6b        M=8    warm      20.928 us     629.9 GB/s   ratio= 0.153  <-- trellis wins
+  exl3-6b        M=8    coldA     55.204 us     238.8 GB/s   ratio= 0.405  <-- trellis wins
+  exl3-6b        M=8    coldB     53.464 us     246.6 GB/s   ratio= 0.384  <-- trellis wins
+  exl3-6b        M=64   warm      44.797 us     377.5 GB/s   ratio= 0.286  <-- trellis wins
+  exl3-6b        M=64   coldA     63.167 us     267.7 GB/s   ratio= 0.407  <-- trellis wins
+  exl3-6b        M=64   coldB     64.669 us     261.5 GB/s   ratio= 0.420  <-- trellis wins
+
+===== kv_b_proj TP3 22head   k=512 n=11264  |  N_bf16=9 N_full=35 G=200  |  bf16 bank 385 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [kernel would be needed (per-head batched)]
+  bf16 F.linear   M=1    warm      11.334 us    1019.8 GB/s   raw=['12.263', '11.334', '11.323']
+  bf16 F.linear   M=1    coldA     48.447 us     238.6 GB/s   raw=['49.851', '48.447', '46.591']
+  bf16 F.linear   M=1    coldB     48.737 us     237.1 GB/s   raw=['49.241', '48.737', '46.876']
+  bf16 F.linear   M=8    warm      12.241 us     957.7 GB/s   raw=['12.262', '12.235', '12.241']
+  bf16 F.linear   M=8    coldA     48.372 us     242.3 GB/s   raw=['48.648', '48.372', '46.492']
+  bf16 F.linear   M=8    coldB     47.442 us     247.1 GB/s   raw=['47.442', '50.055', '47.414']
+  bf16 F.linear   M=64   warm      27.182 us     479.8 GB/s   raw=['27.163', '27.182', '28.096']
+  bf16 F.linear   M=64   coldA     50.774 us     256.9 GB/s   raw=['50.774', '51.186', '48.757']
+  bf16 F.linear   M=64   coldB     49.333 us     264.4 GB/s   raw=['50.196', '49.333', '47.518']
+  bf16 matmul     M=1    warm      15.136 us     763.6 GB/s
+  bf16 matmul     M=1    coldA     78.014 us     148.2 GB/s
+  bf16 matmul     M=1    coldB     75.695 us     152.7 GB/s
+  bf16 matmul     M=8    warm      17.715 us     661.7 GB/s
+  bf16 matmul     M=8    coldA     49.210 us     238.2 GB/s
+  bf16 matmul     M=8    coldB     49.299 us     237.8 GB/s
+  bf16 matmul     M=64   warm      17.803 us     732.5 GB/s
+  bf16 matmul     M=64   coldA     51.987 us     250.9 GB/s
+  bf16 matmul     M=64   coldB     49.796 us     261.9 GB/s
+  exl3-4b        M=1    warm       8.664 us     338.3 GB/s   ratio= 0.764  <-- trellis wins
+  exl3-4b        M=1    coldA     11.947 us     245.3 GB/s   ratio= 0.247  <-- trellis wins
+  exl3-4b        M=1    coldB     16.389 us     178.8 GB/s   ratio= 0.336  <-- trellis wins
+  exl3-4b        M=8    warm       8.345 us     371.0 GB/s   ratio= 0.682  <-- trellis wins
+  exl3-4b        M=8    coldA     12.082 us     256.2 GB/s   ratio= 0.250  <-- trellis wins
+  exl3-4b        M=8    coldB     16.579 us     186.7 GB/s   ratio= 0.349  <-- trellis wins
+  exl3-4b        M=64   warm      16.492 us     267.7 GB/s   ratio= 0.607  <-- trellis wins
+  exl3-4b        M=64   coldA     18.156 us     243.1 GB/s   ratio= 0.358  <-- trellis wins
+  exl3-4b        M=64   coldB     20.968 us     210.5 GB/s   ratio= 0.425  <-- trellis wins
+  exl3-5b        M=1    warm       9.563 us     381.9 GB/s   ratio= 0.844  <-- trellis wins
+  exl3-5b        M=1    coldA     18.513 us     197.2 GB/s   ratio= 0.382  <-- trellis wins
+  exl3-5b        M=1    coldB     19.058 us     191.6 GB/s   ratio= 0.391  <-- trellis wins
+  exl3-5b        M=8    warm       9.363 us     407.6 GB/s   ratio= 0.765  <-- trellis wins
+  exl3-5b        M=8    coldA     17.409 us     219.2 GB/s   ratio= 0.360  <-- trellis wins
+  exl3-5b        M=8    coldB     19.180 us     199.0 GB/s   ratio= 0.404  <-- trellis wins
+  exl3-5b        M=64   warm      21.331 us     240.7 GB/s   ratio= 0.785  <-- trellis wins
+  exl3-5b        M=64   coldA     28.115 us     182.7 GB/s   ratio= 0.554  <-- trellis wins
+  exl3-5b        M=64   coldB     29.590 us     173.6 GB/s   ratio= 0.600  <-- trellis wins
+  exl3-6b        M=1    warm       9.532 us     458.7 GB/s   ratio= 0.841  <-- trellis wins
+  exl3-6b        M=1    coldA     21.514 us     203.2 GB/s   ratio= 0.444  <-- trellis wins
+  exl3-6b        M=1    coldB     21.516 us     203.2 GB/s   ratio= 0.441  <-- trellis wins
+  exl3-6b        M=8    warm       9.468 us     479.3 GB/s   ratio= 0.773  <-- trellis wins
+  exl3-6b        M=8    coldA     21.679 us     209.3 GB/s   ratio= 0.448  <-- trellis wins
+  exl3-6b        M=8    coldB     23.370 us     194.2 GB/s   ratio= 0.493  <-- trellis wins
+  exl3-6b        M=64   warm      17.213 us     340.2 GB/s   ratio= 0.633  <-- trellis wins
+  exl3-6b        M=64   coldA     25.767 us     227.3 GB/s   ratio= 0.507  <-- trellis wins
+  exl3-6b        M=64   coldB     25.736 us     227.6 GB/s   ratio= 0.522  <-- trellis wins
+
+===== CTRL 4096x4096   k=4096 n=4096  |  N_bf16=3 N_full=12 G=200  |  bf16 bank 384 MiB (16.0xL2), 4b bank 96 MiB (4.0xL2)   [cuda-exl3 issue #5 control shape]
+  bf16 F.linear   M=1    warm     164.731 us     203.8 GB/s   raw=['165.210', '164.731', '164.710']
+  bf16 F.linear   M=1    coldA    183.986 us     182.5 GB/s   raw=['183.986', '183.837', '184.012']
+  bf16 F.linear   M=1    coldB    185.740 us     180.7 GB/s   raw=['185.740', '185.776', '185.739']
+  bf16 F.linear   M=8    warm     121.327 us     277.6 GB/s   raw=['121.264', '121.365', '121.327']
+  bf16 F.linear   M=8    coldA    139.523 us     241.4 GB/s   raw=['139.523', '139.490', '139.728']
+  bf16 F.linear   M=8    coldB    144.463 us     233.2 GB/s   raw=['144.858', '144.329', '144.463']
+  bf16 F.linear   M=64   warm     129.960 us     266.3 GB/s   raw=['133.855', '129.856', '129.960']
+  bf16 F.linear   M=64   coldA    145.980 us     237.0 GB/s   raw=['146.244', '145.980', '145.945']
+  bf16 F.linear   M=64   coldB    153.285 us     225.7 GB/s   raw=['152.662', '153.285', '153.811']
+  bf16 matmul     M=1    warm     136.386 us     246.1 GB/s
+  bf16 matmul     M=1    coldA    138.744 us     242.0 GB/s
+  bf16 matmul     M=1    coldB    138.928 us     241.6 GB/s
+  bf16 matmul     M=8    warm     133.843 us     251.7 GB/s
+  bf16 matmul     M=8    coldA    134.380 us     250.7 GB/s
+  bf16 matmul     M=8    coldB    135.244 us     249.1 GB/s
+  bf16 matmul     M=64   warm     135.241 us     255.9 GB/s
+  bf16 matmul     M=64   coldA    134.786 us     256.7 GB/s
+  bf16 matmul     M=64   coldB    134.588 us     257.1 GB/s
+  exl3-4b        M=1    warm      17.069 us     493.4 GB/s   ratio= 0.104  <-- trellis wins
+  exl3-4b        M=1    coldA     29.551 us     285.0 GB/s   ratio= 0.161  <-- trellis wins
+  exl3-4b        M=1    coldB     40.026 us     210.4 GB/s   ratio= 0.215  <-- trellis wins
+  exl3-4b        M=8    warm      17.440 us     489.5 GB/s   ratio= 0.144  <-- trellis wins
+  exl3-4b        M=8    coldA     32.836 us     260.0 GB/s   ratio= 0.235  <-- trellis wins
+  exl3-4b        M=8    coldB     39.312 us     217.1 GB/s   ratio= 0.272  <-- trellis wins
+  exl3-4b        M=64   warm      38.025 us     248.6 GB/s   ratio= 0.293  <-- trellis wins
+  exl3-4b        M=64   coldA     41.636 us     227.1 GB/s   ratio= 0.285  <-- trellis wins
+  exl3-4b        M=64   coldB     46.274 us     204.3 GB/s   ratio= 0.302  <-- trellis wins
+  exl3-5b        M=1    warm      19.493 us     539.6 GB/s   ratio= 0.118  <-- trellis wins
+  exl3-5b        M=1    coldA     41.614 us     252.8 GB/s   ratio= 0.226  <-- trellis wins
+  exl3-5b        M=1    coldB     45.912 us     229.1 GB/s   ratio= 0.247  <-- trellis wins
+  exl3-5b        M=8    warm      20.431 us     520.4 GB/s   ratio= 0.168  <-- trellis wins
+  exl3-5b        M=8    coldA     40.675 us     261.4 GB/s   ratio= 0.292  <-- trellis wins
+  exl3-5b        M=8    coldB     48.056 us     221.3 GB/s   ratio= 0.333  <-- trellis wins
+  exl3-5b        M=64   warm      43.288 us     266.8 GB/s   ratio= 0.333  <-- trellis wins
+  exl3-5b        M=64   coldA     58.828 us     196.3 GB/s   ratio= 0.403  <-- trellis wins
+  exl3-5b        M=64   coldB     62.574 us     184.6 GB/s   ratio= 0.408  <-- trellis wins
+  exl3-6b        M=1    warm      19.479 us     647.6 GB/s   ratio= 0.118  <-- trellis wins
+  exl3-6b        M=1    coldA     54.416 us     231.8 GB/s   ratio= 0.296  <-- trellis wins
+  exl3-6b        M=1    coldB     53.602 us     235.4 GB/s   ratio= 0.289  <-- trellis wins
+  exl3-6b        M=8    warm      19.885 us     640.2 GB/s   ratio= 0.164  <-- trellis wins
+  exl3-6b        M=8    coldA     56.632 us     224.8 GB/s   ratio= 0.406  <-- trellis wins
+  exl3-6b        M=8    coldB     56.192 us     226.6 GB/s   ratio= 0.389  <-- trellis wins
+  exl3-6b        M=64   warm      43.075 us     316.8 GB/s   ratio= 0.331  <-- trellis wins
+  exl3-6b        M=64   coldA     67.854 us     201.1 GB/s   ratio= 0.465  <-- trellis wins
+  exl3-6b        M=64   coldB     66.687 us     204.7 GB/s   ratio= 0.435  <-- trellis wins
+
+===== CTRL 4096x11008   k=4096 n=11008  |  N_bf16=2 N_full=5 G=200  |  bf16 bank 430 MiB (17.9xL2), 4b bank 108 MiB (4.5xL2)   [cuda-exl3 issue #5 control shape]
+  bf16 F.linear   M=1    warm     484.610 us     186.1 GB/s   raw=['484.395', '485.210', '484.610']
+  bf16 F.linear   M=1    coldA    484.376 us     186.2 GB/s   raw=['484.376', '484.941', '483.914']
+  bf16 F.linear   M=1    coldB    485.522 us     185.8 GB/s   raw=['485.395', '486.418', '485.522']
+  bf16 F.linear   M=8    warm     371.686 us     243.3 GB/s   raw=['371.394', '372.350', '371.686']
+  bf16 F.linear   M=8    coldA    372.619 us     242.7 GB/s   raw=['373.017', '372.056', '372.619']
+  bf16 F.linear   M=8    coldB    376.965 us     239.9 GB/s   raw=['376.643', '378.387', '376.965']
+  bf16 F.linear   M=64   warm     376.656 us     244.5 GB/s   raw=['376.656', '381.077', '373.929']
+  bf16 F.linear   M=64   coldA    378.174 us     243.6 GB/s   raw=['380.840', '378.174', '376.904']
+  bf16 F.linear   M=64   coldB    383.416 us     240.2 GB/s   raw=['382.557', '383.416', '387.059']
+  bf16 matmul     M=1    warm     366.620 us     246.1 GB/s
+  bf16 matmul     M=1    coldA    368.978 us     244.5 GB/s
+  bf16 matmul     M=1    coldB    368.721 us     244.7 GB/s
+  bf16 matmul     M=8    warm     348.161 us     259.7 GB/s
+  bf16 matmul     M=8    coldA    348.509 us     259.4 GB/s
+  bf16 matmul     M=8    coldB    348.035 us     259.8 GB/s
+  bf16 matmul     M=64   warm     375.433 us     245.3 GB/s
+  bf16 matmul     M=64   coldA    375.696 us     245.2 GB/s
+  bf16 matmul     M=64   coldB    375.680 us     245.2 GB/s
+  exl3-4b        M=1    warm      44.885 us     503.6 GB/s   ratio= 0.093  <-- trellis wins
+  exl3-4b        M=1    coldA    100.790 us     224.3 GB/s   ratio= 0.208  <-- trellis wins
+  exl3-4b        M=1    coldB     94.741 us     238.6 GB/s   ratio= 0.195  <-- trellis wins
+  exl3-4b        M=8    warm      49.461 us     461.3 GB/s   ratio= 0.133  <-- trellis wins
+  exl3-4b        M=8    coldA     98.055 us     232.7 GB/s   ratio= 0.263  <-- trellis wins
+  exl3-4b        M=8    coldB     95.880 us     238.0 GB/s   ratio= 0.254  <-- trellis wins
+  exl3-4b        M=64   warm      93.792 us     261.3 GB/s   ratio= 0.249  <-- trellis wins
+  exl3-4b        M=64   coldA    110.363 us     222.1 GB/s   ratio= 0.292  <-- trellis wins
+  exl3-4b        M=64   coldB    112.207 us     218.4 GB/s   ratio= 0.293  <-- trellis wins
+  exl3-5b        M=1    warm      92.178 us     306.4 GB/s   ratio= 0.190  <-- trellis wins
+  exl3-5b        M=1    coldA    119.323 us     236.7 GB/s   ratio= 0.246  <-- trellis wins
+  exl3-5b        M=1    coldB    118.441 us     238.4 GB/s   ratio= 0.244  <-- trellis wins
+  exl3-5b        M=8    warm      94.105 us     302.3 GB/s   ratio= 0.253  <-- trellis wins
+  exl3-5b        M=8    coldA    120.028 us     237.0 GB/s   ratio= 0.322  <-- trellis wins
+  exl3-5b        M=8    coldB    117.720 us     241.7 GB/s   ratio= 0.312  <-- trellis wins
+  exl3-5b        M=64   warm     116.781 us     258.1 GB/s   ratio= 0.310  <-- trellis wins
+  exl3-5b        M=64   coldA    135.007 us     223.3 GB/s   ratio= 0.357  <-- trellis wins
+  exl3-5b        M=64   coldB    135.617 us     222.3 GB/s   ratio= 0.354  <-- trellis wins
+  exl3-6b        M=1    warm     131.862 us     256.9 GB/s   ratio= 0.272  <-- trellis wins
+  exl3-6b        M=1    coldA    141.732 us     239.0 GB/s   ratio= 0.293  <-- trellis wins
+  exl3-6b        M=1    coldB    138.700 us     244.2 GB/s   ratio= 0.286  <-- trellis wins
+  exl3-6b        M=8    warm     134.717 us     253.0 GB/s   ratio= 0.362  <-- trellis wins
+  exl3-6b        M=8    coldA    142.809 us     238.7 GB/s   ratio= 0.383  <-- trellis wins
+  exl3-6b        M=8    coldB    140.077 us     243.4 GB/s   ratio= 0.372  <-- trellis wins
+  exl3-6b        M=64   warm     163.192 us     219.3 GB/s   ratio= 0.433  <-- trellis wins
+  exl3-6b        M=64   coldA    162.445 us     220.3 GB/s   ratio= 0.430  <-- trellis wins
+  exl3-6b        M=64   coldB    162.776 us     219.8 GB/s   ratio= 0.425  <-- trellis wins
+
+# peak torch alloc: 1.47 GiB
+# wrote /bench/01-coldbench.json

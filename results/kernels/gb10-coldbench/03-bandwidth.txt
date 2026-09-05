@@ -1,0 +1,26 @@
+== achieved bandwidth, M=8 (GB10 measured achievable read = 235-240 GB/s, ruler 00) ==
+shape                   arm           warm us warm GB/s  cold us cold GB/s  verdict
+f_b_proj  TP3/rank      bf16             2.21     347.9     4.99     154.0  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+f_b_proj  TP3/rank      exl3-4b          3.54      65.8     5.10      45.7  not bandwidth-bound (fixed-cost floor)
+f_b_proj  TP3/rank      exl3-6b          4.13      78.3     5.78      56.0  not bandwidth-bound (fixed-cost floor)
+
+in_proj_fg_a (fa+ga)    bf16             5.27     410.9    12.25     176.9  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+in_proj_fg_a (fa+ga)    exl3-4b          6.01     100.3     8.02      75.1  not bandwidth-bound (fixed-cost floor)
+in_proj_fg_a (fa+ga)    exl3-6b          6.40     135.0     9.18      94.2  not bandwidth-bound (fixed-cost floor)
+
+kv_b_proj replicated    bf16           136.61     249.5   139.33     244.7  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+kv_b_proj replicated    exl3-4b         17.64     509.4    40.56     221.6  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+kv_b_proj replicated    exl3-6b         20.93     629.9    53.46     246.6  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+
+kv_b_proj TP3 22head    bf16            12.24     957.7    47.44     247.1  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+kv_b_proj TP3 22head    exl3-4b          8.34     371.0    16.58     186.7  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+kv_b_proj TP3 22head    exl3-6b          9.47     479.3    23.37     194.2  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+
+CTRL 4096x4096          bf16           121.33     277.6   144.46     233.2  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+CTRL 4096x4096          exl3-4b         17.44     489.5    39.31     217.1  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+CTRL 4096x4096          exl3-6b         19.88     640.2    56.19     226.6  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+
+CTRL 4096x11008         bf16           371.69     243.3   376.97     239.9  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+CTRL 4096x11008         exl3-4b         49.46     461.3    95.88     238.0  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+CTRL 4096x11008         exl3-6b        134.72     253.0   140.08     243.4  warm reading IMPOSSIBLE (>240 GB/s) = L2 artefact
+

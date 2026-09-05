@@ -381,15 +381,9 @@ offered upstream with its description in `patches/kernel/0003-PR-DESCRIPTION.md`
 
 We vendor no files from either of these. What we took is practice and arithmetic, and we say which.
 
-### `MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks`
+### See also
 
-- **Licence:** **MIT** — confirmed. 342 stars.
-- **What we took:** the honest image path — building on the official vLLM GLM-5.3 base tag rather
-  than on a mystery image, pinning the quantization library to a commit, and gating the build on the
-  presence of the symbols it needs. Also the observation that the sparse-MLA backend's requirements,
-  not the quantization format, are what force `fp8` KV on this hardware.
-- **Where it does not apply:** its overlay shards routed experts unconditionally, which cannot work
-  at TP=3.
+- `MiaAI-Lab/GLM-5.3-Flash-EXL3-2x-DGX-Sparks` (MIT) — a two-node EXL3 recipe for the same model. No code or numbers were taken from it; listed for readers comparing two-node setups. Its expert-sharding overlay does not apply at TP=3.
 
 ### `FlyCockpit/GLM-5.3-Flash-EXL3-3x-DGX-Sparks`
 

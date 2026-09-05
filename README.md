@@ -9,10 +9,11 @@ A reproducible recipe for serving **`zai-org/GLM-5.3-Flash`** as an **EXL3 4-bit
 DGX Spark (GB10) nodes with vLLM and the `cuda-exl3` kernels: the two-layer image build, expert
 parallelism over 288 experts, the TP=3 shape padding, the DFlash2 speculative-decoding port, the
 kernel bugs we found and what fixed them, the NCCL mesh cliff, the second cable nothing was using,
-the PCIe wall behind it, the KV-pool surgery, a 274-second cold boot, a measured breakdown of where a
-prefill and a decode step actually go, the three-layer loader patch that finally got a **fully
-quantized** checkpoint to load and what it turned out to be worth, and what is still broken. Written
-so that a person **or their AI coding agent** can follow it step by step.
+the PCIe wall behind it, the KV-pool surgery, a 251-second cold boot, a measured breakdown of where a
+prefill and a decode step actually go, the loader work that got a **fully quantized** checkpoint to
+load — and then to load into dimensions vLLM had padded, which is what put it in production — and
+what is still broken. Written so that a person **or their AI coding agent** can follow it step by
+step.
 
 This is the EXL3 sibling of our NVFP4 recipe,
 [`NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark`](https://github.com/NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark),
@@ -30,38 +31,67 @@ this repository is thin on those, that one is thorough.
 
 ## Headline results
 
-Settings for every row: image `exl3-zeus:62f53e6`, TP=3 + expert parallel, EXL3 4bpw weights,
-`kv-cache-dtype fp8` **and an fp8 draft cache** (`HAREM_DRAFT_KV_DTYPE=fp8`), DFlash2 draft at k=7,
-`--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`, `--max-num-batched-tokens 2048`, `--max-num-seqs 8`,
-`NCCL_MAX_NCHANNELS=8`, `gpu-memory-utilization 0.80`, per-rank pre-sliced sidecar, warm MLA tuner
-cache, mesh plugin with both cables per peer and `NCCL_PTR_CUDA`, the launcher's memory settle gate,
-temperature 0, reasoning effort **low**, 5 September 2026. This is **production configuration 8**.
-Speed is the median of three sweep rounds — the persisted tuner cache is what makes three enough; on
-an image without it the rule is still five rounds with two discarded
-([docs/09](docs/09-measurement-protocol.md), [docs/12](docs/12-tuner-cache.md)).
+Settings for every row: image `exl3-zeus:754421f`, TP=3 + expert parallel, **full-scope** EXL3
+weights (`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw), `kv-cache-dtype fp8` **and an fp8 draft cache**
+(`HAREM_DRAFT_KV_DTYPE=fp8`), DFlash2 draft at k=7, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`,
+`--max-num-batched-tokens 2048`, `--max-num-seqs 8`, `NCCL_MAX_NCHANNELS=8`,
+`gpu-memory-utilization 0.80`, per-rank pre-sliced sidecar, warm MLA tuner cache, mesh plugin with
+both cables per peer and `NCCL_PTR_CUDA`, the launcher's memory settle gate, temperature 0, reasoning
+effort **low**, 5 September 2026. This is **production configuration 9**. Speed is the median of
+three sweep rounds — the persisted tuner cache is what makes three enough; on an image without it the
+rule is still five rounds with two discarded ([docs/09](docs/09-measurement-protocol.md),
+[docs/12](docs/12-tuner-cache.md)). The production-8 column is the pool of two same-day runs of the
+same script, because that arm's documented run-to-run spread is about 7 %.
 
-| What | Result | Notes |
-|---|---|---|
-| Quality gates | correctness probe 10/10, code exam 12/12 | cold **and** after a full benchmark, every arm `[measured-here]` |
-| MMLU sample (35 questions per subject, 1,995 q) | 86.4 ±0.7 | measured at TP=2 on the same checkpoint; not re-run at TP=3 `[measured-here]` |
-| Speed, realistic (12 short English code prompts) | C1 **56.8** tok/s total (63.9 per stream) · C8 **172.8** tok/s total (26.6 per stream) | acceptance 62–64 %, 5.3–5.5 accepted tokens per step `[measured-here]` |
-| Prefill, fresh unseen ~8.5K prompts | **1,780** tok/s (warm repeated 7K prompt: 1,529, production 7) | a repeated prompt reads the prefix cache and lies — see [docs/09](docs/09-measurement-protocol.md) `[measured-here]` |
-| TTFT | 0.34 s at C1, 0.91 s at C8 | production 7's; not re-read at production 8 `[measured-here]` |
-| KV pool | **4,674,931 tokens** at `gpu-memory-utilization 0.80` | about 4.7 concurrent 1M-token requests; read from a load boot with a settled baseline `[measured-here]` |
-| Weights per node | 54.9 GiB | against 81.5 GiB at TP=2 — the whole reason for the third node `[measured-here]` |
-| Cold boot, container start → API ready | **~274 s** (~4.5 min) | was 618 s before the loader work; itemised on the fast-boot arm, plus the settle gate's wait since `[measured-here, raw lost]` |
-| Free host RAM at rest / swap | 12.3 / 13.5 / 13.3 GiB · ~0.1 GiB | rule: never below 4 GiB free `[measured-here]` |
-| Speed by category, C1 | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 tok/s | acceptance 46 / 56 / 55 / **13 %** — prose is where a k=7 draft is wasted. **Measured three configurations earlier**; not re-run since `[not tested]` |
+| What | **Production 9** | Production 8 | Notes |
+|---|---|---|---|
+| Quality gates | correctness probe **10/10**, code exam **12/12** | 10/10 · 12/12 | cold **and** after a full benchmark, both arms `[measured-here]` |
+| MMLU sample (35 questions per subject, 1,995 q) | **86.47 ±0.74** | 86.4 ±0.7 | measured at TP=3 on the production checkpoint; 0.07 points apart, a tenth of either bar `[measured-here]` |
+| Speed, realistic (12 short English code prompts) | C1 **69.9** tok/s total (**75.9** per stream) · C8 **197.2** total (28.6 per stream) | 56.9 / 62.4 · 175.4 / 26.7 | **+22.9 % / +21.7 % at C1, +12.5 % at C8** `[measured-here]` |
+| Draft acceptance · accepted tokens per step | 61.9 % · **5.34** | 64.4 % · 5.50 | −2.4 points and −3 %; the gate is ≥60 %. **This is the cost** — the whole gain is step time `[measured-here]` |
+| Prefill, fresh unseen ~8.5K prompts | **1,738** tok/s (warm repeated 7K prompt: 1,575) | 1,776 (1,537) | both inside the ±3 % equality band: **equal** `[measured-here]` |
+| TTFT | **0.280** s at C1, **0.826** s at C8 | 0.344 / 0.906 | −18.6 % and −8.8 % `[measured-here]` |
+| KV pool | **5,165,289 tokens** at `gpu-memory-utilization 0.80` | 4,696,969 | **+10.0 %**, about 5.2 concurrent 1M-token requests; read from a load boot with a settled baseline `[measured-here]` |
+| Consumed memory per node (weights + non-torch) | **58.3 – 59.1 GiB** | 62.1 – 62.4 GiB | **−3.4 GiB**, which is where the pool came from `[measured-here]` |
+| Cold boot, container start → API ready | **251 s** (weights 58 s) | 264 s (weights 73 s) | a fast-load boot; the one-off dump boot that produces the sidecar is 620 s `[measured-here]` |
+| Free host RAM at rest / swap | 12.1 / 13.5 / 13.4 GiB · ~0.1 GiB | 12.3 / 13.5 / 13.5 · ~0.1 | rule: never below 4 GiB free `[measured-here]` |
+| Speed by category, C1 | — | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 tok/s | acceptance 46 / 56 / 55 / **13 %** — prose is where a k=7 draft is wasted. **Measured five configurations ago**; not re-run since `[not tested]` |
 
-**Production configuration 8 moves the image and nothing else, on purpose.** `62f53e6` carries
-upstream's `had_in` fix, which was priced at 0.2–0.3 % of prefill wall *before* it was built — below
-the noise floor of a serving benchmark. Measured: C1 56.8 against 57.0, C8 172.8 against 175.1,
-prefill 1,780 against 1,769, pool 4.67M against 4.70M, gates full. Four signs, every one inside its
-own band, which is exactly what a sub-noise change should look like and is the whole entry
-([10](docs/10-results-and-roofline.md) §1, [11](docs/11-open-issues.md) §2.19). The configuration
-before it, production 7, bought the **KV pool, +5.6 % to 4.70M**, by putting the DFlash2 drafter's own
-cache at fp8 — speed unchanged inside its bands, TTFT better at both ends
-([07](docs/07-kv-and-draft-page.md) §7, [11](docs/11-open-issues.md) §2.18).
+**Production configuration 9 is a different checkpoint, and it is the largest single move this stack
+has made.** Every configuration from 1 to 8 served `scope: glm53_routed_experts_only` weights:
+4-bit routed experts beside a BF16 attention stack, shared expert and `lm_head`, and that dense half
+measured **45.3 % of a single-stream decode step** — larger than everything in the `cuda-exl3` column
+of our target table put together. Production 9 serves a **full-scope** checkpoint instead, so the
+dense path is 5–6 bit EXL3 as well. Step time goes **88.2 → 70.3 ms**, and the arithmetic is the
+result rather than the tok/s: acceptance and accepted length moved the *wrong* way by about 3 % and
+the arm still wins by 22 %, so none of the gain is drafter behaviour
+([13](docs/13-full-scope-checkpoint.md), [10](docs/10-results-and-roofline.md) §1).
+
+**Two fears from the TP=2 dress rehearsal did not reproduce, and one small cost did.** At two ranks
+the same checkpoint measured ~10 GiB *heavier* per node and left a 31k-token pool that closed the
+long-prompt path; at three ranks it is **3.4 GiB lighter** and the pool grows **10 %**, so
+`max_model_len 1,000,000` was never in question. A cold-probe signal that draft acceptance collapses
+did not reproduce either — it is flat on that probe and 2.4 points lower on the sweep. What it does
+cost, and the line is not left empty: **2.4 points of acceptance, 3 % of accepted tokens per step, a
+second patch tree to keep in step with the first, and a second 53 GB fast-load sidecar per node**
+([13](docs/13-full-scope-checkpoint.md) §7.4, [11](docs/11-open-issues.md) §2.24).
+
+**None of it was about quantization.** The checkpoint would not load for three reasons — a missing
+`packed_modules_mapping`, two lines that pin the attention stack to BF16 whatever the weights hold,
+and a KDA factorisation the reader does not expect — and one of those three fails identically on a
+BF16 copy of the same checkpoint. TP=3 then needed three more things: two launcher constants moved
+from `lcm(64, tp)` to `lcm(128, tp)` (vocab `padding_size` 192 → **384**, shared expert 2112 →
+**2304**), one patch of ours (A9: split a pre-fused checkpoint tensor by the *checkpoint's* widths,
+not the module's padded ones), and a **padded-load path** on the plugin side, which the author built
+in `f3e3090` and `754421f` once the quality gate passed. A post-load audit confirms the invariant it
+rests on: **285 padded EXL3 sites on the rank that owns the padding, every pad a whole number of
+128-column Hadamard blocks and exactly zero** ([13](docs/13-full-scope-checkpoint.md) §7,
+[03](docs/03-tp3-padding-and-sidecars.md) §1).
+
+The configurations before it still hold. Production 8 moved the image to `62f53e6` and nothing else,
+and every column stayed inside its own band, which is exactly what a change priced at 0.2–0.3 % of
+prefill wall should look like ([11](docs/11-open-issues.md) §2.19); production 7 bought **+5.6 % of
+pool** by putting the DFlash2 drafter's own cache at fp8 ([07](docs/07-kv-and-draft-page.md) §7).
 
 **Where a step goes is now measured, and the measurement deleted two of our own targets.** A torch
 profiler ran against the *live* server, all three ranks, no restart — one launcher flag that should
@@ -95,24 +125,15 @@ worth 8–26 % of pool; acting on it would have over-committed the head node
 ([07](docs/07-kv-and-draft-page.md) §1.1, [08](docs/08-fast-boot.md) §5.1,
 [11](docs/11-open-issues.md) §2.3).
 
-**The open edge has moved, and it is now the checkpoint rather than the kernels — and that is no
-longer an estimate.** Dense BF16 GEMM is 45 % of a single-stream decode step because our checkpoint is
-`scope: glm53_routed_experts_only`: attention, the shared experts and `lm_head` stay BF16, so at M=8
-that stage streams 16-bit weights beside a 4-bit routed half. A full-scope checkpoint
-(`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw, MIT) was loaded at TP=2 on 5 September and measured
-against the production checkpoint on the same stack: **C1 68.00 tok/s per stream against 54.69,
-+24.3 %** (aggregate 59.93 against 47.40, +26.4 %), C2 and C4 +22 %, **draft acceptance and accepted
-length unchanged**, gates full, **MMLU sample 86.32 ±0.75 against the control's 86.4 ±0.7**
-`[measured-here]`. Per step 100.4 → 79.7 ms — 65 % of the +34 % that had been estimated, the
-difference being what this checkpoint leaves in BF16 anyway. **Two things it corrected:** the 6-bit
-`lm_head` we had flagged as the quality risk cost nothing measurable, and the scope was never a
-quality decision — two lines in vLLM's `glm5next` model file pin the attention stack to BF16 whatever
-the weights hold, locking 72.8 % of the dense traffic, so `routed_experts_only` was the only scope
-that could load. **The cost is context:** at TP=2 the pool is 31,343 tokens and prompts over ~2,000
-tokens are never scheduled, so TP=2 is a measurement rig, not a serving configuration. TP=3 needs a
-padded-load path for the head, one launcher constant (`padding_size` 192 → 384), a shared-expert width
-of 2,304 and one patch we have not written
-([13](docs/13-full-scope-checkpoint.md), [11](docs/11-open-issues.md) §2.22).
+**That breakdown is production 7's, and production 9 was built to delete its largest row.** The
+45.3 % dense-BF16 column is what a `routed_experts_only` checkpoint costs; the arm that removed it
+took 17.8 ms off a 88.2 ms step, measured, on the same three nodes. The percentages above have **not**
+been re-profiled on production 9 `[not tested]` — the profiler run costs a six-minute window and
+7–8 GiB of host RAM per node, and the next question after it is a different one. What can be said
+arithmetically is that the class that was 45 % of a decode step is now mostly 4–6 bit, so whatever the
+new ranking is, it is not that one. The rest of the trace stands: the NCCL class is still **100 %
+exposed**, and the C1 idle budget is still **3.75 %** rather than the 5.8 % we published
+([10](docs/10-results-and-roofline.md) §5, [11](docs/11-open-issues.md) §2.23).
 
 Behind it, two `NCCL_ALGO` arms and one memory rung. `Tree` is measured and rejected on this fabric —
 4–6× slower on the sizes that matter — while `Ring,Tree` came back *inside the sweep's own repeat
@@ -125,12 +146,14 @@ practice, and the author's own bench closed MLA prefill at 86–89 % of achievab
 prefill lever on this stack belongs to vLLM, to the fabric, or to us.
 
 For reference, our NVFP4 stack on the same three nodes reaches C1 57–60, C8 150, prefill 1,585 and a
-KV pool of 4.32M at `gpu-memory-utilization 0.88` — against this stack's 4.67M at 0.80. **EXL3 at TP=3 is now level on single-stream
-decode and ahead on aggregate throughput, prefill, memory and boot.** Read that with one caveat
-attached: three of the changes that got it there — the channel cap, the second cable and
-`NCCL_PTR_CUDA` — are **fabric-level, not format-level**, they use the same plugin over the same
-wiring, and none of them has been applied to the NVFP4 stack `[not tested]`. If they transfer, most
-of the gap goes with them. Neither stack has been measured at max reasoning effort.
+KV pool of 4.32M at `gpu-memory-utilization 0.88` — against this stack's **69.9 / 197.2 / 1,738 and
+5.17M at 0.80**. **EXL3 at TP=3 is now ahead on single-stream decode, aggregate throughput, memory and
+boot, and level on prefill.** Read that with two caveats attached. Three of the changes that got it
+there — the channel cap, the second cable and `NCCL_PTR_CUDA` — are **fabric-level, not
+format-level**, they use the same plugin over the same wiring, and none of them has been applied to
+the NVFP4 stack `[not tested]`. And the single largest one, production 9, is **checkpoint-level**: an
+NVFP4 checkpoint that quantized the same dense path would collect the same 18 ms per step, and none
+exists that we know of `[not tested]`. Neither stack has been measured at max reasoning effort.
 
 **All benchmark numbers here are at reasoning effort `low`, temperature 0.** Max effort would cost
 5–12× the tokens and days of cluster time; we did not spend them. Nothing on this page is a max-effort
@@ -144,19 +167,19 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 ## Read in this order
 
 1. [00 — Hardware and OS](docs/00-hardware-and-os.md) — three Sparks, the fabric, the versions we ran, desktop off.
-2. [01 — Model and license](docs/01-model-and-license.md) — the EXL3 checkpoint, its pinned revision, and its licence, which is not one you have seen before.
+2. [01 — Model and license](docs/01-model-and-license.md) — the two EXL3 checkpoints, their pinned revisions, and two licences, one of which is not one you have seen before.
 3. [02 — Image build](docs/02-image-build.md) — the two-layer Docker recipe, pinned to a `cuda-exl3` commit.
 4. [03 — TP=3 padding and sidecars](docs/03-tp3-padding-and-sidecars.md) — why an EXL3 tensor cannot be split three ways, and the shape surgery that makes it possible anyway.
 5. [04 — The DFlash2 port](docs/04-dflash2-port.md) — porting a speculative decoder into an image that had never seen one.
 6. [05 — Expert parallel and the cuda-exl3 fixes](docs/05-expert-parallel-and-cuda-exl3-fixes.md) — the one-line kernel bug that cost 45 % of the MoE stage.
 7. [06 — The NCCL mesh](docs/06-nccl-mesh.md) — 0.6 GB/s in the middle of the size range and the one environment variable that fixed it; then the second cable of every pair, which had never carried a packet; then the PCIe slot that was the ceiling all along, and the transport rewrite that proved it.
 8. [07 — KV pool and the draft page](docs/07-kv-and-draft-page.md) — why the pool was capped by a counter, not by memory.
-9. [08 — Fast boot](docs/08-fast-boot.md) — 618 s → 274 s, and the bit-identity proof that makes it safe.
+9. [08 — Fast boot](docs/08-fast-boot.md) — 618 s → 274 s → 251 s, the bit-identity proof that makes it safe, and why two patch trees means two sidecars.
 10. [09 — Measurement protocol](docs/09-measurement-protocol.md) — five rounds, discard two; and four ways to measure a lie.
 11. [10 — Results and roofline](docs/10-results-and-roofline.md) — the full tables, the rulers measured rather than quoted, and where a prefill and a decode step actually go, class by class, from a profiler trace of the live server.
 12. [11 — Open issues](docs/11-open-issues.md) — what is unresolved, what we retracted, and what we never ran.
 13. [12 — The MLA tuner cache](docs/12-tuner-cache.md) — the measurement tax a process-local cache was charging, and the shorter protocol that removes it.
-14. [13 — The full-scope checkpoint](docs/13-full-scope-checkpoint.md) — the three independent reasons a fully quantized checkpoint would not load, none of them about quantization; the loader patch; and what the dense stage is worth, measured.
+14. [13 — The full-scope checkpoint](docs/13-full-scope-checkpoint.md) — the three independent reasons a fully quantized checkpoint would not load, none of them about quantization; the loader patch; the TP=3 padded-load port; and what the dense stage is worth, measured twice. **This is the production recipe.**
 15. [systemd](systemd/README.md) — a unit **template**, not installed anywhere, with the three things wrong with it named. This stack starts by hand; read this before a reboot.
 16. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
 
@@ -164,8 +187,11 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 
 ```text
 0.  Read docs/00 and confirm three DGX Spark nodes, DGX OS up to date, ibv_devinfo 4/4 on each.
-1.  Read docs/01 and download brandonmusic/GLM-5.3-Flash-tr3-4bpw at revision b20c49ba (175.6 GB).
-    Read its LICENSE first: it is the ShapleyMCG License 1.0, not MIT and not Apache.
+1.  Read docs/01 and download turboderp/GLM-5.3-Flash-exl3, branch 4.05bpw, at revision 2a30229e
+    (165 GB, MIT). That is the production checkpoint: full scope, so the dense path and the head
+    are quantized too. brandonmusic/GLM-5.3-Flash-tr3-4bpw at b20c49ba is the fallback if your
+    image predates the padded-load path; its licence is the ShapleyMCG License 1.0, not MIT.
+    Verify what you got - sha256 23/23 against the repository's own metadata - before building on it.
 2.  Download incoai/GLM-5.3-Flash-DFlash2 (the draft). It is CC BY-NC-ND 4.0 and our permission
     for it does not transfer to you (LICENSES.md). The recipe runs without it, about 2.6x slower
     at a single stream.
@@ -173,18 +199,24 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
     19924dcc, per its README, with patches/kernel/0004, 0005 and 0006 applied. Do not skip docs/06:
     the default channel count costs 13 % of C8, and unpatched the plugin uses one cable of each
     pair. Read your own port_xmit_data counters before believing any bandwidth number.
-4.  Build the image (docs/02) on every node from the same source tarball; verify by behaviour
-    (pytest) rather than by binary hash - see the nondeterminism note in docs/02.
-5.  Build the two sidecars (docs/03): the padded model sidecar and the padded drafter sidecar.
-    They are symlink trees plus a handful of rewritten config files, not copies of the weights.
-6.  Copy scripts/ and patches/ to ~/exl3-zeus/ on every node. Derive each node's env from
-    envs/env.tp3.example with sed, per node, never by copying the file between nodes (docs/03).
-7.  Boot: worker-2 first, then worker-1, then head. Run the two quality gates
-    (scripts/correctness-probe.py, scripts/code-exam.py) before believing any speed number.
-    Point CUDA_EXL3_TUNE_CACHE at a directory under the /cache mount (docs/12) before the first
-    boot, or every benchmark you run will be measuring the tuner rather than the change.
+4.  Build the image (docs/02) on every node from the same source tarball, pinned to cuda-exl3
+    754421f or later - the padded-load path (f3e3090 + 754421f) is not optional at TP=3 with this
+    checkpoint. Verify by behaviour (pytest) rather than by binary hash - see docs/02.
+5.  Build the two sidecars: patches/tp3full/pad-tp3full.py for the model (padded config.json AND
+    the rewritten quantization_config.json that carries the packed mapping - patches/tp3/pad-tp3.py
+    does not write the second one and the load then fails), patches/tp3/pad-tp3.py --draft for the
+    drafter. They are symlink trees plus rewritten config files, not copies of the weights (docs/03).
+6.  Copy scripts/ and patches/tp3full/ to ~/exl3-zeus/ on every node; hard-link tp3full-prelude.sh
+    to the name tp3-prelude.sh inside that directory. Derive each node's env from
+    envs/env.tp3-full.example with sed, per node, never by copying the file between nodes.
+7.  Boot: worker-2 first, then worker-1, then head. Read the boot gates before the numbers - the
+    [padload] line, the ten patch anchors, the assert 5 pad audit, and the CUDA_EXL3_DEBUG_NAMES
+    tally (expect 203 EXL3 / 113 bf16). Then the two quality gates (scripts/correctness-probe.py,
+    scripts/code-exam.py), cold and again warm. Point CUDA_EXL3_TUNE_CACHE at a directory under the
+    /cache mount (docs/12) before the first boot, or every benchmark you run will be measuring the
+    tuner rather than the change.
 8.  Optional but recommended: build the per-rank fast-load sidecar (docs/08). It takes one
-    ~11-minute dump boot and cuts every subsequent boot from 618 s to 274 s.
+    ~10-minute dump boot and cuts every subsequent boot from 620 s to 251 s.
 ```
 
 Evidence tiers used throughout: `[measured-here]`, `[measured-here, raw lost]`, `[reported]`,

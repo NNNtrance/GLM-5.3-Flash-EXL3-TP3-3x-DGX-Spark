@@ -96,11 +96,14 @@ kernels for Blackwell plus a fused sparse-MLA attention backend, with a vLLM plu
   classifier reports `other` / NOASSERTION for the repository, which is what a licence file with an
   added paragraph does to template matching; the file body is MIT terms. Both facts are recorded
   because they are not contradictory and a compliance reviewer will see the second one first.
-- **Production commit:** `62f53e676d3e416401c3a0716558e1454affa8ad` — "Bound what is left in
-  `exl3_moe_had_in`", carrying `a47da6e` beneath it, since 5 September afternoon (production
-  configuration 8). The previous production commits were
-  `9bf594cd8b43a2a53db9c7d1d629794aa9365f1a`, "Persist the MLA tuner cache across processes"
-  (production 5–7; every table dated between 5 September 06:45 and that afternoon), and before it
+- **Production commit:** `754421fc99919317b9a4cf2928797bae8f870040` — "Fill a prefix in the vocab
+  loaders when the rank is padded", carrying `f3e3090` beneath it, since 5 September evening
+  (production configuration 9). **That pair is not an optimisation, it is a prerequisite:** without
+  it the full-scope checkpoint cannot be loaded at TP=3 at all, and `patches/tp3full/check-padload-tp3.py`
+  refuses the boot rather than letting it fail half way. The previous production commits were
+  `62f53e676d3e416401c3a0716558e1454affa8ad`, "Bound what is left in `exl3_moe_had_in`", carrying
+  `a47da6e` (production 8), `9bf594cd8b43a2a53db9c7d1d629794aa9365f1a`, "Persist the MLA tuner cache
+  across processes" (production 5–7), and before it
   `f4987cf11806c7381c8a59cb388ab5863852679c`, "Do not fetch the MoE padding rows".
 
 Commits this recipe built, measured or depends on:
@@ -124,10 +127,12 @@ Commits this recipe built, measured or depends on:
 | `9b17ea9` | `9b17ea9` | Add the expert-reread bench, and close the duplicate-read question here | **the author's answer to our profile.** We ran his script unmodified on GB10 against the production build; it closed our own open item ([docs/10](docs/10-results-and-roofline.md) §5.4, [docs/11](docs/11-open-issues.md) §2.12) |
 | `a47da6e` | `a47da6e` | Remove the 64-bit division in `had_in`, deriving the index from the grid | the follow-up to the same profile: **−10 to −18 %** on `exl3_moe_had_in`, roofline 57 % → 63 % `[reported]`. Worth ~0.2–0.3 % of prefill here. **In production since configuration 8**, and it read exactly as advertised: every serving column inside its own band ([docs/10](docs/10-results-and-roofline.md) §1) |
 | **`62f53e6`** | `62f53e676d3e416401c3a0716558e1454affa8ad` | **Bound what is left in `had_in`** | **the production commit** since 5 September afternoon, and the answer to "is there more here": the remaining gap is a **half-ALU** limit — a 128-point Hadamard done with warp shuffles — so it is arithmetic that has to happen rather than traffic that can be removed, worth **≤2 % of prefill** on this stack and unreachable in practice `[reported]`. With it the **`cuda-exl3` MoE stage is closed as an optimisation target here** ([docs/10](docs/10-results-and-roofline.md) §6, [docs/11](docs/11-open-issues.md) §2.19) |
-| `5903248` | `5903248` | Let a checkpoint declare its own packed-module fusions | written the same hour we reported that `glm5next` declares no `packed_modules_mapping`, so a fusion peculiar to one model can travel with the weights instead of in a fork of the model file. Checkpoint entries merge **under** the model class's, and a malformed entry is dropped rather than raised. **Not usable for our case as written** — the author said so himself before we could try it (see below) `[not tested]` |
-| `fba9f27` | `fba9f27` | The same mapping from `CUDA_EXL3_PACKED_MAPPING` | the follow-up, because a published checkpoint is not ours to edit. Verified here against his `config.py` mounted read-only into a CPU container: `in_proj_qkv` 34/34, `gate_up_proj` 45/45, `fused_qkv_a_proj` 11/11 `[measured-here]`. **Not in any image we have built**, so the arm ran on the vLLM patch instead |
-| `d19dee0` | `d19dee0` | Handle a bare `suh` on the v1 loader path, and fix the packed-mapping example | **our `ReplicatedLinear` workaround, done properly and on his side.** He infers the shard index from the shape where ours pins it at 0 — the same thing for a replicated module and not for anything else. Same commit corrects the README example we had measured at 0/34 and adds the rule that explains it: **every module in a packed group must be EXL3 in the checkpoint** |
-| `807d798` | `807d798` | Make `CUDA_EXL3_DEBUG_NAMES` print, and report the hits too | the diagnostic he had recommended as our acceptance gate, which printed nothing on our image because it logged at `info`. Now `warning`, and it logs the modules that **resolved** as well as those that stayed BF16, with running tallies — the failure it was meant to catch (half the attention stack silently left in BF16) is now visible as a climbing count |
+| `5903248` | `59032483e5e57b24a382231557d7f35daa1d2317` | Let a checkpoint declare its own packed-module fusions | written the same hour we reported that `glm5next` declares no `packed_modules_mapping`, so a fusion peculiar to one model can travel with the weights instead of in a fork of the model file. Checkpoint entries merge **under** the model class's, and a malformed entry is dropped rather than raised. We first recorded this as "not usable for our case" because a published checkpoint is not ours to edit — **that was too quick, and production 9 uses it** `[measured-here]`: the sidecar already rewrites files, so `pad-tp3full.py` writes a `quantization_config.json` carrying the mapping and the launcher points `--hf-overrides quantization_config_file` at it. It merges under the patch's own mapping, so both routes are live and neither conflicts — belt and braces ([docs/03](docs/03-tp3-padding-and-sidecars.md) §2) |
+| `fba9f27` | `fba9f27daa8790e933a4bd55fc098480a58c40c1` | The same mapping from `CUDA_EXL3_PACKED_MAPPING` | the follow-up, because a published checkpoint is not ours to edit. Verified here against his `config.py` mounted read-only into a CPU container: `in_proj_qkv` 34/34, `gate_up_proj` 45/45, `fused_qkv_a_proj` 11/11 `[measured-here]`. It **is** in the production image (`754421f` is later), so this is a third live route to the same mapping and the one to prefer if you would rather not rewrite a 48 MB config. Write the JSON with **no spaces**: the launcher word-splits `EXTRA_ENV`. Not the route we run `[not tested]` |
+| `d19dee0` | `d19dee00f55ad60ba2530bf937dc7184e17515e4` | Handle a bare `suh` on the v1 loader path, and fix the packed-mapping example | **our `ReplicatedLinear` workaround, done properly and on his side.** He infers the shard index from the shape where ours pins it at 0 — the same thing for a replicated module and not for anything else. It is in the production image, so **our A5 routing is now redundant**: it is kept because it runs first and is harmless, and retiring it would change the patch `sha256` and cost a dump boot on every node ([docs/08](docs/08-fast-boot.md) §4). Same commit corrects the README example we had measured at 0/34 and adds the rule that explains it: **every module in a packed group must be EXL3 in the checkpoint** |
+| `807d798` | `807d798530d6c6c06039915e5610a0155e32bd54` | Make `CUDA_EXL3_DEBUG_NAMES` print, and report the hits too | the diagnostic he had recommended as our acceptance gate, which printed nothing on our image because it logged at `info`. Now `warning`, and it logs the modules that **resolved** as well as those that stayed BF16, with running tallies — the failure it was meant to catch (half the attention stack silently left in BF16) is now visible as a climbing count. **It is the boot gate production 9 was accepted on**: 203 EXL3 / 113 bf16, read negatively ([docs/09](docs/09-measurement-protocol.md) §5.1) |
+| **`f3e3090`** | `f3e3090d0e8c388972ad4c1fa50824a84c01ea6f` | **Support loading EXL3 weights into a dim vLLM has padded** | **half of the production commit, and the larger half.** Three previous refusals become three supported paths: a padded **output** dim is accepted when the pad is whole 128-column blocks, with `svh` allocated zeroed — because `svh` scales elementwise *after* the output Hadamard, so zeroing it on the pad makes those columns exactly zero whatever the trellis holds; the gate refuses a pad that **shares** a 128-block with real output, and says which condition failed and by how much; and the **row-parallel `suh`** load stops narrowing past the end of the checkpoint, copying what exists and zeroing the rest. Resting under all three, checked exhaustively rather than argued: **all 65,536 codes decode finite in every codebook** — `3inst` [−3.957, +3.973], `mcg` [−3.949, +3.949], `mul1` [−3.453, +3.348] — so an uninitialised pad trellis cannot turn `svh = 0` into a NaN. He built it the same afternoon the TP=2 quality gate passed |
+| **`754421f`** | `754421fc99919317b9a4cf2928797bae8f870040` | **Fill a prefix in the vocab loaders when the rank is padded** | **the other half, and the one that shows why "mostly built" is not built.** `f3e3090` let a padded vocab past the gate but did not teach the head's own loaders about it: both `copy_` the checkpoint slice into the whole parameter, which is a shape mismatch as soon as the parameter is the padded per-rank width. The gate would pass and the load would then die — a half-loaded stack. The trigger was a question rather than a bug report: we asked whether the vocab-parallel head goes through the same gate as an ordinary linear **before** building on it, and it did not |
 
 Four things we reported to that project and their outcome:
 
@@ -168,9 +173,9 @@ this model family the page is shared with Mamba/KDA state so the zeroing cannot 
 ([docs/11](docs/11-open-issues.md) §2.13). **We have no open *performance* item against `cuda-exl3`**,
 which is an unusual place for a dependency to end up: two of our three reports produced upstream
 fixes, the third produced a bench that proved us wrong, and the fourth produced a bound that tells us
-to stop looking. The one thing still outstanding on that side is not a kernel at all — it is the
-padded-load path for a vocab-parallel EXL3 head, agreed and scoped and waiting on nothing but the work
-(below, and [docs/11](docs/11-open-issues.md) §2.22).
+to stop looking. The one thing that was still outstanding on that side was not a kernel at all — the
+padded-load path for a vocab-parallel EXL3 head — and it was **built the same day the quality gate
+passed** (`f3e3090` + `754421f`, below). **We have no open item against `cuda-exl3` of any kind.**
 
 **Then we sent a real profiler trace, and the thread turned into the most valuable exchange in this
 repository.** Four things came back on it, and three of them make the author's side of the ledger
@@ -242,16 +247,31 @@ published that his first attempt reported an implausibly asymmetric range becaus
 their integer bits, and re-ran it rather than quoting a number he did not trust. **That is the right
 standard underneath a padded-load path**, and it is a stronger answer than the question asked for.
 
-The **commitment** that follows from it: once our quality gate decided the lever was worth building,
+The **commitment** that followed from it: once our quality gate decided the lever was worth building,
 he would add the padded-load path behind a flag — accept an EXL3 tensor narrower than the parameter,
-place it, zero `svh` on the remainder — covering the three cases we checked our TP=3 geometry against:
-the vocab-parallel `lm_head` (hard-refused today, and this checkpoint has no BF16 head to fall back
-on), a "refuse unless the pad is 128-aligned" gate, and the input-dim case where
+place it, zero `svh` on the remainder — covering the three cases we had checked our TP=3 geometry
+against: the vocab-parallel `lm_head` (hard-refused at the time, and this checkpoint has no BF16 head
+to fall back on), a "refuse unless the pad is 128-aligned" gate, and the input-dim case where
 `Exl3SuhParameter.load_row_parallel_weight` narrows on its own and would overrun the last rank's
 `o_proj`. He asked for the drafter's acceptance rate ahead of MMLU, on the grounds that a quantized
-target losing acceptance would decide TP=3 before quality did — a better ordering than ours. **The
-gate passed on 5 September** ([docs/13](docs/13-full-scope-checkpoint.md)), acceptance is flat, and
-the word has been sent.
+target losing acceptance would decide TP=3 before quality did — a better ordering than ours.
+
+**The gate passed on 5 September, and the commitment was kept the same afternoon.** All three cases
+are in `f3e3090`, and the fourth thing — which nobody had asked for and which is the reason the port
+worked on the first attempt — is in `754421f`: he noticed, when we asked whether the vocab-parallel
+head went through the same gate as an ordinary linear, that it did not, and that `f3e3090` alone
+would pass the gate and then die in `_vocab_loaders`. **A half-built path is worse than none**,
+because it fails after the weights have started moving. Four hours later the checkpoint was serving
+production at TP=3: **+21.7 % per stream, MMLU 86.47 ±0.74, 285 padded EXL3 sites audited as whole
+128-blocks and exactly zero** ([docs/13](docs/13-full-scope-checkpoint.md) §7). Two upstream commits,
+two constants and one patch of ours, and no kernel changed.
+
+The `f3e3090` gate is worth naming on its own, because it is the part a reader is most likely to get
+wrong: it does not merely require the pad to be aligned, it refuses a pad that **shares** a
+128-column block with real output — and says which condition failed and by how much. That is the
+difference between "the pad is not zero" and "the real columns beside the pad are corrupted", and it
+is the failure our own `lcm(64, tp)` arithmetic would have produced **silently**
+([docs/03](docs/03-tp3-padding-and-sidecars.md) §1.1).
 
 Three notes we owe that thread rather than the other way round: a 128-token prefill chunk costs 403 ms
 because 128 tokens at top-8 already touch every expert, which is a batched-token-budget fact worth
@@ -415,6 +435,19 @@ We vendor no files from either of these. What we took is practice and arithmetic
 Everything under `patches/` was written by us for this recipe unless the file header says otherwise.
 Use them freely under Apache-2.0; a credit is appreciated and not required. Where a patch implements
 someone else's idea, the header says whose.
+
+Two directories were added on 5 September evening with production configuration 9.
+[`patches/tp3full/`](patches/tp3full/) is the production patch tree for the full-scope checkpoint —
+`patches/tp3/` with two constants changed and `patch-fullscope-tp3.py` added. Why it is a second
+directory rather than two more files in the first one is the fast-load manifest identity, and it is
+explained in its own README. [`patches/tp2/patch-fullscope-tp2.py`](patches/tp2/patch-fullscope-tp2.py)
+is the eight-anchor TP=2 form of the same patch, which [docs/13](docs/13-full-scope-checkpoint.md)
+referenced as "not yet in repo" for a day; it is here now, and it is kept rather than superseded
+because it is the smaller, more readable statement of the same three loader layers.
+
+The published copies are **scrubbed** — internal paths in comments replaced by references to these
+docs — so their `sha256` does not match the ones our nodes' manifests record. That only matters
+because the manifest hashes them: you will dump your own sidecar against your own copies.
 
 Two of them are not ours to keep:
 

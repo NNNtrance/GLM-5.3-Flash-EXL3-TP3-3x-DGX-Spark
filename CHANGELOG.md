@@ -11,6 +11,112 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-05 (late evening) — production configuration 9: the checkpoint changed, and it is the largest move this stack has made
+
+Every configuration from 1 to 8 served routed-experts-only weights beside a BF16 attention stack.
+Production 9 does not. The item this repository had called its largest for a week — dense BF16 GEMM
+at 45.3 % of a single-stream decode step — is closed, taken, and in production four hours after the
+TP=2 arm that proved it was worth taking.
+
+- **Production configuration 9** `[measured-here]`. `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw
+  (`2a30229e`, MIT), full scope, at TP=3 with expert parallelism, on image `exl3-zeus:754421f` and the
+  new `patches/tp3full/` tree. Control is production 8 — the **pool of two runs of the same script on
+  the same day**, because that arm's documented run-to-run spread is about 7 %. Medians of three
+  rounds, everything else identical:
+
+  | | **production 9** | production 8 | delta |
+  |---|---|---|---|
+  | C1 total / per stream | **69.90 / 75.91** tok/s | 56.88 / 62.39 | **+22.9 % / +21.7 %** |
+  | C2 / C4 / C6 total | 99.17 / 140.72 / 172.40 | 83.31 / 120.22 / 144.03 | +19.0 / +17.1 / +19.7 % |
+  | C8 total | **197.20** | 175.37 | **+12.5 %** |
+  | TTFT, C1 / C8 | 0.280 / 0.826 s | 0.344 / 0.906 | −18.6 / −8.8 % |
+  | prefill, fresh / 7K repeat | 1,738 / 1,575 | 1,776 / 1,537 | equal both ways |
+  | KV pool at 0.80, 1M context | **5,165,289** | 4,696,969 | **+10.0 %** |
+  | consumed memory per node | 58.3–59.1 GiB | 62.1–62.4 GiB | **−3.4 GiB** |
+  | draft acceptance · tokens per step | 61.94 % · 5.34 | 64.36 % · 5.50 | **−2.4 pt · −3.0 %** |
+  | boot, fast-load | 251 s (weights 57.9 s) | 264 s (73.2 s) | −5 % |
+  | gates cold and warm · MMLU sample | 10/10 · 12/12 · **86.47 ±0.74** | 10/10 · 12/12 · 86.4 ±0.7 | equal |
+
+  **The step arithmetic is the entry:** 88.2 → **70.3 ms**, 17.8 ms saved, while acceptance and
+  accepted length moved the *wrong* way by about 3 %. The whole gain is the dense stage going from
+  BF16 to 4–6 bit; none of it is drafter behaviour. The same lever measured 20.7 ms at TP=2 on two
+  nodes, so it is now **confirmed on two independent topologies**.
+
+- **What it cost, and the line is not empty** `[measured-here]`. Draft acceptance −2.4 points
+  (gate ≥60 %, passed) and accepted tokens per step −3.0 %; a **second patch tree** whose
+  `patch-vllm-tp3.py` and `preflight-tp3.py` diverge from production's on purpose and have to be kept
+  in step by hand; a **second 53 GB fast-load sidecar** per node on top of a second 154 GiB
+  checkpoint. Quality was looked for and not found: 86.47 ±0.74 against 86.4 ±0.7 is 0.07 points, a
+  tenth of either error bar, with both gates full cold and warm on the same engine instance in one
+  session. [docs/13](docs/13-full-scope-checkpoint.md) §7.4, [docs/11](docs/11-open-issues.md) §2.24.
+
+- **The TP=3 port: two constants, one patch of ours, and a padded-load path from upstream.** The two
+  launcher constants moved from `lcm(64, tp)` to `lcm(128, tp)` — vocab `padding_size` 192 → **384**
+  (155,136 = 3 × 404 × 128) and shared expert 2112 → **2304** (768 = 6 × 128 per rank) — because a
+  full-scope checkpoint quantizes both and every EXL3 pad has to be whole 128-column Hadamard blocks.
+  **2,176 is 128-aligned and not divisible by three; the width must be a multiple of `lcm(128, 3)`.**
+  Ours is **A9**: vLLM's tuple-shard loader slices the checkpoint's single 24,576-wide `qkv_proj`
+  using the module's *padded* `output_sizes` (3 × 8,448), so segment 1 reads from the wrong offset and
+  segment 2 overruns; it now splits by the checkpoint's real widths and lets the existing zero-pad
+  widen each rank's slice. No-op at TP≤2. [docs/03](docs/03-tp3-padding-and-sidecars.md) §1.1.
+
+- **A10, the pad audit — and the invariant it turned out to be checking had been holding by
+  accident** `[measured-here]`. The `svh = 0` mechanism was already running on this stack for
+  column-parallel EXL3 modules before anyone designed it, and **nothing verified it** — which is
+  precisely how the old 2,112 arithmetic would have produced silently wrong output rather than an
+  error. A10 now walks every EXL3 module after load and reports:
+
+  ```text
+  HAREM-FULLSCOPE assert 5: 285 EXL3 pad site(s) audited, 285 padded on this rank, all whole 128-blocks and exactly zero
+  ```
+
+  285 is what a model-free meta-device run predicted for rank 2 **before** the boot. The audit also
+  caught its own bug on first writing — it called a column-parallel module's *input* padded and
+  rejected `in_proj_qkv` on ranks 1 and 2 while rank 0 passed. **A single-rank test could not have
+  seen it.**
+
+- **Two TP=2 warnings did not reproduce, and one is a retraction** `[retracted]`. The dress rehearsal
+  said the full-scope checkpoint was ~10 GiB *heavier* per node and projected the TP=3 pool falling
+  4.70 M → ~3.4 M, −27 %, with the 1M-context claim at risk. Measured at three ranks: **3.4 GiB
+  lighter, pool +10.0 %**, `MAX_MODEL_LEN` never touched. The TP=2 pair was confounded — different
+  checkpoints *and* different `max_model_len` — and we record it as **not reproduced rather than
+  explained**, because the mechanism was never isolated. Audit row 32. The second, a cold-probe
+  signal that draft acceptance collapses, is flat on that same probe at TP=3 (row 30).
+
+- **Ten boot gates, all held on the first attempt** `[measured-here]`: the image capability
+  precheck (`[padload] ... =yes` on all three, or exit 23 before a byte of weight is read), the ten
+  patch anchors with the patch `sha256`, the preflight arithmetic, asserts 1–4 silent, assert 5 at
+  285/285, the padded `lm_head` line (154,880 → 155,136, two whole Hadamard blocks zeroed through
+  `svh`), the `CUDA_EXL3_DEBUG_NAMES` tally at **203 EXL3 / 113 bf16** read negatively, the KV pool,
+  free memory and swap, and both quality gates cold and warm. The acceptance list is written out in
+  [docs/09](docs/09-measurement-protocol.md) §5.1, in the order it was run.
+
+- **What stays BF16, measured rather than inferred.** The 113 are four families and nothing else:
+  KDA `f_b_proj`, `g_b_proj`, `in_proj_bfg_a` and MLA `kv_b_proj`. They are why 17.8 ms arrived
+  rather than the ~32 ms the estimate implied, and closing them is a **checkpoint-side** decision, not
+  ours ([docs/11](docs/11-open-issues.md) §2.25).
+
+- **Upstream.** Two more commits from the kernel author, and both were required — `f3e3090` (a padded
+  output dim accepted when the pad is whole 128-blocks, `svh` allocated zeroed; and a row-parallel
+  `suh` load that copies what exists and zeros the rest instead of narrowing off the end) and
+  `754421f` (the vocab loaders fill a prefix). On `f3e3090` alone the boot clears `create_weights`
+  and dies on a `copy_` shape mismatch in `_vocab_loaders`; on anything older it raises "EXL3 weights
+  cannot be zero-extended". [CREDITS](CREDITS.md).
+
+- **In the repository.** `patches/tp3full/` (the whole production tree, with its own README),
+  `patches/tp2/patch-fullscope-tp2.py` (the eight-anchor TP=2 patch, which had been referenced as
+  "not yet in repo"), `envs/env.tp3-full.example`, and `scripts/ab-quick2-full.sh` +
+  `scripts/boot-only-full.sh` — the tier-B harness for the full-scope tree, which differs from the
+  production one in a single line and was added rather than edited, for the same reason the patch
+  tree was ([docs/09](docs/09-measurement-protocol.md) §11.2).
+
+- **Rollback, one line or one file.** Delete `HAREM_EXL3_FULLSCOPE=1` from `EXTRA_ENV` and the same
+  patched image takes the upstream path; or start with `ENV_FILE` pointing at the production 8 env
+  file, which reverts the checkpoint, the image, the patch tree and the sidecar together because all
+  four are named in it. `patches/tp3/` and production 8's sidecar were never modified.
+
+---
+
 ## 2026-09-05 (evening) — the full-scope checkpoint loads, and the largest item on the stack is now a measurement
 
 The item this repository has called its largest is no longer an estimate, and the reason it had been

@@ -226,6 +226,51 @@ in the reasoning field and leaves the content field empty — same prompt, same 
 knows). A drop in the first with the second intact is a chat-template or parser problem, not a model
 problem.
 
+### 5.1 The acceptance list a production change actually gets, in the order it is run
+
+The two gates above are the floor, not the list. Below is the one production configuration 9 was
+promoted on ([13](13-full-scope-checkpoint.md) §7), written out because the **order** is the part
+that transfers: everything model-free comes before the boot, every gate comes before a speed number,
+the pool is read from a load boot, and the long benchmark is last because it is the only thing that
+costs half an hour. Nineteen points were written down before the arm and all nineteen were taken.
+
+| # | test | gate | why it is where it is |
+|---|---|---|---|
+| 1 | both patch scripts in `--check` mode, engine **down** | every anchor matches **exactly once** | costs seconds; a drifted anchor found here is not found four minutes into a boot |
+| 2 | **meta-device name-set dump, all three ranks** | 0 unmapped / 0 unfilled on **every** rank; the EXL3 and BF16 module sets match the list predicted beforehand | §11.3. Rank 2 is mandatory at TP=3: the pad lives there |
+| 3 | memory arithmetic, model-free | settled before spending a boot | the item that had forced the TP=2 arm down to a 31k pool |
+| 4 | preflight on the padded sidecar | vocab 155,136 → 51,712/rank (404 × 128); shared expert 2,304 → 768 (6 × 128); MLA and KDA 66 → 22; expert parallel mandatory | shape arithmetic needs no GPU and no weights |
+| 5 | **image capability gate**, in the prelude | `[padload] ... =yes` on all three capabilities, or **exit 23** | it runs *before the weights*: both failure modes leave a half-loaded stack |
+| 6 | patch anchors, at boot | `anchors 1/1: A1 ... A10`, plus the patch `sha256` in the log | says which code is running, not which code is on disk |
+| 7–10 | asserts 1–4 | **silent** | shard order, `suh` collapse, `conv1d` axis, mapping/shard-id agreement |
+| 11 | **assert 5, the pad audit** | `285 EXL3 pad site(s) audited, 285 padded on this rank, all whole 128-blocks and exactly zero` | the count is one an independent model-free run predicted; **absence of the line is a failure** |
+| 12 | `CUDA_EXL3_DEBUG_NAMES` tally | **203 EXL3 / 113 bf16**, and nothing heavy in the `-> unquantized` list | read **negatively**: the gate is which modules are *absent* from the miss list |
+| 13 | KV pool, from the boot log | reported; `≥ 3.4 M` expected, below 3 M stop | free with the boot, and on an arm that moves a page size it **is** the result |
+| 14 | free memory and swap | ≥ 4 GiB free on every node, swap flat | |
+| 15–16 | correctness probe, code exam | **10/10 and 12/12, cold** | before any speed number, always |
+| 17 | speed, **3 rounds, median** | C1 ≥ the control's, C8 ≥ the control's, prefill-fresh ≥ the control's | §1; three rounds only because the tuner cache is warm |
+| 18 | draft acceptance | ≥ 60 % | a speed win paid for out of acceptance is not a win |
+| 19 | MMLU sample (57 × 35, 0-shot) | inside the control's error bar | ~26 min; last, because it is the expensive one |
+| 20 | gates again, **warm** | 10/10 · 12/12 after the full benchmark | the run that carries weight — see above |
+
+Four properties of that list are worth stealing even if none of the specific tests apply to you.
+
+**Half of it costs no GPU.** Points 1–4 run in a throwaway CPU container beside an idle engine and
+between them catch every failure that loads cleanly and computes the wrong thing (§9, §11.3).
+
+**Two of the boot gates are read negatively.** Point 12's question is not "did anything print" but
+"is the module I care about *absent* from the miss list", and point 11's is "did the audit line
+appear at all". A gate whose passing state is silence has to be checked for presence, because silence
+is also what a gate that never ran looks like — which is exactly how the same diagnostic failed on
+the TP=2 arm ([13](13-full-scope-checkpoint.md) §6.3).
+
+**Every count in it was predicted before it was measured.** 285 pad sites, 203 EXL3 linears, 113 BF16,
+404 × 128 per rank: each came out of a model-free derivation first, so agreeing with the log is
+evidence rather than an observation about the log.
+
+**The list ends where it began.** Point 20 is point 15 run again on a used allocator, and point 13 is
+only trustworthy because point 3 settled the arithmetic first.
+
 ---
 
 ## 6. Realistic, synthetic, and fresh

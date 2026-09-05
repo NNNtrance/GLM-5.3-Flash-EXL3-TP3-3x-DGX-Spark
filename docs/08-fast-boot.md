@@ -1,7 +1,8 @@
-# 08 — Fast boot: 618 s to 274 s
+# 08 — Fast boot: 618 s to 274 s, and then to 251 s
 
-Cold boot on this stack — container start to `Application startup complete` — took **617.9 s**. It now takes **273.6 s**, and
-the weight-loading phase inside it went from **426.3 s to 67.2 s** (6.3×). Speed, quality and the KV pool did not pay for it:
+Cold boot on this stack — container start to `Application startup complete` — took **617.9 s**. It now takes **251 s** on
+production configuration 9, and it took **273.6 s** on the arm this page itemises; the weight-loading phase inside it went from
+**426.3 s to 67.2 s** (6.3×), and to **57.9 s** once the checkpoint underneath it got smaller (§8.1). Speed, quality and the KV pool did not pay for it:
 the gates are unchanged, the sweep is inside its own round-to-round spread, and the pool came out slightly **larger** than
 before. This page is the account — how the boot was measured, the four changes in order, the proof that the fast path restores
 bit-identical weights, the regression that had to be chased, what it costs, and how to undo any of it in one line.
@@ -390,6 +391,57 @@ table** on top of S4. `HAREM_FASTLOAD_READ=mmap` exists in the code as a one-var
 
 ---
 
+### 8.1 Two patch trees means two sidecars, and the identity is what makes that safe
+
+Production configuration 9 serves a different checkpoint from a different patch tree
+([13](13-full-scope-checkpoint.md)), and this page is where that lands. **Four inputs to the manifest
+identity moved at once** — the checkpoint, the sidecar `config.json`, the patch directory and the
+image — so production 8's sidecar could not be reused under any circumstance, and the arm needed its
+own dump boot.
+
+Two things follow, and both are cheap only if you plan them.
+
+**Give the new sidecar its own directory name.** `FASTLOAD_DIR` is mounted **read-write** in dump
+mode, at the same path inside the container as outside, so reusing the name would have overwritten
+production 8's sidecar during the dump — destroying the rollback while building its replacement. One
+line in the env file, and it is the difference between an experiment and an outage.
+
+**Keep the experimental patches in their own directory.** The identity hashes every `patch-*.py` in
+the patch directory and the full text of the prelude (§4), so writing the full-scope patch into
+`patches/tp3/` would have refused the next production boot — which is exactly what happened twice on
+5 September before the second tree existed ([09](09-measurement-protocol.md) §11.2). The full-scope
+arm was built in `patches/tp3full/` instead, and **production 8 stayed up, untouched, throughout**.
+The trees' relationship, the file-by-file check that they have not drifted, and the merge that is
+still owed are in [`patches/tp3full/README.md`](../patches/tp3full/README.md).
+
+The boot ledger for the new arm, both boots, all three ranks `[measured-here]`:
+
+| arm | mode | wall | weights | drafter | init engine | KV pool |
+|---|---|---|---|---|---|---|
+| production 9, **dump** | cold read + dump | **620 s** | 163.9 / 159.2 / 161.6 s | 2.4 / 2.3 / 2.8 s | 66.0 s | 4,840,220 — **not usable** |
+| production 9, **load** | fastload | **251 s** | **57.9 s** (50.24 GiB, 932 MB/s) + 5.4 s verify | 2.3 s | 66.8 s | **5,165,289** |
+| production 8 (control) | fastload | 264 s | 73.2 s | 2.2 s | 65.2 s | 4,696,969 |
+
+The dump wrote **50.24 GiB in 22 shards per rank** (219 / 202 / 241 s = 246 / 268 / 224 MB/s) plus a
+2.04 GiB drafter sidecar, with `MANIFEST.json` present on all three (53 G, 25 files each).
+
+Three things in that table are worth reading rather than skipping.
+
+**The new arm restores 21 % faster** — 57.9 s against 73.2 s — for a reason that has nothing to do
+with this page's work: its sidecar is simply smaller, 50.24 GiB per rank against about 63, because the
+checkpoint behind it is smaller. Boot time followed the weights, as it should.
+
+**The dump boot's pool reads 4,840,220 and the load boot's 5,165,289**, a 6.3 % gap on an otherwise
+identical arm. That is §5's page-cache mechanism, measured again on a new arm, and it is the whole
+reason for the rule: **never record a dump boot's pool as a result**
+([09](09-measurement-protocol.md) §11.1). Read the other way round, the pair also prices fast-load
+itself at about **2 GiB and ~325k KV tokens** on this arm.
+
+**Both rows in the comparison are load boots**, which is what makes the +10.0 % pool figure a
+like-for-like reading rather than an artefact of which boot each side happened to come from.
+
+---
+
 ## 9. Rollback
 
 Six independent one-line rollbacks; none depends on another, and none touches the image, because every patch runs in the
@@ -460,6 +512,11 @@ newest arms are **called conditionally**, from the shell script itself, so an en
 for one of them cannot be broken by an anchor that drifted in some other image. `patches/tp3/README.md`
 has the full description of each patch's env knob and default; this table is only the order and the
 gate.
+
+This table is `patches/tp3/`'s prelude, which is production configurations 1–8 and the rollback path.
+Production 9 runs `patches/tp3full/tp3full-prelude.sh`, which is this list plus two steps at the end
+of it — `patch-fullscope-tp3.py` and `check-padload-tp3.py`, both behind `HAREM_EXL3_FULLSCOPE`
+([13](13-full-scope-checkpoint.md) §7). Everything below applies to both.
 
 | # | Command | Invoked | Effect gated by | Introduced |
 |---|---|---|---|---|

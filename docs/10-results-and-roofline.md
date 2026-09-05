@@ -29,34 +29,52 @@ read-bandwidth ruler drifted 6.5 % between three runs on the same idle machine t
 
 ## 1. The production configuration
 
-**Production configuration 8**, since 5 September afternoon: production 7 with the image moved to
-`exl3-zeus:62f53e6` — upstream's `had_in` commit `a47da6e` plus the note that bounds what is left of
-it. **Nothing else changed**, and the point of the entry is that nothing else moved either.
+**Production configuration 9**, since 5 September 18:40: production 8 with the **checkpoint** changed
+— `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw, full scope, on image `exl3-zeus:754421f` and the
+`patches/tp3full/` tree. It is the first entry on this page in which the model itself is different,
+and it is the largest single move the stack has made ([13](13-full-scope-checkpoint.md)).
 
-| | **production 8** | production 7 | production 6 |
+**One caption note.** The settings block at the top of this page describes production 8 and still
+governs every section from §4 onwards, which was measured on it. For §1 and §2.3, substitute the
+full-scope checkpoint, image `754421f` and `TP3_DIR=.../tp3full`; everything else — TP=3 + EP, fp8 KV
+and fp8 draft cache, DFlash2 k=7, block size 256, MNBT 2048, 8 sequences, 8 NCCL channels, 0.80, the
+settle gate, temperature 0, effort low, medians of three rounds — is unchanged, which is what makes
+the two columns comparable.
+
+| | **production 9** | production 8 | production 7 |
 |---|---|---|---|
-| C1 aggregate / per stream | **56.8** / 63.9 tok/s `[measured-here]` | 57.0 / 64.0 | 56.9 / 63.6 |
-| C2 / C4 / C6 / **C8** aggregate | 83.5 / 119.5 / 146.0 / **172.8** tok/s `[measured-here]` | 80.9 / 120.0 / 143.4 / 175.1 | 84.2 / 118.5 / 142.9 / 168.9 |
-| TTFT, C1 / C8 | 0.34 / 0.91 s (production 7's, not re-read) `[not tested]` | **0.34 / 0.91 s** | 0.41 / 1.01 |
-| Draft acceptance (per-concurrency medians) | 62–64 % `[measured-here]` | 60.8–64.3 % | 61–65 % |
-| Accepted tokens per step | 5.3–5.5 `[measured-here]` | 5.3–5.5 | 5.3–5.5 |
-| Prefill, fresh unseen ~8.5K prompts (median of 3) | **1,780** tok/s `[measured-here]` | 1,769 | 1,792 |
-| KV pool | **4,674,931** tokens (4.67 concurrent 1M-token requests) `[measured-here]` | 4,699,724 | 4,449,035 |
-| Weights per node | 54.86 GiB `[measured-here]` | 54.86 | 54.86 |
-| Boot, container start → API ready | ~274 s plus the settle wait `[measured-here, raw lost]` | ~274 s | 274 s |
+| C1 aggregate / per stream | **69.9 / 75.9** tok/s `[measured-here]` | 56.9 / 62.4 | 57.0 / 64.0 |
+| C2 / C4 / C6 / **C8** aggregate | 99.2 / 140.7 / 172.4 / **197.2** tok/s `[measured-here]` | 83.3 / 120.2 / 144.0 / 175.4 | 80.9 / 120.0 / 143.4 / 175.1 |
+| TTFT, C1 / C8 | **0.280 / 0.826** s `[measured-here]` | 0.344 / 0.906 | 0.34 / 0.91 |
+| Draft acceptance (per-concurrency medians) | **61.9–62.6 %** `[measured-here]` | 61.7–64.4 % | 60.8–64.3 % |
+| Accepted tokens per step | **5.34** at C1 `[measured-here]` | 5.50 | 5.3–5.5 |
+| Prefill, fresh unseen ~8.5K prompts (median of 3) | **1,738** tok/s `[measured-here]` | 1,776 | 1,769 |
+| Prefill, 7K warm repeat | **1,575** tok/s `[measured-here]` | 1,537 | 1,529 |
+| KV pool | **5,165,289** tokens (5.17 concurrent 1M-token requests) `[measured-here]` | 4,696,969 | 4,699,724 |
+| Consumed memory per node (weights + non-torch) | **58.3–59.1 GiB** `[measured-here]` | 62.1–62.4 | — |
+| Boot, container start → API ready | **251 s** (weights 57.9 s) `[measured-here]` | 264 s (weights 73.2) | ~274 s |
 | Quality gates, cold and warm | 10/10 · 12/12 `[measured-here]` | 10/10 · 12/12 | 10/10 · 12/12 |
+| MMLU sample (1,995 q) | **86.47 ±0.74** `[measured-here]` | 86.4 ±0.7 | 86.4 ±0.7 |
 
-**Every difference in that first column is inside its own band, and that is the result.** The
-`had_in` commit was priced at ~0.2–0.3 % of prefill wall before it was built
-([11](11-open-issues.md) §2.19), i.e. deliberately below the noise floor of a serving benchmark; it
-was adopted to keep the image on upstream's head rather than to buy tokens, and it did exactly that.
-C1 −0.4 %, C8 −1.3 %, prefill +0.6 %, pool −0.5 %: four signs, no mechanism, three sweep rounds each.
-A stack that publishes a 1 % change as a win on three rounds would have called two of these results.
+**The step arithmetic is the entry, not the tok/s.** 5.50 tokens per step at 62.39 per stream is an
+88.2 ms step; 5.34 at 75.91 is **70.3 ms**. **17.8 ms saved, while acceptance and accepted length
+moved the wrong way by about 3 %** — so the whole gain is the dense stage going from BF16 to 4–6 bit
+and none of it is drafter behaviour. The same lever measured 20.7 ms at TP=2 on two nodes, which
+makes this the first result on this page confirmed on two independent topologies
+([13](13-full-scope-checkpoint.md) §7.3).
 
-**What production 7 bought, and still holds**, is the pool at **+5.6 % over production 6** and a TTFT
-better at both ends, from putting the DFlash2 drafter's own cache at fp8 ([07](07-kv-and-draft-page.md)
-§7). Its speed column was unchanged too, for the same reason and with the same honesty: C8 read
-+3.7 % and C2 −3.9 %, opposite directions, both inside band.
+**What it cost, and the line is not empty:** draft acceptance **−2.4 points** (64.4 → 61.9 %, gate
+≥60 %), accepted tokens per step **−3.0 %**, a second patch tree to keep in step with the first, and
+a second 53 GB fast-load sidecar per node. Quality was looked for and not found: 86.47 ±0.74 against
+86.4 ±0.7 is 0.07 points, a tenth of either bar, with both gates full cold and warm on the same
+engine instance in one session ([13](13-full-scope-checkpoint.md) §7.4).
+
+**Production 8's entry was that nothing moved, and it still reads that way.** The `had_in` commit was
+priced at ~0.2–0.3 % of prefill wall before it was built ([11](11-open-issues.md) §2.19) — below the
+noise floor of a serving benchmark — and it was adopted to keep the image on upstream's head rather
+than to buy tokens. Four signs, every one inside its own band. **Production 7** bought the pool at
++5.6 % over production 6 and a better TTFT at both ends, from the fp8 draft cache
+([07](07-kv-and-draft-page.md) §7), with its speed column unchanged in both directions.
 
 Three rows need their footnote said out loud rather than hidden in a tier label.
 
@@ -101,15 +119,18 @@ Each row is a boot with its own gates. Aggregate tok/s, medians of rounds 3–5 
 | + `9bf594c`, tuner cache warm | 54.5 | 112.0 | 159.9 | 1,709 | 4,429,752 | [12](12-tuner-cache.md); speed unchanged by design, protocol 5 rounds → 3 |
 | + dual cable + `NCCL_PTR_CUDA` (production 6) | 56.9 | 118.5 | 168.9 | 1,792 | 4,449,035 | [06](06-nccl-mesh.md) §6–§8; the second cable of every pair had never carried a packet |
 | + fp8 draft cache + settle gate (production 7) | 57.0 | 120.0 | 175.1 | 1,769 | 4,699,724 | [07](07-kv-and-draft-page.md) §7; speed unchanged, pool +5.6 %, the first pool number taken with a settled baseline |
-| **+ image `62f53e6` (production 8)** | **56.8** | **119.5** | **172.8** | **1,780** | **4,674,931** | upstream's `had_in` fix; every column inside its own band, which is what a 0.2–0.3 % change should look like |
+| + image `62f53e6` (production 8) | 56.8 | 119.5 | 172.8 | 1,780 | 4,674,931 | upstream's `had_in` fix; every column inside its own band, which is what a 0.2–0.3 % change should look like |
+| **+ the full-scope checkpoint (production 9)** | **69.9** | **140.7** | **197.2** | **1,738** | **5,165,289** | [13](13-full-scope-checkpoint.md); the dense stage goes from BF16 to 4–6 bit. Step 88.2 → 70.3 ms, pool +10 %, memory −3.4 GiB per node, acceptance −2.4 pt |
 
-Three of those rows are the interesting ones. **The third node initially made the machine slower**, by
+Four of those rows are the interesting ones. **The third node initially made the machine slower**, by
 8–29 %, and that was a one-line kernel bug rather than a cost of the arrangement. **The largest single
-jump in the KV pool cost no memory at all** — it was a per-request block counter, not bytes. And the
+jump in the KV pool cost no memory at all** — it was a per-request block counter, not bytes. The
 **dual-cable row is not a tuning win at all**: half the fabric had never been used, by any workload,
-since the cluster was built. Several rows move by less than their own spread and are in the table
-because they changed the boot, the pool or the measurement protocol rather than the speed — the tuner
-cache, the fast-boot sidecar, production 7 and production 8.
+since the cluster was built. And **the last row is not a tuning win either** — it is a different
+checkpoint, and it moved every column further than every tuning row after the kernel fix put
+together. Several rows move by less than their own spread and are in the table because they changed
+the boot, the pool or the measurement protocol rather than the speed — the tuner cache, the fast-boot
+sidecar, production 7 and production 8.
 
 Rejected on the way, each with its own boot and gates:
 
@@ -164,11 +185,15 @@ collapsed the pool before ([07](07-kv-and-draft-page.md) §1).
 
 ### 2.2 A full-scope checkpoint at TP=2: the dense-stage lever, measured
 
-This arm is **not** in the progression above, because it is not a production candidate and it is not
-at TP=3. It is the experiment that answers the largest open item this repository has carried
-([11](11-open-issues.md) §2.22): what is the BF16 dense stage actually worth, if the same layers
-were 4-bit. The full story — why the checkpoint would not load, the three-layer loader patch, and
-what TP=3 needs — is [13](13-full-scope-checkpoint.md).
+This arm is **not** in the progression above, because it was run at TP=2 on two nodes as the dress
+rehearsal for the row that is — production 9, §2.3. It is the experiment that answered the largest
+open item this repository carried ([11](11-open-issues.md) §2.22): what is the BF16 dense stage
+actually worth, if the same layers were 4-bit. The full story — why the checkpoint would not load,
+the loader patch, and the TP=3 port — is [13](13-full-scope-checkpoint.md).
+
+Two of its readings did **not** survive TP=3 and are flagged where they appear: the memory figure
+below (§6.2 of [13](13-full-scope-checkpoint.md)) reversed sign, and a cold-probe acceptance collapse
+did not reproduce at all.
 
 **Settings, both arms identical unless the row says otherwise:** **two** nodes, **TP=2**, expert
 parallel **off**, image `exl3-zeus:62f53e6`, KV `fp8`, DFlash2 draft k=7,
@@ -225,6 +250,33 @@ and every prefill number here.
 > **47.40**. The like-for-like deltas are the ones above. The full-scope column, the quality gate and
 > the conclusion are unaffected ([11](11-open-issues.md) §1.9 row 31).
 
+### 2.3 The same lever at TP=3, and what promoted it
+
+Production 9. Same three nodes, same everything else, medians of three rounds, against a control that
+is the **pool of two same-day runs** of the same script because that arm's run-to-run spread is about
+7 % `[measured-here]`. Full table, boot ledger, per-round figures and the cost line:
+[13](13-full-scope-checkpoint.md) §7.3–§7.4.
+
+| metric | **full scope, TP=3** | experts-only, TP=3 (production 8) | delta |
+|---|---|---|---|
+| C1 total / per stream | **69.90 / 75.91** tok/s | 56.88 / 62.39 | **+22.9 % / +21.7 %** |
+| C2 / C4 / C6 total | 99.17 / 140.72 / 172.40 | 83.31 / 120.22 / 144.03 | +19.0 / +17.1 / +19.7 % |
+| C8 total | **197.20** | 175.37 | **+12.5 %** |
+| TTFT, C1 / C8 | 0.280 / 0.826 s | 0.344 / 0.906 | −18.6 / −8.8 % |
+| prefill, fresh / 7K repeat | 1,738 / 1,575 | 1,776 / 1,537 | **equal** both ways |
+| draft acceptance at C1 · tokens per step | 61.94 % · 5.34 | 64.36 % · 5.50 | **−2.4 pt · −3.0 %** |
+| consumed memory per node | 58.3–59.1 GiB | 62.1–62.4 | **−3.4 GiB** |
+| KV pool at 0.80, 1M context | **5,165,289** | 4,696,969 | **+10.0 %** |
+| boot, fast-load | 251 s (weights 57.9) | 264 s (weights 73.2) | −5 % |
+| gates cold and warm · MMLU sample | 10/10 · 12/12 · **86.47 ±0.74** | 10/10 · 12/12 · 86.4 ±0.7 | equal |
+
+**The two things this row demonstrates that §2.2 could not.** First, the TP=2 arm's two loudest
+warnings were artefacts of the rig: at three ranks the arm is *lighter* rather than 10 GiB heavier,
+and draft acceptance is flat on the probe that had shown it collapsing. Second, and more useful:
+**the step-time saving reproduced across topologies to within a millisecond and a half** — 20.7 ms at
+TP=2, 17.8 ms at TP=3 — which is the strongest evidence on this page that the mechanism was
+understood rather than merely observed.
+
 ---
 
 ## 3. Against the NVFP4 sibling stack
@@ -233,33 +285,33 @@ Same three nodes, same model, same draft, same prompt set, different quantizatio
 figures are from [`NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark`](https://github.com/NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark)
 `[measured-here]`.
 
-| | **EXL3 TP=3 (this recipe)** | NVFP4 TP=3 |
-|---|---|---|
-| C1 aggregate | **57.0** | 57–60 |
-| C8 aggregate | **175.1** | 150 |
-| prefill, fresh | **1,769** | 1,585 (7K) |
-| TTFT C1 | **0.34 s** | 0.38 s |
-| KV pool | **4,699,724 @ 0.80** | 4,321,739 @ 0.88 |
-| weights per node | **54.9 GiB** | 65.5 GiB |
-| boot to serving | **274 s** | ~300 s |
-| gates | 10/10 · 12/12 | 10/10 · 12/12 |
-| MMLU | 86.4 ±0.7 (1,995-question sample, at TP=2) | 85.9 ±0.3 (full, 14,042 questions) |
+| | **EXL3 TP=3, production 9** | EXL3 TP=3, production 8 | NVFP4 TP=3 |
+|---|---|---|---|
+| C1 aggregate | **69.9** | 56.9 | 57–60 |
+| C8 aggregate | **197.2** | 175.4 | 150 |
+| prefill, fresh | **1,738** | 1,776 | 1,585 (7K) |
+| TTFT C1 | **0.280 s** | 0.344 s | 0.38 s |
+| KV pool | **5,165,289 @ 0.80** | 4,696,969 @ 0.80 | 4,321,739 @ 0.88 |
+| consumed memory per node | **58.3–59.1 GiB** | 62.1–62.4 GiB | — |
+| boot to serving | **251 s** | 264 s | ~300 s |
+| gates | 10/10 · 12/12 | 10/10 · 12/12 | 10/10 · 12/12 |
+| MMLU | **86.47 ±0.74** (1,995-question sample, TP=3) | 86.4 ±0.7 (sample, at TP=2) | 85.9 ±0.3 (full, 14,042 questions) |
 
-**EXL3 is now level on single-stream decode and ahead on aggregate throughput, on prefill, on memory
-and on boot.** A day earlier this row read "behind on single-stream and prefill"; what changed was
-not the quantization but the fabric (§2, [06](06-nccl-mesh.md) §6–§8). The KV comparison stays the
-sharper one: EXL3 reaches a larger pool at `gpu-memory-utilization 0.80` than NVFP4 reaches at 0.88,
-which means headroom NVFP4 does not have.
+**EXL3 is now ahead on single-stream decode, aggregate throughput, memory and boot, and level on
+prefill.** Two days earlier this row read "behind on single-stream and prefill". The KV comparison
+stays the sharper one: EXL3 reaches a **19 % larger** pool at `gpu-memory-utilization 0.80` than
+NVFP4 reaches at 0.88, which is headroom NVFP4 does not have.
 
-Three caveats that matter, and they all point the same way. The MMLU numbers are not comparable — one
-is a full run, one is a 1,995-question sample measured on a two-node arrangement. The prefill columns
-are not the same measurement: ours is `prefill-fresh` on unseen prompts, the NVFP4 figure is a warm
-7K prompt, and the honest comparison would need both stacks measured the same way. And **three
-findings on this page are fabric-level, not format-level** — `NCCL_MAX_NCHANNELS=8` (+13 % at C8),
-the idle second cable, and `NCCL_PTR_CUDA` — all three use the same plugin over the same wiring and
-**none of them has been applied to the NVFP4 stack** `[not tested]`. If they transfer, most of this
-table's advantage transfers with them and the comparison moves back. Read it as "this is what the
-EXL3 stack does today", not as "EXL3 beats NVFP4".
+Four caveats that matter, and they all point the same way. The MMLU numbers are not comparable — one
+is a full run, ours are 1,995-question samples. The prefill columns are not the same measurement:
+ours is `prefill-fresh` on unseen prompts, the NVFP4 figure is a warm 7K prompt, and the honest
+comparison would need both stacks measured the same way. **Three findings on this page are
+fabric-level, not format-level** — `NCCL_MAX_NCHANNELS=8` (+13 % at C8), the idle second cable, and
+`NCCL_PTR_CUDA` — all three use the same plugin over the same wiring and **none of them has been
+applied to the NVFP4 stack** `[not tested]`. And **the largest single item, production 9, is
+checkpoint-level rather than format-level**: an NVFP4 checkpoint that quantized the same dense path
+would collect the same ~18 ms per decode step, and none is known to exist `[not tested]`. Read this
+table as "this is what the EXL3 stack does today", not as "EXL3 beats NVFP4".
 
 ---
 
@@ -354,6 +406,16 @@ profiler-free engine within 2.5 %. The absolute *idle* figures do not, and §5.7
 Production configuration **8** differs from this arm by one image (`62f53e6`) and moves no speed
 number outside its band, so this breakdown is read as production 8's as well — with the `had_in` row
 now a little smaller than the 5.6 % printed here `[not tested]`.
+
+**Production configuration 9 is a different matter, and this section has not been re-profiled on it**
+`[not tested]`. Production 9 changed the checkpoint specifically to remove the largest row below —
+dense BF16 GEMM, 45.3 % of a C1 step — and it took 17.8 ms off an 88.2 ms step (§2.3). So the
+*shares* below are production 7 and 8's, not today's: whatever the current ranking is, that row is no
+longer at the top of it. What does carry forward unchanged is everything the trace established about
+*structure* rather than proportion — that the NCCL class is 100 % exposed, that the C1 idle budget is
+3.75 % and mostly per-kernel dispatch, and that two of our published targets did not exist. Re-running
+it costs a six-minute window and 7–8 GiB of host RAM per node, and it is on the list rather than
+done.
 
 ### 5.1 The totals, and what a day of fabric and cache work did
 
@@ -836,7 +898,7 @@ rather than re-derived `[measured-here]`:
 
 | # | target | prefill | C1 | C8 | achieved vs ruler | realistic gain | owner |
 |---|---|---|---|---|---|---|---|
-| 1 | **Dense BF16 GEMM — the unquantized half of the checkpoint** | 17.4 % | **45.3 %** | 21.1 % | 79 % of shape-matched achievable TFLOP/s | **the largest item on the stack, and now measured rather than estimated: +24.3 % per stream at TP=2** (§2.2, [13](13-full-scope-checkpoint.md)) | **checkpoint scope + the vLLM model file**, not the kernels |
+| 1 | **Dense BF16 GEMM — the unquantized half of the checkpoint** | 17.4 % | **45.3 %** | 21.1 % | 79 % of shape-matched achievable TFLOP/s | **CLOSED, and taken: +21.7 % per stream at TP=3, in production since 5 September evening** (§2.3, [13](13-full-scope-checkpoint.md)) | was **checkpoint scope + the vLLM model file**, not the kernels |
 | 2 | MoE trellis GEMM, large M | 28.5 % | 29.7 % | **51.6 %** | 78–85 % of 225 GB/s in the engine; duplicate-read lever **closed** (§5.4) | ~0 | cuda-exl3 — **closed** |
 | 3 | NCCL — **overlap** with compute, currently exactly 0 (§5.7) | 14.5 % | 15.5 % | 11.7 % | ~20 GB/s bus against a ~30 GB/s per-node PCIe ceiling | bandwidth ≤ −2…4 %; **overlap untried, ceiling is the whole class** | vLLM (the fabric side is spent) |
 | 4 | Hyper-connection mixing, 3 passes over a 4× residual | 12.0 % | 2.2 % | 1.5 % | 86–91 % of the ruler | ceiling −2.5…2.7 %; the kernel exists and delivers **−1.0…1.1 %** (§5.5.1) | vLLM / TileLang |
@@ -850,7 +912,8 @@ rather than re-derived `[measured-here]`:
 | 12 | `exl3_moe_combine` | **0 %** | 0 | 0 | — | **the kernel does not exist in this build** | — |
 
 Four things a reader should take from that table, and the first three have changed since it was a
-reconciliation.
+reconciliation. **Row 1 has since been taken**, so read the table as the ranking that *produced*
+production 9 rather than as today's; the shares have not been re-measured on it (§5).
 
 **The largest item is not a kernel and not the fabric — it is the checkpoint's scope, and two lines
 in a model file.** Dense BF16 GEMM is 45 % of a C1 step because `scope: glm53_routed_experts_only`
@@ -860,14 +923,19 @@ stage is weight-bandwidth-bound at M=8, so 4 bpw instead of 16 is ~4× less traf
 ~11 ms, **~32 ms off a 94.65 ms step, roughly +34 % single-stream** `[estimate]`. Everything in the
 `cuda-exl3` column of this table comes to about 5 %.
 
-**That is no longer an estimate.** A full-scope checkpoint was loaded at TP=2 on 5 September and
-measured at **+24.3 % per stream, +26.4 % aggregate, with the MMLU sample inside its error bar and
-draft acceptance unchanged** `[measured-here]` — 65 % of the estimate, the difference being the
-layers this particular checkpoint leaves in BF16 anyway (§2.2). Two things had to be fixed first, and
-neither is about quantization: the model class declares no `packed_modules_mapping`, and the vLLM
-`glm5next` model file pins the attention stack to BF16 in two places that between them lock **72.8 %**
-of the dense traffic. **The scoped checkpoint was not a quality choice; it was the only scope that
-could load** ([13](13-full-scope-checkpoint.md), [11](11-open-issues.md) §2.22).
+**That is no longer an estimate, and it is no longer open.** A full-scope checkpoint was measured at
+TP=2 on 5 September at +24.3 % per stream, and **promoted to production the same evening at TP=3:
++21.7 % per stream, +12.5 % at C8, KV pool +10.0 %, MMLU inside the bar** `[measured-here]` (§2.3).
+Against the estimate, **17.8 ms of the ~32 ms arrived** — 65 % at TP=2 and 55 % at TP=3 of a step
+that was itself shorter — and the difference is the layers this particular checkpoint leaves in BF16
+anyway. **The +34 % was not refuted; it was an upper bound, and it is now bounded from both sides.**
+
+Three things had to be fixed first, and none is about quantization: the model class declares no
+`packed_modules_mapping`; the vLLM `glm5next` model file pins the attention stack to BF16 in two
+places that between them lock **72.8 %** of the dense traffic; and the KDA block is factorised
+differently in the checkpoint from what the reader expects. **The scoped checkpoint was not a quality
+choice; it was the only scope that could load** ([13](13-full-scope-checkpoint.md),
+[11](11-open-issues.md) §2.22).
 
 **The `cuda-exl3` kernel library is closed as a target on this stack.** Rows 2, 5, 7, 10, 11 and 12
 are at the roofline, bounded below what a rebuild is worth, or not kernels at all. Two of them closed

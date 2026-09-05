@@ -1,4 +1,4 @@
-# `0002-harem-on-77513d2.patch` — RETIRED 5 Eyl 2026
+# `0002-harem-on-77513d2.patch` — RETIRED 5 September 2026
 
 Superseded by upstream. Do **not** apply it on top of `a95e809` or later.
 

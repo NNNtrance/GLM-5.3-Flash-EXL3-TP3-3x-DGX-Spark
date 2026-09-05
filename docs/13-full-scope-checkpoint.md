@@ -1,23 +1,33 @@
-# 13 — The full-scope checkpoint: three loader layers, and the dense stage measured
+# 13 — The full-scope checkpoint: five loader layers, a padded load, and the dense stage measured
 
-Our production checkpoint is `scope: glm53_routed_experts_only`, so attention, the KDA layers, the
-shared experts and `lm_head` stream BF16 weights beside a 4-bit routed half. That dense stage is
-**45.3 % of a single-stream decode step** ([10](10-results-and-roofline.md) §5.3) — the largest single
-item this repository carries, and larger than everything in the `cuda-exl3` column of its target table
-put together.
+**This is the production recipe.** Since 5 September 2026, 18:40 local, this stack serves
+`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw at TP=3 with expert parallelism — production
+configuration 9.
 
-This page is what happened when we tried to remove it: a full-scope EXL3 checkpoint
-(`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw), the three independent reasons it would not load, the
-loader patch that fixed them, and the measurement at TP=2 — **+24.3 % per stream, +26.4 % aggregate at
-a single stream, quality inside the error bar, and a context cost that makes TP=2 a measurement rig
-rather than a serving configuration**.
+Every configuration before it served `scope: glm53_routed_experts_only`, so attention, the KDA
+layers, the shared experts and `lm_head` streamed BF16 weights beside a 4-bit routed half. That dense
+stage was **45.3 % of a single-stream decode step** ([10](10-results-and-roofline.md) §5.3) — the
+largest single item this repository has carried, and larger than everything in the `cuda-exl3` column
+of its target table put together.
 
-**The reframing is the part worth reading even if you never load this checkpoint.** We had written the
-scope of our checkpoint down as a quality decision by its publisher. It was not. Two lines in the
-vLLM `glm5next` model file pin the whole attention stack to BF16 regardless of what the weights
-contain, and they lock **72.8 %** of the dense traffic. Until those lines are conditional, no
-checkpoint of any scope can put attention on EXL3 — so `routed_experts_only` was not a choice about
-quality, it was the only thing that could load ([11](11-open-issues.md) §1.9 row 29).
+This page is what happened when we removed it: the three independent reasons a full-scope checkpoint
+would not load at all (§2), the loader patch (§3), the dress rehearsal at TP=2 (§4–§6), and the TP=3
+port that put it in production (§7) — **+22.9 % total and +21.7 % per stream at C1, +12.5 % at C8,
+KV pool +10.0 %, 3.4 GiB lighter per node, quality unchanged, for 2.4 points of draft acceptance**.
+
+**Two reframings are worth reading even if you never load this checkpoint.**
+
+The first: we had written the scope of the old checkpoint down as a quality decision by its
+publisher. It was not. Two lines in the vLLM `glm5next` model file pin the whole attention stack to
+BF16 regardless of what the weights contain, and they lock **72.8 %** of the dense traffic. Until
+those lines are conditional, no checkpoint of any scope can put attention on EXL3 — so
+`routed_experts_only` was not a choice about quality, it was the only thing that could load
+([11](11-open-issues.md) §1.9 row 29).
+
+The second: **an EXL3 tensor cannot be zero-extended, but it can be loaded narrow into a parameter
+the engine has padded** — with `svh = 0` on the pad, and only when the pad occupies whole 128-column
+Hadamard blocks. That single sentence is the whole of the TP=3 port, and it was already happening on
+this stack, unchecked, before anyone designed it (§7.1).
 
 ---
 
@@ -27,7 +37,7 @@ quality, it was the only thing that could load ([11](11-open-issues.md) §1.9 ro
 |---|---|
 | Repository | `turboderp/GLM-5.3-Flash-exl3`, branch `4.05bpw` |
 | Revision we ran | `2a30229e67012798ba9f0cd832bb78abf4c363d5` (short `2a30229e`, 28 August 2026) |
-| Licence | **MIT** — the `LICENSE` file is the MIT text, "Copyright (c) 2026 Z.AI Co., Ltd", and the model card carries `license: mit` `[reported]`. More permissive than the checkpoint we serve in production ([01](01-model-and-license.md) §2): no attribution condition, no exclusion clause |
+| Licence | **MIT** — the `LICENSE` file is the MIT text, "Copyright (c) 2026 Z.AI Co., Ltd", and the model card carries `license: mit` `[reported]`. More permissive than the checkpoint it replaced ([01](01-model-and-license.md) §2): no attribution condition, no exclusion clause |
 | Size on disk | **165.2 GB / 153.8 GiB** — 19 shards (~8.59 GB each), plus `mtp.safetensors` 3.79 GB, `quantization_config.json` 47.9 MB and a 16.0 MB index `[measured-here]` |
 | Verified | `sha256` 23/23 against the repository's own LFS metadata, independently on both nodes `[measured-here]` |
 | Format | exl3 v1.4.4, codebook `mul1`, `bits: 4.05`, `head_bits: 6`, `out_scales: always`, calibration 250 rows × 2,048 columns |
@@ -36,8 +46,10 @@ quality, it was the only thing that could load ([11](11-open-issues.md) §1.9 ro
 
 **It is not smaller, and that surprised us.** The expectation going in was 55–60 GB. The routed
 experts are already 4-bit in *both* checkpoints, so full scope only takes the remaining ~11 % of the
-weights from BF16 down to 4–6 bits: 164 GiB → 154 GiB. **The gain is in decode traffic, not on disk**,
-and the 10 GiB saved on disk turns out to be repaid several times over in host memory (§6.2).
+weights from BF16 down to 4–6 bits: 164 GiB → 154 GiB. **The gain is in decode traffic, not on disk**
+— and at TP=3 the 10 GiB saved on disk is repaid again in host memory: 3.4 GiB less consumed per
+node, which is +10.0 % of KV pool (§7.3). At TP=2 the same reading came out the other way and we
+could not explain it (§6.2); it did not reproduce (§7.5).
 
 ### 1.1 What is quantized, and at what bitrate
 
@@ -55,9 +67,20 @@ Read from `quantization_config.json` (37,032 records) `[measured-here]`:
 | **`lm_head`** | 1 | **6** | mul1 |
 | stays BF16 | `embed_tokens`, every norm, `mlp.gate` (the router), KDA `b_proj`/`f_a_proj`/`f_b_proj`/`g_a_proj`/`g_b_proj`, `indexer.wk`/`weights_proj`, the three `conv1d` | — | — |
 
-For comparison, our production checkpoint's `tensor_storage` holds **only** the 37,152 routed-expert
+For comparison, the fallback checkpoint's `tensor_storage` holds **only** the 37,152 routed-expert
 tensors (`bits 4`, codebook `mcg`, `head_bits 16`). The dense and attention path of the plugin had
 therefore **never been exercised on this stack** before this arm.
+
+What that turns into once loaded, read off `CUDA_EXL3_DEBUG_NAMES=1` on the live TP=3 boot rather
+than inferred `[measured-here]`: **203 EXL3 linears and 113 BF16** per rank, plus 42
+`Exl3MoEMethod` routed-expert layers. The 113 are exactly four families —
+`self_attn.f_b_proj` (34), `self_attn.g_b_proj` (34), `self_attn.in_proj_bfg_a` (34) and MLA
+`self_attn.kv_b_proj` (11) — the ones this checkpoint leaves unquantised. **The negative read is the
+gate:** `o_proj`, `in_proj_qkv`, `q_b_proj`, `fused_qkv_a_proj`, `gate_up_proj`, `down_proj`,
+`indexer.wq_b` and `lm_head` do **not** appear in the `-> unquantized` list. (`embed_tokens`,
+`mlp.gate` and the three `conv1d` are BF16 too but never pass through the plugin's resolver, so they
+are outside this tally; the meta-device run counted them separately at
+`UnquantizedLinearMethod` 268 and `UnquantizedEmbeddingMethod` 1.)
 
 ### 1.2 What BF16 traffic there is to remove, and which layer removes it
 
@@ -194,14 +217,18 @@ Against that: ~154 GiB read plus ~154 GiB written per node, on nodes at 95 % ful
 
 ## 3. The patch
 
-One file, `patch-fullscope-tp2.py`, in the same style as the rest of `patches/tp3/`: exact-text
-anchors that must match **exactly once**, `py_compile` before the write, atomic replace, idempotent,
-a post-check, and a hard exit if anything does not match. Two target files:
-`vllm/models/glm5next/nvidia/model.py` and `.../kda.py`.
+One file, in the same style as the rest of `patches/`: exact-text anchors that must match **exactly
+once**, `py_compile` before the write, atomic replace, idempotent, a `--check` mode, a post-check, and
+a hard exit if anything does not match. Two target files at TP=2:
+`vllm/models/glm5next/nvidia/model.py` and `.../kda.py`; a third, `linear.py`, at TP=3.
 
-**`[patch file not yet in repo]`** — it lives on the nodes at `~/exl3-zeus/tp2/patch-fullscope-tp2.py`
-(hard-linked into the TP=3 patch directory during the arm, then unlinked from there — §6.4). It will
-be added under `patches/` when it is carried at TP=3.
+There are two copies of it, and the difference is exactly A9 and A10:
+
+- [`patches/tp2/patch-fullscope-tp2.py`](../patches/tp2/patch-fullscope-tp2.py) — eight anchors,
+  A1–A8. This is the file the TP=2 measurement in §4 ran on. It is kept because it is the smaller,
+  more readable statement of the same three layers, and because at TP≤2 nothing needs padding.
+- [`patches/tp3full/patch-fullscope-tp3.py`](../patches/tp3full/patch-fullscope-tp3.py) — ten
+  anchors, A1–A10, and the one production runs (§7).
 
 | # | file | layer | what it does |
 |---|---|---|---|
@@ -211,8 +238,10 @@ be added under `patches/` when it is carried at TP=3.
 | A4 | `model.py` | S3b | replaces the six `.in_proj_qkvbfg_a` entries in `stacked_params_mapping` with four new ones, then asserts there are four |
 | A5 | `model.py` | S3a | the `conv1d` three-way split in `load_weights` (plus the `ReplicatedLinear` fix, §3.3) |
 | A6 | `kda.py` | S2 | the unconditional `quant_config` strip becomes conditional |
-| A7 | `kda.py` | S3b | splits `in_proj_qkvbfg_a` into an EXL3 `in_proj_qkv` and a BF16 `in_proj_bfg_a`; installs asserts 1 and 2 |
+| A7 | `kda.py` | S3b | splits `in_proj_qkvbfg_a` into an EXL3 `in_proj_qkv` and a BF16 `in_proj_bfg_a`; records the checkpoint's real shard width on the module; installs asserts 1 and 2 |
 | A8 | `kda.py` | S3b | `forward` becomes two calls when split, the upstream single call otherwise |
+| **A9** | `linear.py` | TP=3 | splits a pre-fused checkpoint tensor by the **checkpoint's** widths, not the module's padded `output_sizes` (§7.1). **No-op at TP≤2**, where the two lists are equal |
+| **A10** | `model.py` | TP=3 | assert 5: the post-load audit that every EXL3 pad is whole 128-blocks and exactly zero (§7.1) |
 
 **Everything is gated on one environment variable**, and with it unset the patched image is upstream
 byte for byte. Measured rather than asserted: with the flag unset the class attribute is never
@@ -313,7 +342,12 @@ workaround can retire once that commit is in an image we run.
 
 ---
 
-## 4. The measurement, at TP=2
+## 4. The measurement, at TP=2 — the dress rehearsal
+
+This section and the two after it are the TP=2 arm, run earlier the same day. It is kept in full
+because it is what decided the TP=3 port was worth building, because two of its readings did not
+survive that port (§7.5), and because it is the only place the loader work can be seen without the
+padding machinery on top of it. **The production numbers are in §7.3.**
 
 **Why TP=2.** At two ranks nothing needs padding — 32 heads and 77,440 vocab rows per rank — so the
 question "what is the dense stage worth" is answered with no new padding machinery. TP=3 needs a
@@ -412,7 +446,9 @@ which is what `scope: glm53_routed_experts_only` means.
 
 ---
 
-## 5. Quality
+## 5. Quality, at TP=2
+
+The TP=3 production figure is in §7.3 (86.47 ±0.74). This is the dress rehearsal.
 
 MMLU sample, 35 questions per subtask, 0-shot, concurrency 8, temperature 0, reasoning effort `low`
 `[measured-here]`:
@@ -441,7 +477,11 @@ than let the table imply two fresh runs `[measured-here]`.
 
 ---
 
-## 6. What it cost
+## 6. What it cost, at TP=2
+
+The production ledger is §7.4. This section is the rehearsal's, and two of its three big items
+did not reproduce at three ranks (§7.5) — they are kept because a reading that did not survive is
+still a reading, and because §6.3 and §6.4 are about instruments rather than about TP=2.
 
 ### 6.1 Context — the price, and it is not small
 
@@ -483,8 +523,10 @@ Taken together that implies roughly **+15 GiB of non-weight allocation**, and th
 `Exl3LinearMethod.process_weights_after_loading` calling `ops.reserve(...)` per EXL3 module: the
 count of EXL3 dense linears per rank goes from **1 to 203**, and `lm_head` alone has `n_total`
 51,712. The word "shared workspace" in that code implies a maximum rather than a sum, which would
-make the hypothesis wrong — **it has not been measured** `[not tested]`. It is the single number to
-settle before TP=3 (§7.3).
+make the hypothesis wrong — **it has not been measured** `[not tested]`. It was the single number to
+settle before TP=3, and at TP=3 the **sign reversed**: 3.4 GiB *lighter* per node and the pool 10 %
+*larger* (§7.3). The mechanism is still not isolated; the TP=2 reading is marked **not reproduced**
+rather than explained (§7.5).
 
 **A separate finding fell out of the same investigation.** Lowering `max_model_len` from 1,000,000 to
 65,536 raised available KV memory from 0.73 to **5.41 GiB**: about **4.7 GiB per node of persistent,
@@ -549,36 +591,41 @@ their own directory and are hard-linked, not copied, if two places need them.
 
 ---
 
-## 7. TP=3: what it needs
+## 7. TP=3: the port, and what it measured
 
-The measurement changes this from "possibly worth building" into an item with a price attached: at
-TP=3, applying the measured per-stream ratio to today's production single-stream figure projects
-roughly **74–75 tok/s** `[estimate]`. That is a projection, not a measurement, and it has two named
-uncertainties: the dense share of a step differs at three ranks, and the `in_proj_qkv` tuple path has
-never run under expert parallelism.
+**Done, promoted, in production since 5 September 18:40.** This section was a plan until that
+afternoon; it is now an account. The projection it carried — "applying the measured per-stream ratio
+projects roughly 74–75 tok/s" `[estimate]` — measured **75.91 tok/s per stream**, which is inside its
+own band and is recorded here because a projection that lands is as much a check on the model behind
+it as one that misses.
 
-### 7.1 On our side
+**Settings, both arms identical unless the row says otherwise:** three DGX Spark nodes, TP=3 +
+expert parallel, DFlash2 draft k=7, KV `fp8` **and** an fp8 draft cache,
+`gpu-memory-utilization 0.80`, `max_model_len 1,000,000`, `--block-size 256`,
+`HAREM_SW_BLOCK_SIZE=256`, `--max-num-batched-tokens 2048`, `--max-num-seqs 8`,
+`NCCL_MAX_NCHANNELS=8`, warm tuner cache, per-rank fast-load sidecar in **both** arms, the launcher's
+settle gate, temperature 0, reasoning effort `low`, medians of three sweep rounds, 5 September 2026.
+Full scope is `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw on image `exl3-zeus:754421f`; the control is
+production configuration 8 — the experts-only checkpoint on `exl3-zeus:62f53e6`. **The control column
+is the pool of two runs of the same script on the same day** (14:45 and 16:44, six rounds), because
+that arm's documented run-to-run spread is about 7 % and a single run of it would have flattered
+whichever side it favoured.
 
-**Every head pad is already 128-aligned, and that was checked rather than assumed** `[measured-here]`.
-MLA `qk`/`v` head_dim is 256 and KDA head_dim is 128, so padding 64 → 66 heads gives whole
-128-column blocks everywhere: 512 columns on `q_b_proj` and on `o_proj`'s input, 256 per KDA shard.
+### 7.1 What the port needed on our side
 
-Exactly two pads are **not** aligned, and both are the same one-line arithmetic error —
-`lcm(64, tp)` where it should be `lcm(128, tp)`:
+Three things, and only one of them was code.
 
-| what | today | required | why |
-|---|---|---|---|
-| vocab padding | `padding_size=192` → 154,944; 51,648 = **403.5** × 128 per rank | **`padding_size=384`** → 155,136; 51,712 = 404 × 128 | `linear.py:89-94` **hard-refuses** a padded vocab for an EXL3 head, and this checkpoint has no BF16 head to fall back on |
-| shared expert intermediate | 2048 → **2112**; 704 = **5.5** × 128 per rank | 2048 → **2304**; 768 = 6 × 128 | `down_proj` at k=704 hits the plugin's explicit refusal; `gate_up_proj` gets a half-block output pad, where there is only a warning — one loud failure and one **silent** one, same fix |
+**Two launcher constants**, both `lcm(64, tp)` where they had to be `lcm(128, tp)`, because a
+full-scope checkpoint quantizes the vocabulary head and the shared expert and every EXL3 pad has to
+be a whole number of 128-column Hadamard blocks. Vocab `padding_size` 192 → **384** (154,880 →
+155,136 = 3 × 404 × 128) and shared-expert intermediate 2,112 → **2,304** (768 = 6 × 128 per rank).
+The arithmetic, including why 2,176 looks right and is not, is
+[03](03-tp3-padding-and-sidecars.md) §1.1. Both are no-ops at TP≤2 and both live in
+`patches/tp3full/patch-vllm-tp3.py`, with matching gates in `preflight-tp3.py`.
 
-**2,176 is the wrong number** and is worth naming because it looks right: it is 17 × 128, but
-2176/3 is not an integer. The padded width must be a multiple of `lcm(128, 3) = 384`, so **2,304**
-(= 18 × 128, 768 per rank). That number is already known here — it is the width of the
-routed-expert sidecar in [11](11-open-issues.md) §2.9.
-
-**And one new obstacle, TP=3 only (A9).** The KDA tuple-shard path splits the checkpoint tensor using
-the module's **padded** `output_sizes`. At TP=2 those are `[8192]×3` against a 24,576-wide checkpoint
-tensor and it fits exactly. At TP=3 they are `[8448]×3`:
+**A9 — one patch, and it is TP=3 only.** vLLM's tuple-shard path (`(0, 1, 2)`) slices the
+checkpoint's single 24,576-wide `qkv_proj` using offsets built from the module's `output_sizes` —
+which at TP=3 are **padded**, 3 × 8,448 against a checkpoint that is still 3 × 8,192:
 
 ```text
 segment 0: narrow(start=0,     len=8448) -> 8448    correct
@@ -586,91 +633,238 @@ segment 1: narrow(start=8448,  len=8448) -> 16896   wrong (true start 8192)
 segment 2: narrow(start=16896, len=8448) -> 25344   overflow -> RuntimeError
 ```
 
-The fix is ours: record the checkpoint's real per-shard width on the module and split by that,
-letting the existing zero-pad path widen each rank's slice afterwards, with asserts that the three
-widths are equal and that the pad is a multiple of 128. **It has not been written and has never
-run** `[not tested]`.
+The fix records the checkpoint's real per-shard width on the module when A7 builds it
+(`quant_config.resolve(...)` gives `out_features / 3 = 8192`), splits by that, and lets the existing
+zero-pad path widen each rank's slice afterwards. Three asserts: the lengths match, the three widths
+are equal, and `pad % 128 == 0` with `sum(ckpt) + sum(pad) == sum(output_sizes)`. At TP=2 the two
+lists are equal and A9 is a no-op. Measured on the meta device, all three ranks:
+`output_sizes=[8448,8448,8448] ckpt=[8192,8192,8192] exl3_shards=[2816,2816,2816]`.
 
-Also on our side: the checkpoint has to be copied to the third node (154 GiB), and the fast-load
-sidecar has to be re-dumped, because four inputs to its identity change at once — different
-checkpoint, different sidecar config, an edited `patch-vllm-tp3.py`, and a new `patch-*.py` in the
-directory.
+**A10 — the audit, because the invariant was already holding by accident.** The `svh = 0` mechanism
+was in fact **already running** on this stack for column-parallel EXL3 modules before anyone designed
+it: the TP=3 padding patch fills missing rows with zeros and `svh` goes through the same path. So the
+padded load was already correct, and **nothing checked it** — which is precisely how the old 2,112
+arithmetic would have produced silently wrong output rather than an error. A10 wraps `load_weights`
+and, while `suh` and `svh` are still raw, walks every EXL3 module: for an output pad, `real % 128`,
+`pad % 128`, `real > 0` and `svh[real:] == 0`; for an input pad — row-parallel only, decided from the
+module's own geometry, `exl3_k * tp == input_size` — the same gates and `suh[0, real:] == 0`. One
+line comes out, and **its absence is a failure**:
 
-### 7.2 What only the plugin author can do
+```text
+HAREM-FULLSCOPE assert 5: 285 EXL3 pad site(s) audited, 285 padded on this rank, all whole 128-blocks and exactly zero
+```
 
-The `svh = 0` padded-load mechanism is in fact **already happening** on this stack for column-parallel
-EXL3 modules: our TP=3 padding patch fills missing rows with zeros, and `svh` goes through the same
-path, so padded columns get `svh = 0` and the trellis behind them is don't-care. The invariant holds
-by accident, and **nothing checks it** — which is exactly how today's 2112/192 arithmetic would have
-produced silently wrong output. Four things were asked for, in the issue thread:
+285 is what a model-free meta-device run predicted for rank 2 **before** the boot, from the pad table
+below — so the reading agrees with an independent count rather than merely being self-consistent
+`[measured-here]`.
 
-1. **`lm_head`.** The hard refusal at `linear.py:89-94` has to become a padded-load path for the
-   vocab-parallel head. This checkpoint has no BF16 head, so there is no fallback.
-2. **A "refuse unless the pad is 128-aligned" gate**, so that a silently-correct situation cannot
-   become a silently-wrong one.
-3. **The input-dim case.** `Exl3SuhParameter.load_row_parallel_weight` does its own `narrow` rather
-   than going through vLLM's patched loader, so at TP=3 the last rank overruns on `o_proj`.
-4. **Confirmation that `decode(0)` is finite**, so that a zero pad trellis multiplied by `svh = 0`
-   cannot produce NaN.
+| n | module | axis | real | local | pad | real/128 | pad/128 |
+|---|---|---|---|---|---|---|---|
+| 1 | `lm_head` | out | 51,456 | 51,712 | 256 | 402 | 2 |
+| 42 | `mlp.shared_experts.down_proj` | **in** | 512 | 768 | 256 | 4 | 2 |
+| 84 | `mlp.shared_experts.gate_up_proj[0,1]` | out | 512 | 768 | 256 | 4 | 2 |
+| 102 | `self_attn.in_proj_qkv[0..2]` (KDA) | out | 2,560 | 2,816 | 256 | 20 | 2 |
+| 34 | `self_attn.o_proj` (KDA) | **in** | 2,560 | 2,816 | 256 | 20 | 2 |
+| 11 | `self_attn.o_proj` (MLA) | **in** | 5,120 | 5,632 | 512 | 40 | 4 |
+| 11 | `self_attn.q_b_proj` | out | 5,120 | 5,632 | 512 | 40 | 4 |
 
-**Item 4 is answered and it is answered completely.** The author swept **all 65,536** 16-bit trellis
-codes through the device decoder for all three codebooks: zero non-finite values in every case, with
+**The audit caught its own bug on first writing, and that is the reusable part.** It called a
+column-parallel module's *input* padded (`k_real != k_local * tp`) and rejected `in_proj_qkv` on
+ranks 1 and 2. Rank 0 passed — **a single-rank test could not have seen it**
+([09](09-measurement-protocol.md) §11.3).
+
+**And two things that were not code at all:** the sidecar generator had to grow a rewritten
+`quantization_config.json` (the packed mapping travelling with the checkpoint — a 48 MB copy, because
+`cuda-exl3` needs `tensor_storage` out of the same dict; [03](03-tp3-padding-and-sidecars.md) §2),
+and the whole tree had to move into `patches/tp3full/` rather than into the production patch
+directory, because that directory's file list is the fast-load manifest identity and adding one file
+to it refuses the next production boot (§6.4, [09](09-measurement-protocol.md) §11.2).
+
+### 7.2 What the plugin author built, and the image gate that checks for it
+
+Three things were asked for in the issue thread, and all three were built the same afternoon once the
+TP=2 quality gate passed. **All three were required; no two of them are enough.**
+
+| commit | what it does | what fails without it |
+|---|---|---|
+| `f3e3090` | accepts a padded **output** dim when the pad is whole 128-blocks, allocating `svh` zeroed; and makes the row-parallel `suh` load copy what exists and zero the rest instead of narrowing past the end of the checkpoint | `create_weights` raises "EXL3 weights cannot be zero-extended" |
+| `754421f` | the vocab loaders fill a **prefix** instead of `copy_`-ing an unpadded slice into a padded parameter | the gate passes and the load then dies on a `copy_` shape mismatch in `_vocab_loaders` (rank 2: 3,232 against 3,216 tiles) |
+| `807d798` | makes `CUDA_EXL3_DEBUG_NAMES` print at all, and report the modules that **resolved** as well as those that stayed BF16 | the designed acceptance gate prints nothing and looks exactly like a clean run (§6.3) |
+
+A fourth question was answered rather than built, and completely: the author swept **all 65,536**
+16-bit trellis codes through the device decoder for all three codebooks — zero non-finite values,
 bounded ranges (`3inst` [−3.9570, +3.9727], `mcg` [−3.9492, +3.9492], `mul1` [−3.4531, +3.3477])
 `[reported]`. The decoder is total and bounded, so `svh = 0` on a pad column is exactly
 `0 × finite = 0`. That is the full domain enumerated rather than an argument from construction, which
 is the right standard underneath a padded-load path.
 
-Items 1–3 are agreed and scoped, and were explicitly waiting on the quality gate before being built.
-**The gate has now passed**, and the word has been sent.
+Both failure modes above are loud, and both leave a **half-loaded stack**, so the gate goes in front
+of them rather than behind. `patches/tp3full/check-padload-tp3.py` runs in the prelude, reads all
+three capabilities out of the installed source by inspection (there is no version string to trust,
+because the image is built from a git checkout), prints one line and exits **23** if any is missing —
+before a byte of weight is read:
 
-### 7.3 The acceptance test for TP=3, in order
+```text
+[padload] cuda-exl3 padded-load support: padded-output-gate (f3e3090)=yes  vocab-loader-prefix (754421f)=yes  row-parallel-suh-pad (f3e3090)=yes
+```
 
-Baseline is production configuration 8, measured the same day with the same script: C1 **59.9** ·
-C8 **178.6** · acceptance **63.9 %** · prefill-fresh **1,774** · KV **4,699,724** · gates
-**10/10 · 12/12** · MMLU **86.4 ±0.7**.
+### 7.3 The result
 
-| # | test | gate |
+Medians of three rounds, against the pooled production-8 control. Treating ≤3 % as equal
+([09](09-measurement-protocol.md) §1.2) `[measured-here]`:
+
+| metric | **full scope (production 9)** | experts-only (production 8) | delta | verdict |
+|---|---|---|---|---|
+| **C1 total** | **69.90** tok/s | 56.88 | **+22.9 %** | faster |
+| **C1 per stream** | **75.91** tok/s | 62.39 | **+21.7 %** | faster |
+| C2 total / per stream | 99.17 / 54.03 | 83.31 / 49.45 | +19.0 / +9.3 % | faster |
+| C4 total / per stream | 140.72 / 42.61 | 120.22 / 37.25 | +17.1 / +14.4 % | faster |
+| C6 total / per stream | 172.40 / 33.04 | 144.03 / 30.59 | +19.7 / +8.0 % | faster |
+| **C8 total** | **197.20** tok/s | 175.37 | **+12.5 %** | faster |
+| C8 per stream | 28.64 | 26.71 | +7.2 % | faster |
+| TTFT at C1 / C8 | **0.280 / 0.826** s | 0.344 / 0.906 | −18.6 / −8.8 % | faster |
+| prefill, fresh unseen | 1,738 tok/s | 1,776 | −2.2 % | **equal** |
+| prefill, 7K warm repeat | 1,575 tok/s | 1,537 | +2.5 % | **equal** |
+| draft acceptance at C1 | 61.94 % | 64.36 % | **−2.4 points** | lower, gate ≥60 % passed |
+| draft acceptance at C8 | 62.59 % | 61.74 % | +1.4 % | equal |
+| accepted tokens per step at C1 | 5.34 | 5.50 | −3.0 % | lower |
+| consumed memory per rank | **58.28 / 59.08 / 59.01** GiB | 62.08 / 62.32 / 62.39 | **−3.4 GiB** | lighter |
+| **KV pool** | **5,165,289** tokens (5.17× at 1M) | 4,696,969 (4.70×) | **+10.0 %** | larger |
+| peak activation, free memory at startup | 1.66 GiB, 111.4 / 113.1 / 113.0 | 1.66 GiB, 111.9 / 113.0 / 113.1 | — | equal |
+| boot, fast-load | **251 s** (weights 57.9 s) | 264 s (weights 73.2 s) | −5 % | faster |
+| free host RAM / swap after the run | 12.1 / 13.5 / 13.4 GiB · 0.11 / 0.09 / 0.08 | 12.3 / 13.5 / 13.5 · same | — | equal, flat |
+| gates cold and warm | **10/10 · 12/12** | 10/10 · 12/12 | — | pass |
+| MMLU sample (57 × 35, 0-shot) | **86.47 ±0.74** | 86.4 ±0.7 | 0.07 points | pass |
+
+All three full-scope rounds, for the record:
+
+| round | C1 total / per stream | C2 | C4 | C6 | C8 | acceptance at C1 |
+|---|---|---|---|---|---|---|
+| 1 | 69.57 / 72.21 | 98.49 | 144.02 | 171.93 | 198.95 | 61.44 % |
+| 2 | 69.90 / 78.37 | 100.01 | 140.72 | 173.35 | 190.30 | 61.94 % |
+| 3 | 70.29 / 75.91 | 99.17 | 137.06 | 172.40 | 197.20 | 62.74 % |
+
+**The step arithmetic is the result, not the tok/s:**
+
+```text
+production 8: 5.50 tokens/step ÷ 62.39 tok/s per stream = 88.2 ms/step
+production 9: 5.34 tokens/step ÷ 75.91 tok/s per stream = 70.3 ms/step
+gain        : 17.8 ms/step  (step -20.3 %, throughput +21.7 %)
+```
+
+The gain is **entirely** step time. Acceptance and tokens per step move the *wrong* way by about 3 %
+and the arm still wins by 22 %, so none of it is drafter behaviour. This is the same lever measured
+at TP=2 (20.7 ms/step, +24.3 %) reproduced at TP=3 to within a millisecond and a half: **the
+dense-GEMM hypothesis is now confirmed on two independent topologies.**
+
+A second, cleaner read on the same engine. `cold-warm-c1` runs one 700-token prompt cold, warm and
+warm again — same prompt, same script, both arms, an hour apart `[measured-here]`:
+
+| | full scope | production 8 (two runs) | delta |
+|---|---|---|---|
+| cold | **57.2** tok/s | 42.9 / 43.9 | **+33.3 %** |
+| warm | **56.5** | 44.3 / 45.7 | +27.5 % |
+| warm 2 | **57.5** | 44.8 / 43.3 | +28.3 % |
+| TTFT cold | 1.36 s | 1.38 / 1.40 | equal |
+| acceptance | 42.5 / 42.2 / 42.9 % | 40.4–43.9 % | **equal** |
+
+**This settles the TP=2 acceptance scare** (§4.1, [11](11-open-issues.md) §1.9 row 30). At TP=2 the
+same script showed acceptance falling 48 % → 34 % and it was reported upstream as "a new and real
+gate". At TP=3 it is flat on this script and 2.4 points lower on the sweep, while speed is up
+27–33 %. The 6-bit `lm_head` does perturb the drafter — but it costs far less than it earns.
+
+### 7.4 What it cost
+
+No gain is published here without its price, and this one has six.
+
+| cost | size | note |
 |---|---|---|
-| 1 | both patch scripts in `--check` mode, engine down | every anchor matches exactly once |
-| 2 | meta-device dump, **three ranks**, TP=3 | 0 unmapped / 0 unfilled on **every** rank, EXL3 and BF16 sets as in §4.3. Rank 2 is mandatory: the pad lives there and a TP=2 run cannot see it |
-| 3 | **memory arithmetic**, model-free | settle the +15 GiB question of §6.2 *before* spending a boot |
-| 4 | preflight on the padded sidecar | vocab 155,136, shared expert 2,304 → 768 per rank, 66 heads → 22 per rank, expert parallel mandatory |
-| 5 | boot | prelude stamps, patch `sha256`, every anchor applied |
-| 6–9 | asserts 1–4 | all silent |
-| 10 | **assert 5, new** | on every padded EXL3 module, on the rank that owns the boundary: `svh` is exactly zero beyond the real width, and both the real width and the pad are multiples of 128 |
-| 11 | **assert 6, new** | A9: the three checkpoint split widths equal, and real + pad equals the padded total |
-| 12–13 | correctness probe, code exam | 10/10 and 12/12, **cold and warm** |
-| 14 | speed | C1 ≥ 59.9 (expected 70–78), C8 ≥ 178.6, prefill-fresh ≥ 1,774 |
-| 15 | draft acceptance | ≥ 60 % |
-| 16 | KV pool | reported; **≥ 3.4 M** expected; below 3 M, stop and reopen §6.2 |
-| 17 | MMLU sample | 86.4 ±0.7 |
-| 18 | free RAM and swap | ≥ 4 GiB free, swap stable |
-| 19 | restore production and verify | health, pool within ~0.5 %, gates full |
+| draft acceptance at C1 | **−2.4 points** (64.4 → 61.9 %) | real and small; the gate is ≥60 % and it passed. Flat on the cold script |
+| accepted tokens per step at C1 | **−3.0 %** (5.50 → 5.34) | same cause: a 6-bit `lm_head` perturbing a drafter trained against a BF16 one |
+| prefill, fresh | −2.2 % | inside the ±3 % equality band; not a real loss, and prefill-7k moved +2.5 % the other way |
+| maintenance | **a second patch tree**, `patches/tp3full/`, whose `patch-vllm-tp3.py` and `preflight-tp3.py` diverge from `patches/tp3/` on purpose | a fix in one does not reach the other. Merging them is technically possible today — the constants derive from `tp` and 128 and are no-ops at TP≤2 — and was not done, so production 8's fast-load identity would keep working. [11](11-open-issues.md) §2.24 |
+| disk | **53 GB × 3** for the second fast-load sidecar, on top of a second 154 GiB checkpoint × 3 | one node had 51 G free before this and needed the old sidecars cleared first |
+| quality | **none found, and it was looked for** | MMLU 86.47 ±0.74 against 86.4 ±0.7 — 0.07 points, a tenth of either bar — plus both gates cold and warm on the same engine instance in one session |
 
-If a gate fails, the suspects in order: the A9 split width (assert 6), rank 2's pad columns
+Not on the list, because they were expected and did not happen: the **image is unchanged by the
+patch** (it is applied inside the container at boot, to the writable layer, and leaves no trace when
+the container is removed), and `MAX_MODEL_LEN=1,000,000` was never threatened.
+
+### 7.5 Two TP=2 signals that did not reproduce, and the honest version of why
+
+The dress rehearsal produced two warnings loud enough to be written into this page as risks. Neither
+survived TP=3, and saying *why* matters more than saying *that*.
+
+**"~10 GiB heavier per node", which forced TP=2 down to a 31k pool (§6.2).** At TP=3 the sign is
+reversed: 3.4 GiB **lighter**, KV pool +10.0 %. We did not isolate the mechanism, and two things
+differ. (a) At TP=2 the two arms ran on different checkpoints *and* different `max_model_len` values,
+and that same report found free KV scaling with `max_model_len` (0.73 → 5.41 GiB going 1M → 64k), so
+the "10 GiB" figure was measured across a confounded pair; here both arms are at 1M. (b) The leading
+suspect, `Exl3LinearMethod.process_weights_after_loading`'s `ops.reserve`, scales with EXL3 **shard**
+size, and at TP=3 every shard is a third rather than a half. We report the TP=3 numbers as measured
+and mark the TP=2 delta **not reproduced**, not explained `[retracted]`.
+
+**"Draft acceptance collapses on a quantized target."** That came from a cold single-prompt probe
+with a sample of one, and it was reported upstream before the sweep ran. It is flat on that same
+probe at TP=3 and 2.4 points down on the sweep ([11](11-open-issues.md) §1.9 row 30).
+
+**Also measured, and useful for planning:** the dump boot (no fast-load) consumed 60.44 / 60.54 /
+61.35 GiB and gave 4,840,220 KV tokens, so **fast-load itself is worth about 2 GiB and ~325k KV
+tokens** on this arm. Both arms in the table above are load boots, so the comparison is like for like
+([09](09-measurement-protocol.md) §11.1).
+
+### 7.6 The acceptance list, as it was actually run
+
+Nineteen points were written before the arm and every one of them was taken. The order matters more
+than the list: everything model-free comes before the boot, every gate comes before a speed number,
+and the pool is read from a load boot. It is reproduced in
+[09](09-measurement-protocol.md) §5.1 as the general form.
+
+If a gate had failed, the suspects in order were: the A9 split width (assert 6), rank 2's pad columns
 (assert 5), the row-parallel `suh` narrowing on `o_proj`, the 6-bit `lm_head`, and the `q`/`k`/`v`
 order of the `conv1d` split (assert 3).
 
----
+### 7.7 Rollback
+
+Three levels, none of which needs an image rebuild:
+
+- **One line.** Delete `HAREM_EXL3_FULLSCOPE=1` from `EXTRA_ENV`. The patch reads the knob at run
+  time, so the same patched image takes the upstream path.
+- **The whole arm.** Start with `ENV_FILE` pointing at the production 8 env file — ours is
+  `.env.tp3.bak-prod8-62f53e6`. That reverts the checkpoint, the image (`62f53e6`), the patch tree
+  (`tp3/`) and the fast-load sidecar in one move, because all four are named in the env file.
+  `patches/tp3/`, `.env.tp3`'s backup and production 8's sidecar were never modified during the arm.
+- **The safety property underneath both.** The split decision is taken from the **checkpoint**, not
+  from the environment (`quant_config.resolve(f"{prefix}.in_proj_qkv") is not None`), so booting the
+  experts-only checkpoint with the flag *set* gives split inactive, 0 unmapped, 0 unfilled,
+  everything BF16 `[measured-here]`. A wrong env file cannot silently corrupt a run.
 
 ## 8. What this changes
 
-- **The largest open item on this stack is no longer an estimate.** The dense stage is worth
-  **+24.3 % per stream** at TP=2 with **no quality cost** and **no drafter change**
+- **The largest item this stack carried is closed, and it is in production.** The dense stage is
+  worth **+21.7 % per stream at TP=3** — 17.8 ms of an 88.2 ms decode step — with **no quality cost**,
+  a **larger** KV pool and a **faster** boot, against 2.4 points of draft acceptance
   ([11](11-open-issues.md) §2.22).
 - **`routed_experts_only` was never a quality decision.** Two lines in a model file made it the only
   loadable scope, and they would have done so for any checkpoint in any format.
 - **The KDA factorisation mismatch is not an EXL3 problem.** `conv1d` is BF16; a BF16 copy of this
   checkpoint fails identically. Anyone loading an upstream-layout GLM-5.3-Flash checkpoint on the
   NVIDIA `glm5next` reader will hit it, whatever the quantization.
-- **TP=2 is not a serving configuration for a full-scope checkpoint.** The 31k pool closes the long
-  prompt path. The place for full scope is TP=3, and the remaining work there is a launcher constant,
-  a shared-expert width, one patch we have not written, and a padded-load path on the plugin side.
+- **A quantized tensor can live in a padded parameter.** Not by zero-extension, which is meaningless
+  for a trellis, but by a narrow load with the output scale zeroed on the pad — and only on whole
+  128-column blocks. It is now checked at every load rather than holding by accident (§7.1).
+- **TP=2 was a measurement rig and TP=3 is the serving configuration**, and the two disagreed about
+  memory in a way we could not explain. Both readings are still on this page (§6.2, §7.5): the TP=2
+  one is marked not reproduced rather than explained.
+- **Two signals reported upstream before the sweep ran were wrong**, and both are in the retraction
+  audit: the acceptance collapse (row 30) and the aggregate-versus-per-stream transcription (row 31).
+  A number that leaves this repository is a published number whatever produced it.
 
 ---
 
 ## 9. What is next
 
-[10 — Results and roofline](10-results-and-roofline.md) §2.2 for this arm in the results progression,
-[11 — Open issues](11-open-issues.md) §2.22 for the TP=3 item as it now stands, and
-[01 — Model and licence](01-model-and-license.md) §1 for how the two checkpoints compare.
+[10 — Results and roofline](10-results-and-roofline.md) §1 for production 9 in the results
+progression, [11 — Open issues](11-open-issues.md) §2.22 and §2.24–§2.25 for what this opened,
+[03](03-tp3-padding-and-sidecars.md) §1.1 for the padding arithmetic, and
+[`patches/tp3full/README.md`](../patches/tp3full/README.md) for the directory itself.

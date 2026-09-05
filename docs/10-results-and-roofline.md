@@ -15,6 +15,12 @@ effort `low`**, 5 September 2026. Speed on this configuration is the **median of
 [12](12-tuner-cache.md)); the older arms in §2 are five-round medians with two discarded. Raw tables
 in [`../results/`](../results/README.md).
 
+**Rulers before roofline.** Every efficiency percentage on this page is against a bandwidth and a
+GEMM peak **measured on this device in our own image**, not against a vendor figure — §4.1. The tools
+are [`bench/bw.py`](../bench/bw.py) and [`bench/gemmpeak.py`](../bench/gemmpeak.py), they take
+seconds, and running them in the same process as the thing being measured is not optional here: the
+read-bandwidth ruler drifted 6.5 % between three runs on the same idle machine the same morning.
+
 ---
 
 ## 1. The production configuration
@@ -86,6 +92,7 @@ Rejected on the way, each with its own boot and gates:
 | `--max-num-batched-tokens 4096` | +9.5 % fresh prefill, −13 % mixed-load TTFT, −28.5 % KV pool. A judgement, reversible in one line `[measured-here]`. |
 | MoE input-transform fusion (`61a17bc`) | +1–4 % end to end, but a later upstream commit takes the same win another way and upstream dropped the branch `[measured-here]`. |
 | A 2,304-padded tensor-sliced arrangement instead of expert parallelism | On the fixed kernel it loses everywhere except M=1 and costs +12.5 % expert bytes out of the KV pool `[measured-here]`. |
+| A one-sided RDMA_WRITE mesh transport (`patches/kernel/0007`) | Removes RNR retries to exactly zero and moves throughput by nothing: engine C1 56.4, C8 171.1, prefill-fresh 1,763 against production's 56.9 / 168.9 / 1,792 — differences in both directions, inside boot spread. The ceiling is the cards' PCIe slots, not the flow control ([06](06-nccl-mesh.md) §9–§10) `[measured-here]`. |
 
 ---
 
@@ -127,14 +134,36 @@ EXL3 stack does today", not as "EXL3 beats NVFP4".
 
 ## 4. Roofline
 
-Hardware limits, measured on one node with the engine stopped, inside our image `[measured-here]`
-(these come from the NVFP4 sibling's measurement on the same hardware): memory copy 230–246 GB/s
-read+write, **read-only 243 GB/s**; BF16 matmul **97 TFLOPS**; FP8 `_scaled_mm` **199 TFLOPS** at
-8192².
+### 4.1 Measure the ruler first, and this one moved
 
-Byte model, from the checkpoint's own shapes `[estimate]`: 45 layers of which 43 carry routed experts
-(3–45; layer 45 is the MTP layer and carries its own 288); 288 experts, top-8, one shared expert;
-hidden 4096, routed intermediate 2048. A routed expert is 3 × 4096 × 2048 = 25.2M parameters, about
+Every roofline percentage published in this repository before 5 September was against a **vendor**
+number, and every one of them was about **22 % optimistic** `[retracted]`. Both rulers have now been
+measured on this device, in our own image, in the same process that ran the benchmarks
+`[measured-here]`:
+
+| ruler | measured on GB10 | vendor / implied | achieved |
+|---|---|---|---|
+| device read bandwidth, bf16 `sum` over 4 GiB | **225.2 GB/s** | 273 GB/s | 82 % |
+| device copy bandwidth, read+write, 4 GiB | 214.5 | — | — |
+| device read bandwidth, 2 GiB buffer | 205.8 | — | — |
+| **BF16 dense GEMM peak**, 8192³ `torch.matmul` | **97.3 TFLOP/s** | ~125 (1 PFLOP FP4 ÷ 8) | 78 % |
+| BF16 GEMM at an engine shape, 2032×5632×4096 | 80.4 | — | — |
+| BF16 GEMM at an engine shape, 2032×4096×4096 | 91.8 | — | — |
+
+Two tools, both in `bench/`, both a few seconds: [`bench/bw.py`](../bench/bw.py) and
+[`bench/gemmpeak.py`](../bench/gemmpeak.py). Run them **in the same binary and the same run** as
+whatever you are measuring, and quote the result beside every efficiency claim.
+
+**The ruler itself drifts.** Three independent measurements the same morning on the same idle machine
+gave 225.2, 239.6 and 240.9 GB/s — a 6.5 % spread `[measured-here]`. Percentages below are therefore
+given against a band, not a point, wherever the difference matters. A `memset` ruler (`.zero_()`)
+measured 196.8–198.2 GB/s, which is the right comparison for a kernel that only writes.
+
+### 4.2 The byte model
+
+From the checkpoint's own shapes `[estimate]`: 45 layers of which 43 carry routed experts (3–45;
+layer 45 is the MTP layer and carries its own 288); 288 experts, top-8, one shared expert; hidden
+4096, routed intermediate 2048. A routed expert is 3 × 4096 × 2048 = 25.2M parameters, about
 **12.9 MB** at 4 bpw with its scales. Under expert parallelism each node holds 96 experts of 288, so
 43 × 96 × 12.9 MB ≈ 49.6 GiB of expert weight per node — and the measured figure is 54.86 GiB, which
 leaves about **5.3 GiB of BF16 non-expert weight per node** (attention, KDA, the shared expert,
@@ -143,39 +172,272 @@ leaves about **5.3 GiB of BF16 non-expert weight per node** (attention, KDA, the
 With a k=7 draft a decode step verifies 8 tokens per sequence, so the expected number of distinct
 experts touched per layer is `288 × (1 − e^(−8·tokens/288))`.
 
-| Regime | Measured | Bytes per step per node `[estimate]` | Effective bandwidth | Share of 243 GB/s | Share of 97 TFLOPS (BF16) |
+| Regime | Measured | Bytes per step per node `[estimate]` | Effective bandwidth | Share of **225 GB/s** | Share of 97.3 TFLOP/s |
 |---|---|---|---|---|---|
-| Decode C1, DFlash2 k=7 | 63.6 tok/s per stream, 5.49 tok/step → 86.3 ms/step | 8 verify tokens → ~19 of 96 experts per layer: 10.6 GB expert + 5.3 GB dense ≈ **15.9 GB** | ≈ **184 GB/s** | ≈ **76 %** | ≈ 2 % |
-| Decode C8, DFlash2 k=7 | 168.9 tok/s total, 42.3 accepted tok/step → 250 ms/step | 64 verify tokens → ~80 of 96 experts per layer: 44.3 GB + 5.3 GB ≈ **49.6 GB** | ≈ **198 GB/s** | ≈ **82 %** | ≈ 5 % |
-| Prefill, 2048-token chunk | 1,792 tok/s → 1.14 s per chunk | every expert touched: 53.3 GB + 5.3 GB ≈ **58.6 GB** | ≈ **51 GB/s** | ≈ **21 %** | ≈ **24 %** (≈ 24 TFLOPS/node) |
+| Decode C1, DFlash2 k=7 | 89.1 ms per engine step (measured directly, §5.3) | 8 verify tokens → ~19 of 96 experts per layer: 10.6 GB expert + 5.3 GB dense ≈ **15.9 GB** | ≈ **178 GB/s** | ≈ **79 %** | ≈ 2 % |
+| Decode C8, DFlash2 k=7 | 223 ms per engine step (measured directly, §5.3) | 64 verify tokens → ~80 of 96 experts per layer: 44.3 GB + 5.3 GB ≈ **49.6 GB** | ≈ **222 GB/s** | ≈ **99 %** | ≈ 6 % |
+| Prefill, 2048-token chunk | 1.109 s per chunk (measured directly, §5.2) | every expert touched: 53.3 GB + 5.3 GB ≈ **58.6 GB** | ≈ **53 GB/s** | ≈ **23 %** | ≈ 24 % |
 
-**Reading.** Decode with the draft already sits at three quarters to four fifths of the memory roof, so
-faster kernels buy little there — the levers are fewer bytes (a checkpoint that also quantizes
-attention) or higher acceptance. **Prefill is far from both roofs**, at a fifth of bandwidth and
-under a quarter of compute, and that is where kernel work can still pay.
+**Reading.** Decode with the draft is **at** the memory roof, not near it — the C8 row lands at 99 %
+of the measured ruler, which is a way of saying the byte model and the measurement agree rather than
+that the hardware is saturated to the last percent. Faster kernels buy nothing there; the levers are
+fewer bytes (a checkpoint that also quantizes attention) or higher acceptance. **Prefill is far from
+both roofs**, at under a quarter of bandwidth and under a quarter of compute, and that is where
+kernel work can still pay. §5 replaces this arithmetic with a measured breakdown.
 
-The profiler agrees with the second half of that and refines the first. On a fresh 8,273-token
-prefill, GPU busy was 98.8 % of the window — so prefill is not launch-bound or CPU-bound, and any win
-must come out of a kernel — with the MoE EXL3 GEMM at 26.5 %, BF16 dense GEMMs at ~20 %, and NCCL
-all-reduce at 21.9 % `[measured-here]`. **That profile predates three separate collective changes**
-(the channel cap, the second cable and `NCCL_PTR_CUDA`) and the all-reduce share is certainly lower
-now; re-profiling it is the cheapest unspent measurement in this repository
-([06](06-nccl-mesh.md) §12 item 5). At decode the BF16 dense GEMMs are the **largest single
-item at ~37 %**, ahead of the EXL3 MoE GEMM at 29.3 %.
-
-That last number is the most important structural fact in this repository: **the biggest cost at
-decode is the part of the model that is not quantized**, and no work inside the EXL3 kernel library
-can reach it ([01](01-model-and-license.md) §3.2).
-
-Assumptions in the table, and they are not small: KV reads are ignored (short contexts), the draft
-model's own weights are ignored, expert-touch counts are expectations rather than measured
-histograms, and a 4 bpw expert is taken as 12.9 MB. **Treat every ratio as ±15 %.** No
-`nsys`/`ncu` run backs the byte model; what backs it is that the derived per-node weight total lands
-within 1 % of the measured one.
+Assumptions, and they are not small: KV reads are ignored (short contexts), the draft model's own
+weights are ignored, expert-touch counts are expectations rather than measured histograms, and a
+4 bpw expert is taken as 12.9 MB. **Treat every ratio as ±15 %.** What backs the byte model is that
+the derived per-node weight total lands within 1 % of the measured one.
 
 ---
 
-## 5. What we did not measure
+## 5. Where a step actually goes
+
+§4 is arithmetic. This section is the measurement, on production configuration 6, and it changes what
+the next piece of work should be. Full tables:
+[`../results/profile/step-breakdown.md`](../results/profile/step-breakdown.md).
+
+**How it was taken, because the method has a caveat.** The running engine was started without
+`--profiler-config`, so `/start_profile` returns 404 and `nsys` on this version cannot attach to a
+live process; a profiling boot was not available and restarting production to get one was not
+allowed. So the breakdown is a reconciliation of three sources: the **structure** comes from an
+earlier torch-profiler trace of the same model, same TP=3+EP, same batched-token budget, re-segmented
+**per prefill chunk** rather than averaged over a window ([`bench/prof-analyze3.py`](../bench/prof-analyze3.py));
+the **classes that changed** were re-measured model-free in the same image
+([`bench/moe_stage_bench.py`](../bench/moe_stage_bench.py), [`bench/mesh_sweep.py`](../bench/mesh_sweep.py));
+and the **totals** were measured on the live server by wall clock
+([`bench/live-step.py`](../bench/live-step.py), [`bench/live-decode.py`](../bench/live-decode.py)).
+Carrying the per-class ratios forward overshoots the measured GPU-busy time by **2.8 %**, and the
+table below is normalised by that factor. One profiling boot would turn every re-costed row into a
+measurement; until then, read this as ±3 % per class and treat NCCL as a band rather than a point,
+since the residual most plausibly belongs to it. Add `--profiler-config` to your own launcher before
+you need it.
+
+### 5.1 The totals, and what a day of fabric and cache work did
+
+Live server, fresh unseen prompts, `max_tokens=1`, 52 requests over five length steps
+`[measured-here]`:
+
+| prompt tokens | wall (s) | tok/s |
+|---|---|---|
+| 1,032 | 0.773–0.840 | 1,192–1,341 |
+| 2,026–2,090 | 1.208–1.258 | 1,655–1,677 |
+| 3,980–4,088 | 2.260–2.292 | 1,761–1,784 |
+| 6,142–6,311 | 3.519–3.598 | 1,745–1,754 |
+| **8,423–8,427** | **4.669–4.680** | **1,801–1,804** |
+
+A least-squares fit over all 52 points gives **0.5456 ms per prompt token marginal** and a 139 ms
+intercept (HTTP, tokenise, sample, detokenise).
+
+| | one configuration earlier | production 6 | change |
+|---|---|---|---|
+| steady 2,032-token prefill chunk | 1,262.3 ms | **1,109 ms** | **−12.2 %** |
+| end-to-end per prompt token, 8.3–8.4K | 0.7892 ms | **0.5547 ms** | **−29.7 %** |
+| prefill throughput, 8.4K fresh | 1,257 tok/s | **1,802** | **+43 %** |
+| C1 decode, ms per engine step | ~108 | **89.1** | **−17.5 %** |
+| C8 decode, ms per engine step | — | **223** | — |
+
+The gap between −12 % *inside* a chunk and −30 % end to end is the MLA tuner cache
+([12](12-tuner-cache.md)): the older run paid 411 ms extra on its first chunk and 665 ms on its
+17-token tail pass, re-tuning on every new shape.
+
+### 5.2 Prefill, one steady 2,048-token chunk
+
+Occupancy in the profiled window is **99.3 %** — there is 0.7 % of launch gap in the whole chunk, so
+prefill is entirely kernel-bound and nothing is to be won on the host side `[measured-here]`.
+
+| class | earlier ms | earlier % | **now ms** | **now %** | basis for "now" |
+|---|---|---|---|---|---|
+| MoE trellis GEMM (`exl3_gemm_m_kernel`, 84 calls) | 357.5 | 28.5 % | **291** | **26.4 %** | model-free, ratio 0.837 |
+| NCCL all-reduce (102 calls × 16.8 MB) | 251.7 | 20.1 % | **182** | **16.5 %** | model-free, ratio 0.743 |
+| Dense BF16 GEMM (cutlass / nvjet — the unquantized half) | 183.8 | 14.7 % | **179** | **16.2 %** | unchanged |
+| **Hyper-connection mixing** (`mhc_*`, `hc_prenorm`) | 132.5 | 10.6 % | **129** | **11.7 %** | unchanged |
+| MLA attention (`mla_decode_partial` + `reduce`) | 92.9 | 7.4 % | **90** | **8.2 %** | unchanged |
+| KDA linear attention (triton chunked scans) | 85.0 | 6.8 % | **83** | **7.5 %** | unchanged |
+| MoE `had_in` / `glu_had_in` | 70.1 | 5.6 % | **68** | **6.1 %** | model-free, ratio 0.993 |
+| norm / elementwise | 42.1 | 3.4 % | **41** | **3.7 %** | unchanged |
+| MoE `combine` / `build_inv` | 14.4 | 1.2 % | **16** | **1.5 %** | model-free, ratio 1.154 |
+| KV block zeroing (`_zero_kv_blocks`, 1 call) | 14.7 | 1.2 % | **14** | **1.3 %** | unchanged |
+| DSA indexer (`fp8_mqa_logits`, `topKPerRowPrefill`) | 6.8 | 0.5 % | **7** | **0.6 %** | unchanged |
+| MoE align / route | 1.9 | 0.2 % | **2** | **0.2 %** | unchanged |
+| **GPU busy** | **1,253.6** | | **1,101** | | |
+| **wall** | **1,262.3** | occ 99.3 % | **1,109** | | measured |
+
+**Two corrections to the earlier reading of the same trace** `[retracted]`. The `mhc_*` and
+`hc_prenorm` kernels are not dense GEMM and not the indexer: they are **hyper-connection mixing**,
+a class of their own worth 10–12 % (§5.5). And MLA is 7.4 % in a steady chunk, not the 9 % a window
+average reported — the extra was the tail pass, where the tuner re-tuned on a new shape.
+
+**The DSA indexer is 0.6 % of prefill.** Writing a device-capability-120 persistent or filtered top-k
+would buy nothing here, which is the same conclusion a micro-benchmark reached from the other side
+([05](05-expert-parallel-and-cuda-exl3-fixes.md)). Item closed.
+
+**A near-empty chunk is cheap; a small one is not.** Crossing a 2,048-token boundary costs only the
+tokens (2,041 → 2,058 adds 45 ms; 6,101 → 6,173 adds 45 ms), but a 128-token chunk costs **403 ms**
+— 105 collectives (205 ms) plus a nearly complete MoE weight stream (104 ms), because 128 tokens ×
+top-8 already touches every expert `[measured-here]`.
+
+### 5.3 Decode, C1, verify batch M=8, drafter active
+
+Segmented per step: the window spanned by that step's `exl3_gemm_m_kernel` calls is the target model,
+everything else in the step is the draft plus head/tail and sampling. 11 steps, mean 94.9 ms
+`[measured-here]`:
+
+| class | target ms | draft ms | total | % |
+|---|---|---|---|---|
+| Dense BF16 GEMM (cutlass wmma 16×16 / 32×32) | 32.51 | **11.91** | 44.42 | **44.8 %** |
+| MoE trellis GEMM | 29.08 | — | 29.08 | 29.3 % |
+| NCCL all-reduce | 11.95 | **5.38** | 17.33 | 17.5 % |
+| hyper-connection mixing | 1.94 | 0.18 | 2.11 | 2.1 % |
+| KDA + norm + MLA + indexer + MoE aux | 3.7 | 0.9 | 4.6 | 4.6 % |
+| **DFlash2 draft, total** | — | **18.50** | — | **19.5 %** |
+
+Carried onto today's measured 89.1 ms step, the collective's share falls to **10–15 %** and the
+totals reconcile within 5 % of the measurement. **At decode the unquantized half of the checkpoint is
+the single largest item**, it gets *less* efficient per rank as ranks are added because each rank's
+shard of a BF16 matrix shrinks, and nothing in the EXL3 kernel library touches it. The k=7 drafter
+costs 19.5 % of a step and does its own all-reduce. The C8 split is `[not tested]` — that one needs a
+profiling boot.
+
+### 5.4 The MoE trellis GEMM is at the roof, and the traffic lever is closed
+
+The largest single prefill class runs at **81–96 % of the measured 225 GB/s ruler**, model-free, EP
+arm, one rank, per MoE layer (`w13 = [E, 4096, 4096]` at 4 bit = 8.389 MB per expert; traffic =
+`local_blocks × 8.389 MB`) `[measured-here]`:
+
+| M | block_m | `local_blocks` | distinct local experts | `gemm_w13` µs | GB/s if per-block | GB/s if per-expert | % of 225 GB/s |
+|---|---|---|---|---|---|---|---|
+| 8 | 16 | 17 | ≤17 | 662 | 215 | 215 | **96 %** |
+| 64 | 16 | 77.5 | ≈67 | 2,975 | 219 | 189 | 84–97 % |
+| 512 | 16 | 121.5 | 96 | 3,831 | 266 | 210 | 93 – >100 % |
+| 2048 | 64 | 112 | 96 | 4,404 | 213 | 183 | **81–95 %** |
+
+The kernel is not slow; it is taking most of what the memory can deliver. That left exactly one
+lever — **read less**. At M=2048 the launch runs 112 blocks over 96 local experts and at M=512 it
+runs 121.5, so *if* a block re-reads its expert's trellis, 17–27 % of that traffic is avoidable and
+an expert-stationary schedule would be worth about 3.7 % of prefill wall.
+
+**It does not re-read.** The kernel author added a bench for exactly this question
+(`bench_moe_expert_reread.py`, `9b17ea9`); we ran it unmodified on GB10 against the production build,
+three times, with the ruler in the same process — 96 experts, `block_m=16`, N = 1…4 blocks per expert
+`[measured-here]`:
+
+| N | blocks | rows | µs (run 1 / 2 / 3) | GB/s per expert | GB/s per block |
+|---|---|---|---|---|---|
+| 1 | 96 | 1,536 | 3,696 / 3,621 / 3,660 | 218–222 | 218–222 |
+| 2 | 192 | 3,072 | 4,035 / 4,066 / 4,064 | 198–200 | 396–399 |
+| 3 | 288 | 4,608 | 4,370 / 4,361 / 4,403 | 183–185 | 549–554 |
+| 4 | 384 | 6,144 | 5,469 / 5,464 / 5,480 | 147 | 588–590 |
+
+Doubling the block count costs **1.11×**, not 2×; quadrupling it costs 1.5×, not 4×. The trellis
+**stays resident** across an expert's blocks — `moe_align_block_size` keeps an expert's blocks
+adjacent and 8.4 MB per expert fits a 24 MiB L2. The 14–27 % traffic win the arm was built to find
+**does not exist at this configuration, and the item is closed** `[measured-here]`. The reason the
+per-block GB/s column climbs past the ruler is that an L2-resident re-read is cheap, not that DRAM is
+being exceeded; the load-bearing evidence is the µs column being nearly independent of block count.
+The same bench on the author's own 188-SM card gives 1.16×, so this is structural rather than a
+property of 48 SMs.
+
+That leaves `exl3_moe_had_in` as the only sub-roofline kernel in the MoE stage — 83–129 GB/s, **37–57 %
+of the ruler**, 4.0 % of a prefill chunk. Upstream has since taken it (`a47da6e`, a 64-bit division
+removed in favour of deriving the index from the grid): **−10 to −18 % on that kernel**, roofline
+57 % → 63 %, which is worth ~0.2–0.3 % of prefill wall on this stack — real, and not worth an image
+rebuild on its own `[reported]`. It goes into the next build bundle.
+
+### 5.5 Hyper-connection mixing: 11.7 % of prefill, and one honest lever
+
+`hc_mult = 4`, so the residual stream is carried in **four copies** — `(M, 4, 4096)` bf16, 32,768
+bytes per token. Twice per layer (before attention and before the FFN) a fused post+pre block runs
+**three kernels**: a post mapping that writes the new residual, a tf32 GEMM against a `(24, 16384)`
+projection, and a fused sigmoid/softmax/Sinkhorn + RMSNorm that produces the layer input. Six
+launches per layer, 275 per prefill chunk, 132 ms `[measured-here]`.
+
+The analytic traffic is ~148,600 bytes per token, or **27.2 GB per chunk**; at 132 ms that is
+**205.8 GB/s = 86–91 % of the ruler band**. Arithmetic intensity is 5.3 FLOP/byte against this
+machine's balance point of ~405, so the class is memory-bound by a factor of 76 and the tf32 GEMM
+inside it runs at 4.8 % of peak because there is nothing else for it to be. A model-free reproduction
+in the same image landed within **0.8 %** of the trace ([`bench/mhc_bench.py`](../bench/mhc_bench.py)).
+
+Three things this rules out, each of which looked plausible:
+
+- **Not launch-bound.** With CUDA graphs on and off the 90-call sequence differs by **0.03 %** at
+  M=2048 (it differs by 76 % at M=8, which is why decode runs in a graph) `[measured-here]`.
+- **Not a bad TileLang configuration.** Sweeping the two tunables the call site leaves at their
+  defaults is worth −4.9 % on the first kernel and −3.5 % on the third — **0.4 % of prefill**
+  together. On the third kernel `threads > 96` does not compile at all (`no available layout`), so
+  the production value is the widest one that builds, not a lazy default `[measured-here]`.
+- **Not escapable via the torch fallback.** The reference implementation exists but is unreachable on
+  CUDA — `forward_cuda` calls TileLang unconditionally, `enabled()` is overridden to `True`, and the
+  model bypasses the `CustomOp` wrapper entirely by importing the TileLang functions directly. It is
+  also 5.3–15.5× slower, adding ~900 ms to a chunk `[measured-here]`. It is a reference, not an
+  escape hatch.
+
+The one real lever is to **read the residual once less**: the second kernel's entire traffic is one
+re-read of what the first kernel just wrote. Fusing them would save 30.5 % of that pair's bytes —
+**−28 to −30 ms per chunk, −2.5 to −2.7 % of prefill**. The existing fused kernel does not do this
+job: it is selected only at ≤16 tokens, it grids per token per n-tile, and forced at large M it is
+**+32 % worse** at M=2048 and worse at every M we tried, including M=8 `[measured-here]`. The lever
+needs a new large-M kernel that tiles over `block_m`, and it is vLLM/TileLang work, not EXL3 work.
+An earlier estimate of ours put this at −3.6 %; measured, the ceiling is −2.7 %, so **that estimate
+was 30 % optimistic** `[retracted]`.
+
+### 5.6 KV block zeroing: at the memset roof, and the gain is not available
+
+`_zero_kv_blocks_kernel` costs **14.7 ms in a single call per prefill chunk**, 1.3 %. vLLM zeroes
+newly allocated blocks when the cache has Mamba layers **or** mixed precision, and this stack has
+both: 34 KDA/Mamba layers, and a main cache at fp8 with the DFlash draft's own cache at bf16.
+
+Reconstructing the live grid model-free — `[128, 720, 8]`, 32 KB pages —
+reproduces the trace within 2.5 % and shows the kernel running at **100 % of the memset ruler**
+(198 GB/s) `[measured-here]`. There is nothing to win in the kernel. What it is doing is zeroing
+**2.4–2.9 GB per chunk** where the new tokens' real KV is about 3.4 MB.
+
+The obvious lever — make the cache uniform-precision by moving the draft to fp8, then skip the
+zeroing — **is not available on this model**, and finding out why is the useful part. The zeroer does
+skip Mamba layers, which is what made "then the only remaining reason is mixed precision" look right.
+But in this model's hybrid layout **one tensor is co-owned by an MLA layer and one Mamba layer from
+each group**, so a block handed from the Mamba group to the attention group carries 1.7 MB of raw SSM
+state. Measured per block: MLA pages co-owned with Mamba/KDA are **85.5 %** of the bytes being
+zeroed, the indexer tail 5.5 %, the draft's sliding window 9.0 %. The Mamba half of vLLM's condition
+is the binding one and it is independent of precision. The safe remainder — indexer plus draft, if
+the cache were uniform — is worth **0.19 % of prefill**, which is not worth writing a partial mode
+for `[measured-here]`. Item closed; the ceiling is recorded so nobody prices it again.
+
+---
+
+## 6. Ranked targets, and who owns them
+
+Per 2,048-token prefill chunk (1,109 ms measured end to end), against the **measured** rulers of §4.1
+`[measured-here]`:
+
+| # | target | ms | share | achieved vs ruler | realistic gain | owner |
+|---|---|---|---|---|---|---|
+| 1 | NCCL all-reduce over the fabric | 182 | 16.5 % | ~20 GB/s bus against a ~30 GB/s per-node PCIe ceiling | ≤ **−2…4 %** prefill ([06](06-nccl-mesh.md) §9) | plugin / NCCL |
+| 2 | Dense BF16 GEMM, Ampere-class `cutlass_80_*` on sm_121 | 179 | 16.2 % | 63.6 against 80.4 TFLOP/s at the same shape = **79 %** | −3.1 % if it reached 95 % | vLLM / cuBLAS |
+| 3 | Hyper-connection mixing, 3 passes over a 4× residual | 129 | 11.7 % | 86–91 % of the ruler | **−2.5…2.7 %**, needs a new large-M kernel (§5.5) | vLLM / TileLang |
+| 4 | MLA prefill (`mla_decode_partial` runs at prefill too) | 90 | 8.2 % | **not measured** — the trace does not carry the selected-key count | ? | cuda-exl3 |
+| 5 | KDA linear attention (triton) | 83 | 7.5 % | **not measured** | ? | vLLM |
+| 6 | MoE trellis GEMM, large M | 291 | 26.4 % | 81–96 % — and the duplicate-read lever is **closed** (§5.4) | ~0 | cuda-exl3 |
+| 7 | `exl3_moe_had_in` | 44 | 4.0 % | 37–57 % — the only sub-roofline kernel in the MoE stage | −0.2…0.3 % (taken upstream, `a47da6e`) | cuda-exl3 |
+| 8 | `_zero_kv_blocks_kernel` | 14 | 1.3 % | 100 % of the memset ruler; gain **not available** (§5.6) | ~0 | vLLM |
+| 9 | `exl3_moe_glu_had_in` | 24 | 2.2 % | 190 GB/s = 84 % | −0.3 % | cuda-exl3 |
+| 10 | `exl3_moe_combine` | 16 | 1.5 % | 205 GB/s = 91 % | ~0 | cuda-exl3 |
+| 11 | DSA indexer | 7 | 0.6 % | — | ~0, **closed** | — |
+
+Two things a reader should take from that table. **The two largest prefill items are outside the EXL3
+kernel library entirely** — the fabric and the unquantized half of the model — and the largest item
+that is inside it is already at the roof. And **there is no single-digit-percent win left anywhere in
+prefill**: the honest list is 2–4 % from the fabric, 2.5–2.7 % from a hyper-connection kernel nobody
+has written, 3.1 % from someone shipping Blackwell-class dense GEMM kernels for sm_121, and a
+scattering of fractions. The one **config** lever that is larger than all of them is the batched-token
+budget: the MoE stage's marginal cost falls to 1.38 µs per token per layer at M=2048, so MNBT 4096
+would cut that stage's per-token cost by about a third — and it costs the KV pool, which is why 2048
+stands ([07](07-kv-and-draft-page.md), [11](11-open-issues.md) §2.5) `[measured-here]`.
+
+---
+
+## 7. What we did not measure
 
 - **Anything at max reasoning effort** `[not tested]`. See [09](09-measurement-protocol.md) §7.
 - **MMLU at TP=3** `[not tested]` — the sample was run at TP=2.
@@ -191,9 +453,20 @@ within 1 % of the measured one.
 - **Content types and mixed load on the production configuration** `[not tested]` — the last two arms
   were measured at tier B ([09](09-measurement-protocol.md) §9), which runs neither probe. §1 carries
   the fast-boot arm's figures and says so.
+- **A torch-profiler run on the production configuration** `[not tested]`. The engine was launched
+  without `--profiler-config` and restarting it was not on the table, so §5 is a reconciliation with a
+  2.8 % residual rather than a direct profile. The two rows it would settle are the NCCL band
+  (14–17 % of prefill) and the C8 decode split. Cost: one boot. Launch with the profiler directory set
+  and the question closes.
+- **The MLA prefill kernel's efficiency** `[not tested]`. It is 8.2 % of a prefill chunk and the trace
+  does not carry the selected-key count, so there is no denominator to divide by. It needs its own
+  model-free measurement before anyone calls it a target.
+- **`--max-num-batched-tokens 4096` on the current configuration** `[not tested]`. §6 gives the
+  arithmetic for why it is the largest single prefill lever left, and [07](07-kv-and-draft-page.md)
+  gives the KV price it was rejected on two configurations ago. Nobody has re-run it since.
 
 ---
 
-## 6. What is next
+## 8. What is next
 
 [11 — Open issues](11-open-issues.md): what is unresolved, what we retracted, and what we never ran.

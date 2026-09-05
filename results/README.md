@@ -22,6 +22,8 @@ The exact settings per arm are in each file's header.
 | `mesh/all-reduce-sweep.md` | The mesh all-reduce cliff: bandwidth by message size against point-to-point, the hardware counters, the channel-count dose–response, the protocol sweep, and the engine A/B. |
 | `mesh/multilink-sweep.md` | The nine-arm plugin sweep: the idle second cable, `NCCL_PTR_CUDA`, what the flush and DMA-BUF cost, and why 16 channels is harmful. |
 | `mesh/multilink-sweep.csv` | The same sweep, every arm × operation × size, with the per-collective RNR counters. Machine-readable. |
+| `mesh/rdma-write-sweep.md` | The six-arm sweep of the one-sided `RDMA_WRITE` transport: RNR and out-of-buffer to exactly zero, throughput unmoved, the engine arm, and why it was not adopted. |
+| `profile/step-breakdown.md` | Where a prefill chunk and a decode step actually go, class by class; the two rulers measured on the device; the MoE stage model-free; the expert re-read bench; the hyper-connection kernels; the KV-zeroing geometry. |
 
 ## What is deliberately not here
 
@@ -32,8 +34,11 @@ The exact settings per arm are in each file's header.
   evidence.
 - **Boot and engine logs.** They carry host names and addresses throughout. What they proved is
   quoted as individual log lines in the documents, in context, with the surrounding text.
-- **Profiler traces.** Large binary artefacts; the extracted kernel breakdown is in
-  [`../docs/05-expert-parallel-and-cuda-exl3-fixes.md`](../docs/05-expert-parallel-and-cuda-exl3-fixes.md) §4.
+- **Profiler traces.** Large binary artefacts; the extracted kernel breakdowns are in
+  [`../docs/05-expert-parallel-and-cuda-exl3-fixes.md`](../docs/05-expert-parallel-and-cuda-exl3-fixes.md) §4
+  and in `profile/step-breakdown.md`.
+- **Per-arm mesh sweep logs.** The published tables are the two-repetition means and the counter
+  columns; the logs themselves carry node names and fabric addresses throughout.
 - **Weights of any kind**, including the model sidecars and the fast-load sidecar.
 
 ## Scrubbing

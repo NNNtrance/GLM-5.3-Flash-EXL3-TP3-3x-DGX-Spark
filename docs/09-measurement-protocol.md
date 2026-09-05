@@ -187,9 +187,15 @@ before every measurement is which of these can actually settle it. Working down 
 
 | Tier | What it runs | Cost | Answers |
 |---|---|---|---|
-| **A — model-free** | `bench/`: the real shapes, engine **down**. `bench/validate.sh <image>`, `bench/ar_bench.py`, `bench/mesh-multilink-sweep.sh`, `bench/moe_stage_bench.py`, `bench/topk_bench.py` | seconds to ~45 min, no boot | kernel and collective questions; rejecting a setting outright; anything with a mechanism |
+| **A — model-free** | `bench/`: the real shapes, engine **down**. `bench/validate.sh <image>`, `bench/ar_bench.py`, `bench/mesh-multilink-sweep.sh`, `bench/moe_stage_bench.py`, `bench/topk_bench.py`, `bench/mhc_bench.py`, `bench/zerokv_bench.py`, and always `bench/bw.py` + `bench/gemmpeak.py` in the same run | seconds to ~45 min, no boot | kernel and collective questions; rejecting a setting outright; anything with a mechanism |
 | **B — quick arm** | one boot → gates cold → `soguk-c1` → `prefill-7k` → **`prefill-fresh`** → **3** C1–C8 rounds → gates warm → free RAM and swap | ~17 min | does a model-free win survive the engine, and did it cost anything |
 | **C — full arm** | tier B with **5** rounds, plus `category-speed.py` and `mixed-load-probe.py` | ~30–40 min | a configuration that is going into production, or a claim about content types or latency under load |
+
+A fourth thing, which is not a tier and is cheaper than all of them: **the live server's own
+metrics**. `bench/live-step.py` and `bench/live-decode.py` get a prefill ladder, a chunk-boundary
+probe and an exact ms-per-engine-step out of a *running* engine without restarting it, because
+`vllm:iteration_tokens_total_count` and `vllm:spec_decode_num_drafts_total` make the step count exact
+rather than inferred. When the question is "how long is a step", that is the whole measurement.
 
 **Tier A first, always.** Every conclusion in this repository that survived was reached with the
 engine down; every conclusion drawn from two engine sweeps alone has since been retracted (§4). The
@@ -209,7 +215,46 @@ number without them is not a result. And every tier reports **what the gain cost
 and memory together, with the KV pool line filled in, because several changes on this stack have paid
 for throughput out of the pool without anyone noticing for a boot or two.
 
-## 10. What is next
+## 10. One measurement at a time: the GPU and the fabric are a lock
+
+This is a protocol rule, not a courtesy. On a three-node cluster with one engine, a model-free
+micro-benchmark, a fabric sweep and a serving benchmark all want the same hardware, and any two of
+them running at once produce numbers that are quietly wrong: a throwaway container next to the live
+engine competes for memory bandwidth and SM occupancy, and a three-node NCCL sweep next to a live
+engine competes for RDMA queue-pair resources — which does not slow the engine down, it **fails** its
+next collective.
+
+So: **one measurement holds the cluster at a time**, and it says so in a file.
+
+```
+echo "what, and when" > ~/exl3-zeus/ENGINE-BUSY
+```
+
+The rule around that file is four lines:
+
+1. **Write it before the first `docker run` that touches the GPU or the fabric**, with what you are
+   doing and the timestamp. Remove it after the last one — not after the analysis, after the last
+   command that could contend.
+2. **Check it first, and wait rather than interleave.** If it is held, your measurement is not
+   cheaper for starting now; it is worthless.
+3. **A model-free container beside an idle engine is allowed and is not free.** Everything measured
+   this way in this repository ran pinned to the engine's own cpuset with a memory cap
+   (`--cpuset-cpus`, `--memory=8g`), against an engine that was serving nothing. That is a
+   deliberate choice — it is how the numbers stay comparable with the ones taken while the engine was
+   down — and it is only defensible while the engine is idle.
+4. **Three-node NCCL work needs the engine down, not idle** `[measured-here]`. This is the one hard
+   line: a fabric sweep beside a running engine can exhaust queue-pair resources and take the engine's
+   next collective with it. Every mesh number on this stack was taken with all three containers
+   stopped.
+
+And one habit that has repeatedly paid for itself: **name every command that ever touched the live
+engine**, in the report, including the harmless ones. One measurement in this repository read the
+engine container's cpuset with `docker inspect` while checking for a CPU collision; that is a
+configuration read with no effect on a running container, and it is written down anyway. The value is
+not the confession, it is that the next person debugging an odd number can rule the engine in or out
+without guessing.
+
+## 11. What is next
 
 [10 — Results and roofline](10-results-and-roofline.md) — the numbers this protocol produced, and how
 close to the hardware they are. [12 — The tuner cache](12-tuner-cache.md) — why §1 has two protocols

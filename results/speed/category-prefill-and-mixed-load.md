@@ -10,7 +10,7 @@ The last two arms — *tuner cache warm* and *dual cable + `PTR_CUDA`* (the prod
 since) — ran on image `exl3-zeus:9bf594c` with the persisted MLA tuner cache
 ([docs/12](../../docs/12-tuner-cache.md)) and, for the last one, the patched mesh plugin
 ([docs/06](../../docs/06-nccl-mesh.md) §6–§8). They were measured with the quick arm of the tiered
-protocol ([docs/09](../../docs/09-measurement-protocol.md) §10), which does not run the category or
+protocol ([docs/09](../../docs/09-measurement-protocol.md) §9), which does not run the category or
 mixed-load probes — so those two tables stop at the fast-boot arm and say so.
 
 ## 1. Decode rate by content type

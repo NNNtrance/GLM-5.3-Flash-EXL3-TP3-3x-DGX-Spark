@@ -1175,8 +1175,31 @@ about 2 % of a prefill chunk" quoted before this measurement does not exist. The
 zero**; the only lever left on that kernel is reducing its work, not its traffic. This repository
 never carried the 21–26 % figure in a document, so there is nothing here to withdraw — but it was
 live in the thread the datum was produced for, and the correction is worth more than the datum. A
-cheap falsification on a 48-SM part is [HELP-WANTED](../HELP-WANTED.md) §8 and we have **not** run it
-`[not tested]`.
+cheap falsification on a 48-SM part was [HELP-WANTED](../HELP-WANTED.md) §8; we have now run it.
+
+**We ran it the same day, on our own hardware, and the prediction held at both head counts.**
+[`results/kernels/mla-prefill-falsification-gb10.md`](../results/kernels/mla-prefill-falsification-gb10.md)
+`[measured-here]`: his fixture, verbatim, at his 16-head shape and at our own 22-head TP=3 shape, over
+the same three contexts. At 262K, production sits **1.3 %** above drifting at our 22-head shape —
+tighter than the **1.6 %** he measured on his own 188-SM card — and **5.4 %** above drifting at his
+16-head shape run here, against an independent arm that needs **82.0 %** and **146.8 %** more time
+respectively. Across all six cells (three contexts × two head counts) production closes **96.0–98.4 %**
+of the independent→drifting distance, and its excess over drifting at 262K (223–575 µs) is below one
+cold read of its own working set. **Item 6 — his own numbering — now closes at zero on both parts, not
+just his.** The run also sharpened the test rather than weakening it: this card's independent/drifting
+spread (1.82–2.47×) is wider than his (1.46×) because its bandwidth-to-compute ratio is roughly 6×
+lower, so the same leaked traffic would have cost about six times as much relatively — and it still
+landed on drifting.
+
+**Closing this item produced one new one.** At 22 heads — this stack's own TP=3 per-rank count — the
+kernel's compute floor costs **13–16 % more per head** than at his 16, reproducibly at every context
+and isolated to the compute path rather than traffic: the first concrete candidate for the "reduce the
+kernel's own work" lever `5fd7299` says is all that is left. **And one caveat travels forward rather
+than closing here.** The correctness check gating this fixture's timings ran at a small 2-head shape;
+the harness grew a matrix for the real 22-head shape that same afternoon and its CPU-only self-test
+passed (24/24), but the GPU run itself — the kernel call at 22 heads against a torch reference — is
+still queued for an engine-free window `[not tested]`. Both the 22-head correctness run and the
+per-head cost anomaly are [HELP-WANTED](../HELP-WANTED.md) §8 now.
 
 **Two process corrections came out of the campaign and both cost more than the result.** The
 diagnostic image had been built with only the first of the production image's two stages, so the

@@ -453,6 +453,14 @@ We vendor no files from either of these. What we took is practice and arithmetic
 - **`bench_moe_expert_reread.py`** — **not ours**. Written by the `cuda-exl3` author in `9b17ea9` to
   settle a question we had raised the wrong way round; we ran it unmodified and it closed the item
   ([docs/11](docs/11-open-issues.md) §2.12). Under that project's MIT licence.
+- **[`bench/mla-prefill/`](bench/mla-prefill/)** — `bench_mla_prefill_5fd7299.py` is **not ours**: a
+  verbatim copy of the author's own `bench/bench_mla_prefill.py` at his commit `5fd7299`, kept unedited
+  for provenance, under that project's MIT licence. `mla_prefill_falsify.py` is ours (Apache-2.0)
+  except that its three arms and selection generator are copied verbatim from the same file under the
+  same MIT terms, so the fixture it runs is his rather than a reimplementation of it. Used to falsify
+  his `5fd7299` correction on our own GB10 — it held, tighter than on his card
+  ([docs/11](docs/11-open-issues.md) §2.27,
+  [`results/kernels/mla-prefill-falsification-gb10.md`](results/kernels/mla-prefill-falsification-gb10.md)).
 - **PyTorch profiler**, via vLLM's `--profiler-config`. Note that on this vLLM the environment
   variable form does nothing and the endpoint returns 404 — the flag is the only way in
   ([docs/05](docs/05-expert-parallel-and-cuda-exl3-fixes.md)). Set it on the launcher **before** you

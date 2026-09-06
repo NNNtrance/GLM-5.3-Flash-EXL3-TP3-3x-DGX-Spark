@@ -321,44 +321,66 @@ the engine for identical shapes, the gap is a heuristic and it is fixable at the
 
 ---
 
-## 8. MLA prefill at production overlap — a one-bench falsification, on a 48-SM part
+## 8. Two loose ends from the MLA-prefill falsification: a correctness check and a cost anomaly
 
-**Effort: one tier A bench, minutes, engine down. One node is enough, and it needs no fabric.**
-Pending on our side: we will run it after the current engine work, and until then it is
-`[not tested]`.
+**The falsification itself is done — this section used to ask for it, and now reports it and asks for
+two smaller follow-ups instead.** The `cuda-exl3` author corrected his own MLA-prefill ceiling in
+commit `5fd7299` after our indexer datum ([`results/kernels/sm12-stack-patches-ab.md`](results/kernels/sm12-stack-patches-ab.md)
+§8: median 2,049 selected keys per row, median adjacent-row overlap 0.9258) showed production was two
+orders of magnitude from the low-turnover arm it had been compared against, and predicted that on a
+48-SM part the production arm would land within a few percent of a fully cache-resident arm rather
+than between it and a gather-bound one. We ran that on our own GB10:
+[`results/kernels/mla-prefill-falsification-gb10.md`](results/kernels/mla-prefill-falsification-gb10.md)
+`[measured-here]`. **The prediction held at both head counts** — at 262K context, +1.3 % at our own
+22-head TP=3 shape (tighter than the +1.6 % he measured on his own 188-SM card) and +5.4 % at his
+16-head shape, against an independent arm needing 82.0–146.8 % more time. **The item closes at zero on
+both parts**; full account in [docs/11](docs/11-open-issues.md) §2.27. Two things fell out of closing
+it, and neither has an answer yet.
 
-**What happened, because the item this replaces was closed at a number and is now closed at zero.**
-The `cuda-exl3` author's MLA-prefill benchmark had two arms: a *drifting* one, in which about **2**
-keys of a query row's selection turn over from the row before it, and an *independent* one, in which
-every row selects freshly. Ours was assumed to sit between them, and a **"21-26 % overlap gap, worth
-about 2 % of a prefill chunk"** was quoted on that assumption.
+### 8a. Numerically verify the kernel at the real 22-head TP=3 shape
 
-Then we measured the selection itself. A diagnostic hook reading back the token-granular selection
-buffer in a steady 1,792-row prefill chunk gives **median 2,049 selected keys per row and a median
-adjacent-row overlap of 0.9258** over 7,168 rows `[measured-here]` —
-[`results/kernels/sm12-stack-patches-ab.md`](results/kernels/sm12-stack-patches-ab.md) §8. That is
-**about 152 keys turning over per row, roughly 76x the drifting arm**: production was two orders of
-magnitude away from the arm it was being compared against, not between the two.
+**Effort: one tier A bench, a few minutes, engine down. One node, no fabric — and the tooling is
+already written.**
 
-He built a third arm calibrated to that turnover, swept context, and **corrected his own conclusion**
-in commit **`5fd7299`**, *"Correct the MLA prefill ceiling: at production overlap there is no gap"*
-`[reported]`. At **262K context** the production-pattern arm runs within **1.6 %** of the fully
-cache-resident arm — **2,422.8 µs against 2,385.8 µs** — while the independent arm needs **3,474 µs**.
-The mechanism is that the live key set is the **residence window**, about **4,096 keys ≈ 4.5 MiB**,
-not the chunk's whole footprint, so it fits even a 24 MiB L2. **MLA prefill is compute-bound at
-production overlap; the 21-26 % gap does not exist and the item closes at zero.** The only lever left
-on that kernel is reducing the work it does, not the traffic it moves.
+The falsification's own correctness gate checked `mla_decode` against a torch reference only at a
+small 2-head smoke shape; the 22-head shape every timed number above uses was **timed but never
+numerically verified**. This stack has an unrelated kernel (`b12x`'s decode path) that silently
+miscomputed at exactly the 22-head TP=3 shape because nobody had tested that shape, so this is not a
+formality.
 
-**The falsification he proposed, which is what this item asks for.** Every number above is from his
-hardware. On a **48-SM GB10** with a 24 MiB L2, run `bench/bench_mla_prefill.py`'s **production arm
-at 262K context** and check that it lands **within a few percent of the drifting arm**. If it does,
-the closure transfers to this part. If it does not — if the production arm sits closer to the
-independent arm on a smaller machine — then the residence-window argument is part-dependent and the
-gap is real here even though it is not there, which is a result worth more than a confirmation.
+Nothing needs writing: [`bench/mla-prefill/mla_prefill_falsify.py`](bench/mla-prefill/mla_prefill_falsify.py)
+`--check` runs a correctness matrix at the production shape — both head counts, both contexts, the
+kpool-aligned selection grid, and a ragged-`seqlens` variant that exercises the masking path the
+timing run never touches — and its `--self-test` (CPU only, no lock, no GPU) has already passed
+24/24. What is missing is the GPU half: run `--check` inside the production image in an engine-free
+window.
 
-**Report:** the three arms' microseconds at 262K, the L2 size and SM count of the part, the
-`cuda-exl3` commit, and the context sweep either side of 262K if you have the time — the crossover,
-if there is one, is the interesting part.
+**Report:** pass/fail per cell of the matrix, the worst `max_rel` and `cos_min` across it, and — if
+anything fails — which arm, context and variant, so a failure can be narrowed the way the b12x one
+eventually was.
+
+### 8b. Why 22 heads cost 13-16 % more per head than 16, in the compute-only arm
+
+**Effort: unknown — a "what is going on" item, not a "run this command" one. Start with a tier A bench
+(an hour); escalate to profiling only if that does not explain it.**
+
+The falsification's `drifting` arm (cache-resident, so purely the kernel's compute/issue cost) scales
+**super-linearly** with head count: 16 → 22 heads is 1.375× the work, but the measured time is
+**1.557–1.589×**, reproducibly at all three contexts. The `independent` (traffic-bound) arm does the
+opposite — 1.17–1.28×, *sub*-linear — so the penalty sits entirely on the compute path, not in memory
+traffic, and it is invisible at the author's own 16-head shape. Since 22 heads per rank is what this
+stack's TP=3 shape gives it, a TP=2 or TP=4 topology would not see this at all.
+
+**What is not known:** whether this is a smooth per-head cost, a step at some occupancy or
+register-pressure boundary between 16 and 22, or something specific to `head_dim=576` not dividing
+evenly into whatever block/warp geometry the kernel uses at higher head counts. A cheap first step:
+sweep head count finely (16, 18, 20, 22, and a couple of points past it) in the `drifting` arm only —
+the effect is context-independent in the falsification's own data, so no context sweep is needed —
+and report whether the cost curve is smooth or has a knee, and where. Past that, it needs `ncu`/`nsys`
+on the kernel at two head counts and a report of which phase of `mla_decode` the extra time lands in.
+
+**Report:** the per-head-count timing table from the sweep, "smooth" or "knee at N heads", and, if you
+profile it, which sub-kernel or code path accounts for the gap.
 
 ---
 

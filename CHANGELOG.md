@@ -11,6 +11,45 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — the MLA-prefill ceiling, falsified on our own hardware: the kernel author's correction holds, tighter than on his card
+
+**A prediction from someone else's issue thread, run on our own GB10 the same day it was made.** The
+`cuda-exl3` author corrected his own MLA-prefill ceiling in commit `5fd7299` after our indexer datum
+([`results/kernels/sm12-stack-patches-ab.md`](results/kernels/sm12-stack-patches-ab.md) §8: median
+2,049 selected keys per row, adjacent-row overlap 0.9258) showed production sat two orders of
+magnitude from the low-turnover arm his benchmark had been comparing it against, and predicted that on
+a 48-SM part the production arm would land within a few percent of a fully cache-resident arm rather
+than between it and a gather-bound one. New page:
+[`results/kernels/mla-prefill-falsification-gb10.md`](results/kernels/mla-prefill-falsification-gb10.md)
+`[measured-here]`; fixture in [`bench/mla-prefill/`](bench/mla-prefill/).
+
+**The prediction held, at both head counts, and this card asked the question harder than his did.**
+His fixture, copied verbatim, run against the production kernel (`cuda-exl3 754421f`) inside a window
+where the engine was already down on all three nodes: 17 s, 1.65 GiB peak. At 262K context, production
+sits **+1.3 %** over a fully cache-resident arm at our own 22-head TP=3 shape — tighter than the
+**+1.6 %** he measured on his 188-SM, 128 MiB-L2 card — and **+5.4 %** at his 16-head shape run here,
+against an independent arm needing **82.0–146.8 %** more time. Across all six cells (three contexts ×
+two head counts) production closes **96.0–98.4 %** of the independent→drifting distance, and its
+excess over drifting at 262K (223–575 µs) is below one cold read of its own 187 MiB working set —
+three orders of magnitude under the full gather. **The "21–26 % overlap gap, about 2 % of a prefill
+chunk" this item was carried at does not exist. It closes at zero on both parts.** GB10's own
+bandwidth-to-compute ratio being roughly 6× lower than his made the test sharper, not weaker: this
+card separates the two extreme arms by 1.82–2.47×, against his 1.46×, and the answer was the same
+regardless.
+
+**Closing it produced one new item.** At 22 heads — this stack's own TP=3 per-rank count — the
+kernel's compute-only floor costs **13–16 % more per head** than at his 16, reproducibly at every
+context and isolated to the compute path rather than traffic: the first concrete candidate for the
+"reduce the kernel's own work" lever `5fd7299` says is what remains. **And one caveat travels forward
+rather than closing here.** The correctness gate on this fixture's timings ran at a small 2-head
+shape; a correctness matrix for the real 22-head shape was added the same afternoon and its CPU-only
+self-test passed 24/24, but the GPU run itself is still queued for an engine-free window
+`[not tested]`. Both the 22-head numeric check and the per-head cost anomaly are now
+[HELP-WANTED](HELP-WANTED.md) §8, which used to ask for the falsification itself. Narrative and
+closure: [docs/11](docs/11-open-issues.md) §2.27.
+
+---
+
 ## 2026-09-06 — production configuration 11: the memory ladder to 0.87, and the sm_12x guards that ride with it
 
 **Two changes in one boot, and the second one paid for the first.** `gpu-memory-utilization` 0.83 →

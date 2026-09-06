@@ -32,10 +32,12 @@ facts pin the size, both read off the consumers:
      DeepSeek-V4 divides the buffer size by ``compress_ratio`` at its call
      site (models/deepseek_v4/attention.py); the glm5next path does not.
 
-  2. The gather writes ``chunk.total_seq_lens`` rows -- the sum over that
-     chunk's requests of the compressed lengths (``build_prefill_chunk_metadata``)
-     -- into ``k_quant_full[: chunk.total_seq_lens]``
-     (sparse_attn_indexer_kpool.py / sparse_attn_indexer.py).
+  2. The gather fills ``k_quant_full[: chunk.total_seq_lens]`` -- the sum over
+     that chunk's requests of the compressed lengths
+     (``build_prefill_chunk_metadata``) -- in
+     sparse_attn_indexer_kpool.py / sparse_attn_indexer.py.  Note the workspace
+     REQUEST itself is static (``total_seq_lens`` is the op argument, fixed at
+     construction); only this slice varies per chunk.
 
 So the largest total the scheduler can EVER present in one step is
 
@@ -73,31 +75,49 @@ SIZING
 The x2 safety factor is on top of an EXACT ceiling, and the 512 MB floor wins
 over it here, giving ~2.03x headroom over anything the scheduler can produce.
 
-SAFETY -- WHY A TOO-SMALL BUFFER CANNOT CORRUPT SILENTLY
---------------------------------------------------------
-Three layers, in order of when they fire:
+SAFETY -- WHAT A TOO-SMALL BUFFER WOULD DO, AND WHAT CATCHES IT
+---------------------------------------------------------------
+CORRECTED 6 September 2026.  This block previously claimed the symptom is an
+out-of-bounds device write in the gather, caught by upstream's locked-workspace
+assertion as the load-bearing layer.  BOTH WERE WRONG; the correction is the
+#55221 issue author's (@drakosha,
+https://github.com/vllm-project/vllm/issues/55221#issuecomment-5561194190) and
+is verified in results/memory/indexer-workspace-ab.md section 2 and docs/11
+section 1.13.
+
+The real symptom is SILENT.  ``k_quant_full[: chunk.total_seq_lens]`` is a
+Python slice, and a slice longer than its tensor CLAMPS rather than raising.
+The gather kernel then does NOT overrun -- ``cp_gather_indexer_k_quant_cache``
+(csrc/libtorch_stable/cache_kernels.cu) takes ``num_tokens = dst_k.size(0)``
+and early-returns on ``token_idx >= num_tokens``, so ``cu_seq_lens`` picks
+which in-range rows are valid, not how many are written.  The rows past the
+clamp are simply never gathered, and ``cu_seqlen_ks``/``ke`` -- built from the
+UNCLAMPED lengths -- are then handed to ``fp8_fp4_mqa_logits`` with a shortened
+k_quant.  Wrong selection, no exception.  The fp8 scale buffer does share the
+one ``get_simultaneous`` allocation, immediately after the values view.
 
   L1  Startup, this patch: if the chosen size is below ``per_req`` the engine
       REFUSES TO START (RuntimeError).  An explicit HAREM_INDEXER_WS_MB that
       would break correctness is rejected before a byte is committed.
+      THIS IS THE LOAD-BEARING LAYER.  The splitter admits only while
+      ``new_n <= workspace_size`` against this same bounded value, so the only
+      chunk that can exceed the buffer is the ``end == start`` branch's single
+      unsplittable request -- which L1 makes impossible.
 
   L2  Metadata build, this patch: ``split_indexer_prefill_chunks`` raises if it
       is about to emit a chunk whose compressed total exceeds ``workspace_size``
       -- i.e. the ``end == start`` branch.  This fires before any kernel launch.
 
-  L3  Gather, this patch: right at ``k_quant_full[: chunk.total_seq_lens]``.
-      This is the actual corruption point and the reason L3 exists at all: a
-      Python slice CLAMPS silently (``t[:N]`` on a shorter tensor returns the
-      shorter tensor), so without a check ``cp_gather_indexer_k_quant_cache``
-      would be handed ``cu_seq_lens`` whose last entry exceeds the buffer it
-      writes into -- an out-of-bounds DEVICE write, not an exception.
+  L3  Gather, this patch: right at ``k_quant_full[: chunk.total_seq_lens]``,
+      the clamp point itself.
 
   L0  (upstream, unconditional) ``WorkspaceManager._ensure_workspace_size``
-      raises ``AssertionError`` naming the caller when a locked workspace is
-      too small (v1/worker/workspace.py).  Every access goes through
-      ``get_simultaneous`` -> ``_ensure_workspace_size`` BEFORE the buffer is
-      sliced, so an under-sized workspace can never be silently indexed past;
-      after ``lock_workspace()`` the manager cannot grow, it can only raise.
+      raises ``AssertionError`` naming the caller when a LOCKED workspace is
+      asked to GROW (v1/worker/workspace.py).  It does NOT cover this case:
+      the indexer's request is static (``total_seq_lens`` is fixed at
+      construction), so ``required_bytes`` never changes and this assertion
+      cannot fire from the indexer path.  It would take a different consumer of
+      the shared workspace appearing after ``lock_workspace()``.
 
 L2 and L3 are armed only when the knob is set, so the control arm of an A/B is
 upstream byte for byte.
@@ -354,8 +374,9 @@ IDX_GUARD_NEW = '''        req_slice = slice(start + request_offset, end + reque
         # emits a chunk that can exceed workspace_size (a single request the
         # packer could not split).  Downstream that becomes
         # k_quant_full[:chunk.total_seq_lens] on a shorter buffer -- a SILENT
-        # Python-slice clamp, then an out-of-bounds device write in
-        # cp_gather_indexer_k_quant_cache.  Armed only with the sizing knob.
+        # Python-slice clamp.  The gather is destination-bounded, so the rows
+        # past the clamp are never gathered and the selection is quietly wrong.
+        # Armed only with the sizing knob.
         if _HAREM_IDXWS_GUARD and chunk_n > workspace_size:
             raise AssertionError(
                 "HAREM-IDXWS: indexer prefill chunk needs "
@@ -403,9 +424,10 @@ KP_GUARD_OLD = '''        for chunk in prefill_metadata.chunks if not short_pref
 
 KP_GUARD_NEW = '''        for chunk in prefill_metadata.chunks if not short_prefill else ():
             # --- HAREM-IDXWS L3: last line of defence, exactly where a
-            # too-small workspace would start corrupting. The slice below
-            # CLAMPS silently, and cp_gather_indexer_k_quant_cache would then
-            # write cu_seq_lens[-1] rows into a shorter buffer.
+            # too-small workspace goes quietly wrong. The slice below CLAMPS
+            # silently; the gather is bounded by dst_k.size(0), so the rows
+            # past the clamp are never gathered while cu_seqlen_ks/ke still
+            # describe them to fp8_fp4_mqa_logits.
             if _HAREM_IDXWS_GUARD and chunk.total_seq_lens > k_quant_full.shape[0]:
                 raise AssertionError(
                     "HAREM-IDXWS: K-gather workspace too small: chunk needs "

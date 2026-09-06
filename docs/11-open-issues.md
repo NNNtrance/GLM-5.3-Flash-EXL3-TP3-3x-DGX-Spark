@@ -13,9 +13,12 @@ elsewhere.
 Seven things we wrote down as findings and later measured properly, plus two smaller ones, plus the
 step-time breakdown that a real profiler run corrected in three places (§1.10), plus a kernel ratio
 withdrawn the same night it was published (§1.11), plus a full audit of every claim of ours that a
-later measurement overturned (§1.9 — **32 of them**, as of the 5 September pass). Each was published —
-in a report, an upstream issue, or both — before it was corrected. Two of them (§1.6 and §1.7) are the
-same number, corrected twice, in opposite directions.
+later measurement overturned (§1.9 — **32 of them**, as of the 5 September pass), plus a CUDA-graph
+reason that was right about the fact and wrong about the cause (§1.12), plus a failure mode we had
+published upstream and someone else corrected (§1.13). Each was published — in a report, an upstream
+issue, or both — before it was corrected. Two of them (§1.6 and §1.7) are the same number, corrected
+twice, in opposite directions. **§1.13 is the first that a reader outside this stack caught**, and it
+is the one we would least have found alone.
 
 ### 1.1 "The missing `n_rows` also costs the non-expert-parallel path"
 
@@ -235,6 +238,45 @@ makes FlashInfer's division 22 % 3 = 1, and the moment production 7 moved the dr
 (FlashInfer) the graphs went off at TP=3 and stayed off — while TP=2, where the same division is
 32 % 4 = 0, captures them on the same image. §2.29 has the code and the arithmetic; the declaration
 is filed upstream as [vllm#55581](https://github.com/vllm-project/vllm/issues/55581). Retracted 6 September 2026 `[retracted]`.
+
+### 1.13 "A too-small indexer workspace ends in upstream's locked-workspace `AssertionError`"
+
+We wrote this in §2.28, in [HELP-WANTED](../HELP-WANTED.md) §9, in the patch's own docstring and
+[in the #55221 thread](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5559336290),
+and built a four-layer safety story on it in which upstream's assertion was the load-bearing layer.
+**Wrong** `[retracted]`. The issue author, [@drakosha](https://github.com/drakosha),
+[corrected it](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5561194190): both
+indexers ask the `WorkspaceManager` for a **static** size and only then slice per chunk, so the
+request never grows, `_ensure_workspace_size` sees the same `required_bytes` every step, and the
+assertion we linked **cannot fire from this path at all**. Our own A/B had said so and we did not read
+it — exactly one resize event per rank, for the life of the engine.
+
+Verified against the code we run (image `exl3-zeus:754421f`, vLLM base `487ecf187`), where two things
+came out:
+
+- **Their correction of the request path holds exactly.** `total_seq_lens` is the op argument bound
+  once at construction to `get_max_prefill_buffer_size(vllm_config)` = `max_model_len × 40`; the
+  profiling branch and the run-time branch pass the same value; the per-chunk narrowing is the slice
+  `k_quant_full[: chunk.total_seq_lens]` (and `[: chunk.max_local_total_seq_lens]` in the sibling
+  file). A Python slice longer than its tensor clamps without raising, so **the failure is silent**.
+  The fp8 scale buffer does share the allocation — `get_simultaneous` packs every requested tensor
+  into one `uint8` buffer at 256-byte-aligned offsets — so the hazard they describe is real in kind.
+- **One detail of the correction does not hold on our build, in the safer direction.** Their
+  replacement symptom is an out-of-bounds *write* by `cp_gather_indexer_k_quant_cache`. That kernel is
+  **destination-bounded**: `int num_tokens = dst_k.size(0);`, a grid of
+  `ceil(num_tokens / BLOCK_Y_SIZE)`, and a per-thread `token_idx >= num_tokens` early return carrying
+  upstream's comment "num_tokens may be an allocation upper bound when Python avoids a D2H sync".
+  `cu_seq_lens` chooses which in-range rows are valid, not how many are written. True at `808f8cd3ac`
+  — the ref their line numbers cite — and at every commit sampled back to `22a58640b4`. So the rows
+  past the clamp are never gathered; the wrongness then travels to `fp8_fp4_mqa_logits`, which is
+  handed `cu_seqlen_ks`/`ke` describing the unclamped extent alongside a shortened `k_quant`.
+
+**Net: the real failure mode is a silent clamp producing wrong answers, and the load-bearing layer is
+ours, not upstream's** — the startup refusal below the one-request floor. Corrected in
+[`results/memory/indexer-workspace-ab.md`](../results/memory/indexer-workspace-ab.md) §2, which also
+carries the reachability arithmetic, in §2.28 below, in
+[HELP-WANTED](../HELP-WANTED.md) §9 and in the patch docstring. The thread is answered.
+Retracted 6 September 2026.
 
 ## 2. Open, with a known next step
 
@@ -1252,9 +1294,13 @@ control arm showed **one** resize event on each rank, grown by `sparse_attn_inde
 exactly the 5,036.40 MB the code reading predicted — so the gain was not capped by some other
 consumer, which was the most likely way for the whole item to be worth nothing.
 
-**What it cost.** Diagnostic margin: 20× the largest load the scheduler can produce, down to 2.03×,
-against four layers that turn an under-size into a loud failure rather than a silent out-of-bounds
-device write — one of them upstream's own locked-workspace assertion. Speed: nothing measurable, and
+**What it cost.** Diagnostic margin: 20× the largest load the scheduler can produce, down to 2.03×
+against that ceiling and 16.27× against the one-request floor, which is the only route to an over-size
+chunk — held by a startup refusal at that floor plus two armed run-time assertions either side of the
+slice. What an under-size would actually do is a **silent clamp producing wrong answers**, not the
+out-of-bounds device write this page first described, and upstream's locked-workspace assertion,
+which we had counted as the load-bearing layer, cannot fire from this path — §1.13, corrected by the
+issue author. Speed: nothing measurable, and
 it was looked for at five concurrency levels, in fresh prefill and in TTFT. Host headroom: nothing,
 in either direction — the freed memory goes straight into the pool, so `MemAvailable` is unchanged
 and this is **not** a lever on the rung where 0.90 failed (§2.4). It stacks with that ladder.

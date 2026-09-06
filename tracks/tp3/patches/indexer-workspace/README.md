@@ -34,8 +34,20 @@ entries — a constant chosen upstream against DeepSeek-V3.2's 163,840-token con
 for the life of the engine and charged to the residual the profiler subtracts before it sizes the KV
 pool. The buffer only ever holds **one indexer chunk's compressed context**, whose exact ceiling here
 is `max_num_seqs × ceil((max_model_len + num_spec + 1) / index_kpool)` = 2,000,016 entries =
-**251.8 MB**. The patch takes it to **512 MB**, 2.03× that ceiling. The derivation, the four safety
-layers and the reason a too-small buffer cannot corrupt silently are in the script's own docstring.
+**251.8 MB**. The patch takes it to **512 MB**, 2.03× that ceiling — and 16.27× the one-request floor,
+which is the only route by which a chunk can exceed the buffer at all. The derivation and the four
+layers are in the script's own docstring.
+
+**What a too-small buffer actually does was corrected on 6 September**: a **silent Python-slice
+clamp**, not the out-of-bounds device write this page and the docstring first described, and not
+upstream's locked-workspace `AssertionError`, which cannot fire from this path because the indexer's
+workspace request is static. The correction is the issue author
+[@drakosha](https://github.com/drakosha)'s,
+[in the #55221 thread](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5561194190);
+what we verified against our own code, including one detail of it that does not hold here, is in
+[`results/memory/indexer-workspace-ab.md`](../../../../results/memory/indexer-workspace-ab.md) §2 and
+[docs/11](../../../../docs/11-open-issues.md) §1.13. The load-bearing layer is **L1**, the startup
+refusal below the one-request floor.
 
 ## The knobs
 

@@ -11,6 +11,49 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — Retracted: the indexer workspace does not fail loudly. The issue author corrected us, and checking it corrected one thing back
+
+**We published a failure mode we had not read carefully, and the person we published it to caught
+it.** Our confirmation on
+[vllm#55221](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5559336290) said that a
+too-small sparse-indexer K-gather workspace ends in upstream's locked-workspace `AssertionError` — a
+loud failure — and this repository built a four-layer safety story on that, with upstream's assertion
+as the load-bearing layer. The issue author, [@drakosha](https://github.com/drakosha),
+[replied](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5561194190) that both
+indexers ask the `WorkspaceManager` for a **static** size and only then slice per chunk, so the
+request never grows and that assertion **cannot fire from this path**. Verified against the code we
+run: they are right, and our own A/B had said so — exactly one resize event per rank. **The real
+failure mode is a silent Python-slice clamp producing wrong answers**, which is the worse kind.
+Retraction: [docs/11](docs/11-open-issues.md) §1.13.
+
+**Checking it moved one detail back the other way.** Their replacement symptom is an out-of-bounds
+device *write* by `cp_gather_indexer_k_quant_cache`. That kernel is destination-bounded —
+`num_tokens = dst_k.size(0)` and a per-thread `token_idx >= num_tokens` early return, carrying
+upstream's own comment about `num_tokens` being an allocation upper bound — at `808f8cd3ac`, the ref
+their line numbers cite, at our image's base `487ecf187`, and at every commit sampled back to
+`22a58640b4`. So no overrun from the gather: the rows past the clamp are never gathered, and the
+wrongness travels to `fp8_fp4_mqa_logits`, handed `cu_seqlen_ks`/`ke` for an extent its `k_quant` no
+longer has. The fp8 scale buffer *does* share the one `get_simultaneous` allocation, so that half of
+the hazard stands.
+
+**Nothing about the measurement or the configuration changes; the reason it is safe does.** The
+load-bearing layer is **ours** — the startup refusal below the one-request floor — because the
+splitter admits only while `new_n <= workspace_size` against the same bounded value, leaving the
+`end == start` branch's single unsplittable request as the only route to an over-size chunk. Under
+production 12 that needs an uncompressed context above **16,268,812 tokens** against a `max_model_len`
+of 1,000,000: unreachable by construction, not by margin. Against the aggregate ceiling of
+**2,000,016 entries (251.8 MB)** the 4,067,203-entry bound still holds **2.03×**. Arithmetic and the
+code reading: [`results/memory/indexer-workspace-ab.md`](results/memory/indexer-workspace-ab.md) §2.
+
+**And the transferable part of our note 2 is narrower than we wrote.** At `max_num_seqs` 32 the
+`min(upstream, max(2 × ceiling, 512 MB))` formula our arm used frees nothing — drakosha's numbers,
+and they are right. What transfers is the **exact ceiling without the 2× margin, plus the startup
+guard below the one-request floor**; the win is dropping the `max_model_len` term, not the constant.
+[#51252](https://github.com/vllm-project/vllm/pull/51252) is the right generic fix and is stalled; we
+will not duplicate it into #55222. [HELP-WANTED](HELP-WANTED.md) §9 updated.
+
+---
+
 ## 2026-09-06 — The CUDA-graph A/B: the lever is +1.75 % and closes the item, the graph pool at three ranks is a quarter of what we estimated
 
 **We ran the A/B we had published as unrun, the same evening we published it.** Three env-only arms
@@ -284,8 +327,10 @@ gates 10/10 and 12/12 cold **and** warm on both arms, tool-call 8/8, needle-lite
 tokens, every lane's needle correct; swap 0.000 GiB and **none of the four safety layers fired**.
 
 **What it cost, and the line is not left empty.** Diagnostic margin: the indexer had 20× the largest
-load the scheduler can produce and now has 2.03×, against a startup refusal, two armed run-time
-assertions and upstream's own locked-workspace assertion. Speed: nothing measurable, looked for at
+load the scheduler can produce and now has 2.03×, against a startup refusal and two armed run-time
+assertions. (This entry also credited upstream's locked-workspace assertion as a fourth layer; it
+cannot fire from this path — retracted in the 6 September entry above.) Speed: nothing measurable,
+looked for at
 five concurrency levels, in fresh prefill and in TTFT. Host headroom: **nothing, in either direction**
 — the freed memory goes straight into the pool, so `MemAvailable` is unchanged and this is not a lever
 on the rung where 0.90 failed. It stacks with the ladder rather than competing with it.

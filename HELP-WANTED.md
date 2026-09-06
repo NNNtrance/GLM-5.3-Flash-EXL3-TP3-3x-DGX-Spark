@@ -434,9 +434,18 @@ with:
 1. **#55222 and #51252 want to land together, not merely to compose.** #55222 divides the buffer's
    *shape* at the glm5next call site; the builder's admission budget still comes from the undivided
    value and is what the chunker compares compressed sequence lengths against. With one of the two,
-   the chunker may admit 4× what the buffer it writes into can hold. The net is upstream's own
-   locked-workspace `AssertionError`, so this is a loud failure rather than a silent one — and it is
-   unreachable at a 1M context with 32 sequences — but the shape permits the drift.
+   the chunker may admit 4× what the buffer it writes into can hold. **We first wrote that the net is
+   upstream's own locked-workspace `AssertionError`, i.e. a loud failure. That was wrong**, and the
+   issue author [@drakosha](https://github.com/drakosha)
+   [corrected it](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5561194190): both
+   indexers ask the `WorkspaceManager` for a **static** size and slice per chunk, so the request never
+   grows and that assertion cannot fire. The real net is **silent** —
+   `k_quant_full[: chunk.total_seq_lens]` clamps without raising. Still unreachable at a 1M context
+   with 32 sequences, but the shape permits the drift and the failure it permits is quiet. One detail
+   of the correction did not hold on our build, in the safer direction: the gather kernel is
+   destination-bounded, so there is no out-of-bounds *write* either
+   ([docs/11](docs/11-open-issues.md) §1.13). **#51252 is the right generic fix and it is stalled**;
+   we will not duplicate it into #55222.
 2. **After the division the size is still linear in `max_model_len`** and blind to how many requests
    can exist. Of the 4.42 GiB we freed, the division accounts for 3.69 GiB and the
    `max_num_seqs × per-request` bound for the remaining 0.73 GiB. The second is the smaller half; it

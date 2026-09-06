@@ -122,26 +122,90 @@ entries. The difference is **4.4174 GiB**.
 
 ---
 
-## 2. Why a too-small buffer cannot corrupt silently
+## 2. What a too-small buffer actually does, and the layers that catch it
 
-This is the part that decides whether the item is worth touching at all, because the failure it
-would cause is the bad kind: `k_quant_full[: chunk.total_seq_lens]` is a **Python slice**, and a slice
-of a shorter tensor **clamps silently** rather than raising. The gather kernel then writes
-`cu_seq_lens[-1]` rows into a buffer that does not have them — an out-of-bounds device write, not an
-exception. Four layers turn that into a loud failure:
+> **Corrected 6 September 2026** `[retracted]`. This section originally claimed that the gather kernel
+> writes `cu_seq_lens[-1]` rows into a shorter buffer — an out-of-bounds device write — and that
+> upstream's locked-workspace `AssertionError` (**L0**) was the load-bearing layer. **Both were
+> wrong.** The correction came from [@drakosha](https://github.com/drakosha)
+> [in the #55221 thread](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5561194190):
+> both indexers ask the `WorkspaceManager` for a **static** size and then slice per chunk, so the
+> request never grows and the assertion we cited cannot fire. Checking that against the code we
+> actually run confirmed their reading of the request path, and moved one detail of the symptom in the
+> other direction — the gather kernel does not write out of bounds either. What survives is below.
+> [`docs/11`](../../docs/11-open-issues.md) §1.13 carries the retraction.
+
+This is the part that decides whether the item is worth touching at all, because the failure it would
+cause is the bad kind: **silent**. `k_quant_full[: chunk.total_seq_lens]` is a **Python slice**, and a
+slice longer than the tensor **clamps** rather than raising. Read off the code we run, here is what
+follows the clamp:
+
+- **The gather does not overrun.** `cp_gather_indexer_k_quant_cache`
+  (`csrc/libtorch_stable/cache_kernels.cu`) takes its extent from the **destination**:
+  `int num_tokens = dst_k.size(0);`, a grid of `ceil(num_tokens / BLOCK_Y_SIZE)`, and a per-thread
+  guard `if (head_idx >= head_dim || token_idx >= num_tokens || batch < 0) return;` carrying
+  upstream's own comment, "num_tokens may be an allocation upper bound when Python avoids a D2H
+  sync". `cu_seq_lens` selects *which* in-range rows are valid; it does not set how many rows are
+  written. Verified at our image's base commit `487ecf187`, at `808f8cd3ac`, and at every commit
+  sampled back to `22a58640b4` (29 May 2026). The ROCm Triton reference
+  (`vllm/v1/attention/ops/rocm_aiter_mla_sparse.py`) is destination-bounded the same way,
+  `num_tokens = k_fp8.size(0)`.
+- **So the rows past the clamp are simply never gathered** — and the chunk's `cu_seqlen_ks` /
+  `cu_seqlen_ke`, built from the *unclamped* compressed lengths, are then handed to
+  `fp8_fp4_mqa_logits` alongside the shortened `k_quant` / `k_scale`. The consumer is asked to read K
+  rows the buffer does not have. That is an out-of-bounds **read** on the DeepGEMM side rather than a
+  write, and either way the top-k selection it feeds is silently wrong. Whether DeepGEMM bounds-checks
+  is `[not tested]` here: it is a JIT-compiled dependency and this verification was CPU-only.
+- **The scale buffer does share the allocation**, which is the part of the hazard that survives
+  unchanged. `WorkspaceManager.get_simultaneous` (`vllm/v1/worker/workspace.py`) packs every requested
+  tensor into **one** `uint8` buffer at 256-byte-aligned offsets, so `k_scale_full` begins immediately
+  after `k_quant_full` — anything that did run past the values view would land in the scales.
+
+The failure mode is therefore **a silent clamp that produces wrong answers**, not a crash and not
+corruption written by the gather. That is harder to detect, not easier, which is why the layers exist:
 
 | Layer | Where | When it fires | Whose code |
 |---|---|---|---|
-| **L0** | `v1/worker/workspace.py` | a locked workspace asked to grow raises `AssertionError`, naming the caller's file and line | **upstream, unconditional** |
+| **L0** | `v1/worker/workspace.py` | a locked workspace asked to **grow** raises `AssertionError`, naming the caller's file and line — but the indexer's request is static, so **this layer does not cover the case at hand** | **upstream, unconditional** |
 | **L1** | `get_max_prefill_buffer_size` | **at startup**: a chosen size below the one-request floor raises `RuntimeError` before a byte is committed | the patch |
 | **L2** | `split_indexer_prefill_chunks` | metadata build: the `end == start` branch about to emit an oversized chunk raises, before any kernel launch | the patch, armed by the knob |
-| **L3** | `sparse_attn_indexer_kpool.py`, immediately above the slice | at the corruption point itself | the patch, armed by the knob |
+| **L3** | `sparse_attn_indexer_kpool.py`, immediately above the slice | at the clamp itself | the patch, armed by the knob |
 
-**L0 is the load-bearing one and it is not ours.** Every access to the workspace goes through
-`get_simultaneous` → `_ensure_workspace_size` **before** any view is produced, and after
-`lock_workspace()` the manager cannot grow — it can only raise. The one path that gets past L0 is the
-splitter's oversized chunk, because the run-time request always asks for the same fixed total; that is
-exactly what L2 and L3 watch.
+**L0 is not the load-bearing one, and believing it was is the error.** The indexer requests a
+**static** size — `_gather_workspace_shapes(total_seq_lens, …)`, where `total_seq_lens` is the op
+argument bound once at construction to `get_max_prefill_buffer_size(vllm_config)` — and only then
+slices per chunk (`sparse_attn_indexer_kpool.py`: the `get_simultaneous` call and the
+`k_quant_full[: chunk.total_seq_lens]` below it; `sparse_attn_indexer.py` does the same with
+`max_local_total_seq_lens`). `_ensure_workspace_size` therefore sees the same `required_bytes` on
+every step, and the locked-workspace assertion cannot fire from this path at all. It would take a
+*different* consumer of the shared workspace appearing after `lock_workspace()`, or `max_model_len` or
+the 40 changing after it — neither of which happens. Our own evidence said so and we did not read it:
+**exactly one resize event per rank** for the life of the engine.
+
+**L1 is the load-bearing one, and it is ours.** The splitter admits requests only while
+`new_n <= workspace_size` and is handed the *same* bounded value the buffer is sized from, so the only
+chunk that can exceed the buffer is the one the `end == start` branch emits deliberately — a single
+request the packer could not split. L1 refuses to start when the chosen size is below one request's
+compressed context, which is precisely what stops that branch from producing an over-size chunk. L2
+and L3 are belt and braces at the two places it would otherwise surface.
+
+**The arithmetic, and why the bound is safe in this configuration.** Production configuration 12:
+`max_model_len` 1,000,000, `max_num_seqs` 8, `max_num_batched_tokens` 2048, `num_spec` 7,
+`compress_ratio` 4, 132 B per entry, chosen bound **4,067,203 entries = 512.0 MB**.
+
+| | Entries | MB | Against the bound |
+|---|---:|---:|---|
+| One prefill step's compressed total, exact ceiling: `max_num_seqs × ceil((max_model_len + num_spec + 1) / compress_ratio)` = 8 × 250,002 | **2,000,016** | 251.8 | **2.03×**, 2,067,187 entries spare |
+| One request's compressed context, the correctness floor: `ceil(1,000,008 / 4)` | **250,002** | 31.5 | **16.27×** |
+| Chosen bound | 4,067,203 | 512.0 | — |
+
+`max_num_batched_tokens` bounds the **query** dimension and the logits budget, not this one, so it
+does not enter the ceiling — it only makes the aggregate row rarer in practice. And the aggregate row
+cannot overflow in any case, because the splitter's admission test uses the same number and would
+split instead. An over-size chunk therefore needs a single request whose *own* compressed context
+exceeds 4,067,203 entries — an uncompressed context above **16,268,812 tokens** against a
+`max_model_len` of 1,000,000. Unreachable by construction rather than by margin, which is exactly what
+L1 keeps true.
 
 **L2 and L3 are armed only when the sizing knob is set.** With the knob unset the patched image
 behaves as upstream, which is what makes a clean control arm possible on the same tree — and that
@@ -340,10 +404,11 @@ rather than assumed: the buffer that gets locked really is the indexer's, its si
 concurrency levels; the signs are mixed and everything is inside its band.
 
 **What is genuinely given up is diagnostic margin.** Upstream hands the indexer 20× the largest load
-the scheduler can produce; this hands it **2.03×**. That is a real reduction in slack, bought back
-with the four layers of §2 — a startup refusal, two armed run-time assertions and upstream's own
-locked-workspace assertion — none of which fired under a 1M-token request or eight concurrent
-long-context lanes.
+the scheduler can produce; this hands it **2.03×** against that ceiling and **16.27×** against the
+one-request floor that is the only route to an over-size chunk (§2). That is a real reduction in
+slack, bought back with a startup refusal at that floor — the load-bearing layer — and two armed
+run-time assertions either side of the silent clamp. None fired under a 1M-token request or eight
+concurrent long-context lanes.
 
 **And there is a second, blunter cost: disk.** The patch changes the fast-load manifest identity, so
 promoting it means a fresh sidecar of about **53 GB per node** — which does not fit today (§7).

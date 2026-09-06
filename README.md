@@ -1,4 +1,4 @@
-# GLM-5.3-Flash (EXL3 4bpw) on 3× NVIDIA DGX Spark — vLLM, cuda-exl3, TP=3 + EP, DFlash2
+# GLM-5.3-Flash (EXL3 4bpw) on 3× NVIDIA DGX Spark — vLLM, cuda-exl3, TP=3 + EP, DFlash2 — with a TP=2 track for two nodes
 
 > **Most recipes stop at the flags. This one goes below the engine.** When three nodes ran slower
 > than two, we did not swap a setting — we found the kernel dispatch bug behind it, together with the

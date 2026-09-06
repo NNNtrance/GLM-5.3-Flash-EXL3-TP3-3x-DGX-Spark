@@ -8,8 +8,14 @@ works, exactly which files and flags change, what we measured at two ranks and w
 as important — the long list of things we never ran there.
 
 **Read the trade-off first, because it is not the one people expect** (§4). At two ranks this stack is
-slower on *every* speed axis we measured, single-stream included, and its KV pool is a seventh of the
+slower on *every* speed axis we measured, single-stream included, and its KV pool is a fraction of the
 three-node one. What TP=2 buys is a node and a shorter recipe, not latency.
+
+**And read §3.5 before you run two ranks at all.** The one production setting this page used to list
+as untested at TP=2 — the draft KV page, `HAREM_SW_BLOCK_SIZE=256` — is now measured there, and it is
+not a tuning knob at two ranks. Without it the pool is 601,562 tokens and **a 6,253-token prompt is
+never scheduled at all**; with it the pool is 1,303,571 and an 8,268-token prompt serves in 6.3 s,
+with the quality gates unchanged `[measured-here]`. Set it.
 
 Every number below carries its date, its image and its settings. Our TP=2 arms were run on four
 different days' worth of stack, and three of the four are **older than production 10**; the table in
@@ -200,8 +206,8 @@ ran on. `754421f` also works and adds nothing you need at two ranks. Build it ex
 | `NCCL_MAX_NCHANNELS=8` | keep; it is a plugin property, not a peer-count property |
 | `NCCL_MESH_LINKS_PER_PEER` | `0` (auto) with two cables between the pair; `1` with one cable, which makes `patches/kernel/0005` a no-op |
 | `NCCL_MESH_MIN_RNR_TIMER=1`, `NCCL_MESH_PTR_CUDA=1`, `NCCL_MESH_FLUSH=1` | keep |
-| `HAREM_SW_BLOCK_SIZE=256` | keep — but see §3.3: we have **never run it at TP=2** |
-| `HAREM_DRAFT_KV_DTYPE=fp8` | keep — likewise never run at TP=2 |
+| `HAREM_SW_BLOCK_SIZE=256` | **mandatory in practice** — measured at TP=2 in §3.5: the pool more than doubles and the long-prompt path only exists with it `[measured-here]` |
+| `HAREM_DRAFT_KV_DTYPE=fp8` | keep — never run at TP=2 `[not tested]` |
 | `CUDA_EXL3_TUNE_CACHE` | keep, and warm it before you measure anything ([12](12-tuner-cache.md)) |
 | `GPU_MEMORY_UTILIZATION` | our TP=2 arms all ran **0.85**, not production 10's 0.83; read §3.4 before copying either |
 | `MAX_MODEL_LEN` | 1,000,000 is reachable with the experts-only checkpoint at TP=2 and **was not** with the full-scope one (§3.2) |
@@ -280,8 +286,8 @@ other because they were run back to back on one boot:
 
 **What that cost.** The KV pool falls from 1,987,179 to 825,000 — **−58 %** — because the drafter's
 KV group is allocated on a 16-token page. That is the same defect [07](07-kv-and-draft-page.md) §3
-diagnoses and fixes with `HAREM_SW_BLOCK_SIZE=256`, and **the fix has never been applied at TP=2**
-(§3.3). And prose gets *slower*, 21.3 → 18.5 tok/s: at k=7 the wasted draft costs more than the
+diagnoses and fixes with `HAREM_SW_BLOCK_SIZE=256`; **that fix is now measured at two ranks and it
+more than doubles the pool** (§3.5). And prose gets *slower*, 21.3 → 18.5 tok/s: at k=7 the wasted draft costs more than the
 occasional hit is worth on high-entropy text, and prose acceptance is 12.8 % against MTP's 37.7 %.
 
 ### 3.2 Arms C and D — the current stack, 5 September 2026
@@ -335,9 +341,13 @@ Everything in this table is in production at three ranks and has never been run 
 Where an effect at TP=3 lets us say something useful about the likely direction, it is marked
 `[estimate]` and is a projection, not a measurement.
 
+**One row has left this table.** `HAREM_SW_BLOCK_SIZE=256` was its first entry and its largest
+projection; it was measured at two ranks on 6 September 2026 and now has its own section, §3.5. The
+projection it carried — "perhaps 0.8–1.2 M from arm C's 665,625" — was **low**, and the reasoning
+behind it was incomplete: at two ranks the defect is worse than at three, not merely as bad.
+
 | Not run at TP=2 | What it did at TP=3 | Expectation at TP=2 |
 |---|---|---|
-| **`HAREM_SW_BLOCK_SIZE=256`** — the draft KV page, 16 → 256 ([07](07-kv-and-draft-page.md) §3) | KV pool 2,428,769 → 4,413,223 at 0.80, **+82 %**; C8 153.8 → 162.8; TTFT −20–30 % | the mechanism is a per-request **block counter**, not memory, and arm B's −58 % pool is the same defect, so a large pool gain is likely — perhaps 0.8–1.2 M from arm C's 665,625 `[estimate]`. Nothing here is measured, and the hybrid allocator's 4,608-token override in arm D may swallow it entirely |
 | **`HAREM_DRAFT_KV_DTYPE=fp8`** — the drafter's own cache at fp8 ([07](07-kv-and-draft-page.md) §7) | +5.6 % of pool, acceptance unchanged, speed within noise | should carry; not measured |
 | **`gpu-memory-utilization` 0.83** (production 10) | +8.7 % of pool over 0.80, swap flat | our TP=2 arms ran **0.85**, and arm A recorded 3.5 GB of swap on the head during weight load at that rung. The three-node memory rule and its ladder ([11](11-open-issues.md) §2.4) were derived at three ranks and should be re-derived at two, not copied |
 | **The fast-load sidecar** ([08](08-fast-boot.md)) | boot 618 → 274 → 251 s; weights 426 → 58 s | per rank, so two sidecars of ~1.5× the size. Every TP=2 boot above is a cold one without it |
@@ -350,7 +360,8 @@ Where an effect at TP=3 lets us say something useful about the likely direction,
 
 This page therefore only **partly** closes [CONTRIBUTING](../CONTRIBUTING.md) item 10. Arms C and D
 are on the production image with the fabric work in place; what is still missing at two ranks is the
-draft page, the fp8 draft cache, fast load, the memory ladder and a second boot.
+fp8 draft cache, fast load, the memory ladder and a second boot. The draft page came off this list
+on 6 September 2026 — §3.5.
 
 ### 3.4 One reading that did not survive, and is kept here
 
@@ -366,6 +377,120 @@ A separate finding from the same investigation does stand and is worth carrying 
 lowering `max_model_len` from 1,000,000 to 65,536 raised available KV memory from 0.73 to **5.41
 GiB**, so roughly **4.7 GiB per node of persistent, non-KV allocation scales with `max_model_len`** on
 this stack `[measured-here]`.
+
+One number in the paragraph above is now doubtful in its own right: "the arm C control had 4.4 GiB"
+of available KV memory. Re-running that exact env file on 6 September (§3.5) printed **9.97 GiB** on
+the binding rank and 11.68 GiB on the other. We cannot reconcile them — arm C's container log was
+not kept, only its extracted pool figure — so the 4.4 GiB is best read as an inference from the
+pool rather than as a log line, and the "10 GiB heavier per node" arithmetic that rests on it is
+weaker still. It stays `[retracted]`.
+
+### 3.5 The draft KV page at two ranks — measured, 6 September 2026
+
+This closes the largest open item on the page, and the answer is stronger than the projection §3.3
+carried. Two arms back to back, one boot each, **the only difference one token in `EXTRA_ENV`**
+`[measured-here]`. Full raw record: [`results/speed/tp2-draft-page.md`](../results/speed/tp2-draft-page.md).
+
+**Settings, identical in both arms.** Two nodes, TP=2, EP off, image `exl3-zeus:62f53e6`,
+`brandonmusic/GLM-5.3-Flash-tr3-4bpw` at `b20c49ba` (routed experts only), KV `fp8`, DFlash2 k=7,
+`--attention-backend CUSTOM`, `--block-size 256`, `--max-num-seqs 8`,
+`--max-num-batched-tokens 2048`, `--max-model-len 1000000`, `gpu-memory-utilization 0.85`,
+`HAREM_DISABLE_PERSISTENT_TOPK=1`, `NCCL_MAX_NCHANNELS=8`, mesh plugin with both cables,
+`CUDA_EXL3_TUNE_CACHE` warm, no fast-load sidecar, no fp8 draft cache, temperature 0, reasoning
+effort **low**, medians of three rounds. Both arms booted through the host-side settle gate
+(`MemAvailable ≥ 112 GiB`; they started at 116.9 and 117.1 GiB), so the pool figures satisfy the
+acceptance rule in [07](07-kv-and-draft-page.md) §1.1.
+
+The patch is [`patches/tp3/patch-swblock-tp3.py`](../patches/tp3/patch-swblock-tp3.py) **unchanged** —
+it is `tp`-agnostic and gated on its own environment variable, so the control arm ran the same image
+with the knob unset. Keep it in a `patches/tp2/` tree of your own (§2.3); at two ranks there is no
+fast-load manifest to invalidate, which is the one hazard that rule exists for.
+
+#### Why the defect is *worse* at two ranks
+
+The engine's own per-group decomposition, printed by `patch-kvdiag-tp3.py` in both arms:
+
+| group | page, control | blocks/request, control | page, fix | blocks/request, fix |
+|---|---|---|---|---|
+| `MLAAttentionSpec`, 22 layers | 152,064 B | 218 | 152,064 B | 218 |
+| `KpoolTailSpec`, 11 layers | 152,064 B | 1 | 152,064 B | 1 |
+| `MambaSpec` × 4 | 2,359,296 B | 9 + 9 + 9 + 9 | 2,359,296 B | 9 + 9 + 9 + 9 |
+| **`SlidingWindowSpec` — the drafter, 5 layers** | **32,768 B** (16 tokens) | **385** | **524,288 B** (256 tokens) | **25** |
+| **blocks per request** | | **640** | | **280** |
+| `num_blocks` | | 385 | | 365 |
+| **`GPU KV cache size` at 1M** | | **601,562** (0.60x) | | **1,303,571** (1.30x) |
+
+**The drafter takes 60.2 % of the divisor at two ranks against 53 % at three.** Not because the
+drafter changed — its 385 is identical — but because the target's share shrank: the platform raises
+the attention block to **4,608** tokens at TP=2 where it is 3,328 at TP=3, and that cuts the MLA
+group from 301 blocks per request to 218. A smaller denominator makes the same defect a larger
+share, which is why §3.3's projection from the TP=3 percentage came out low.
+
+#### What it did
+
+| metric | control — page 16 | **fix — page 256** | delta |
+|---|---|---|---|
+| **KV pool at 1M** | 601,562 | **1,303,571** | **+116.7 %** |
+| the same, normalised to equal binding-rank KV memory | 601,562 | 1,260,714 | **+109.6 %** |
+| **prefill-fresh, 3 unseen ~8.3K prompts** | **never scheduled** | **1,478 tok/s** | path opens |
+| **prefill, 7,382 tokens, uncached** | **never scheduled** | **1,267 tok/s** | path opens |
+| **largest prompt actually served** | **5,386 tokens** | **8,268**, every size served | path opens |
+| C1 aggregate | 47.41 | 47.30 | equal |
+| C1 per stream | 55.73 | 51.34 | −7.9 %, see the cost line |
+| C2 / C4 / C6 aggregate | 68.27 / 91.65 / 113.22 | 68.72 / 93.74 / 117.71 | +0.7 / +2.3 / +4.0 % |
+| **C8 aggregate** | 127.54 | **135.59** | **+6.3 %** |
+| **TTFT median, C1 / C8** | 0.621 / 1.703 s | **0.478 / 1.244 s** | **−23 % / −27 %** |
+| draft acceptance · tokens per step, C1 | 64.48 % · 5.51 | 62.56 % · 5.38 | −1.9 points |
+| gates, cold **and** warm | 10/10 · 12/12 · 0 empty | 10/10 · 12/12 · 0 empty | equal |
+| boot, cold, no sidecar | 396 s | 375 s | −5 % |
+
+The direction and size match three ranks exactly where they should: there the same change bought
++82 % of pool, +6 % at C8 and 20–30 % off TTFT ([07](07-kv-and-draft-page.md) §3).
+
+#### The cliff, which is the real finding
+
+The control does not serve a long prompt *slowly*. It does not serve it at all. Walking prompt
+length up one request at a time, 75-second budget `[measured-here]`:
+
+| prompt tokens | control | fix |
+|---|---|---|
+| 913 / 1,786 / 2,759 / 3,586 / 4,444 | served, 1.5–3.8 s | served |
+| 5,386 | served, 4.1 s | served |
+| **6,253** | **never scheduled** | served, 4.9 s |
+| 7,329 / 8,268 | — | served, 5.5 / 6.3 s |
+
+`Running: 0 reqs, Waiting: 1 reqs, GPU KV cache usage: 0.0 %`, indefinitely — the same state
+[13](13-full-scope-checkpoint.md) §6 recorded for the full-scope TP=2 arm, and the same arithmetic:
+block ids are global to one pool, one request wants 640 of the pool's 385 blocks, so it is never
+admitted. After the fix it wants 280 of 365.
+
+**And the control sits on the edge of that cliff by luck.** The arm C boot published in §3.2 got
+665,625 tokens — 426 blocks — and did serve a 7,382-token prompt, at 1,135 tok/s. The same env file,
+untouched, booted through a settle gate on 6 September gets 601,562 — 385 blocks — and cannot. The
+difference is the instrument, not the stack: the 5 September TP=2 harness had no settle gate, and
+[07](07-kv-and-draft-page.md) §1.1 says a node that starts dirty awards itself memory it does not
+have. Both readings are real boots of the same configuration. That is the point: **without the page
+fix, whether two ranks can serve an 8K prompt depends on the host's state at boot.** Treat the arm C
+prefill figures in §3.2 and §4 as measured on an unpinned baseline `[measured-here]`.
+
+#### What it cost
+
+- **Per-block memory rises about 9.1 %** — the drafter's per-block cost goes 163,840 → 2,621,440 B
+  and `num_blocks` would fall 385 → 353 at equal memory. At three ranks the price was +9.2 %.
+- **The draft group's prefix-cache matching unit coarsens 16 → 256 tokens.** Nothing measurable
+  here: with a 4,608-token attention block the prefix-cache hit rate is 0 % in both arms.
+- **Acceptance falls 1.9 points** (64.5 → 62.6 %), inside this stack's 60–65 % boot-to-boot band,
+  not confirmed on a second boot.
+- **C1 per-stream decode reads 7.9 % lower**, the one number that moved the wrong way. The fix arm's
+  own three rounds span 50.60–55.29 (9.3 %), the C1 aggregate is equal and TTFT is 23 % better, so
+  one boot does not establish a loss. No C1 gain, and no proven C1 loss.
+- **Free host RAM falls about 1.2 GiB per node**; swap flat at 0.02–0.03 GiB in both arms.
+
+#### Still not done at two ranks
+
+One boot per arm. `HAREM_DRAFT_KV_DTYPE=fp8`, fast load, the memory ladder and expert parallelism
+remain `[not tested]` here, and the page fix was **not** tried on top of the full-scope checkpoint at
+TP=2, whose pool is clamped by a different mechanism (§3.2) — that one is still open.
 
 ---
 
@@ -384,9 +509,15 @@ Like for like, same day, same image, same harness, same experts-only checkpoint,
 | C8 aggregate | 133.57 | 178.55 | 75 % |
 | Prefill, fresh unseen prompts | 1,334 | 1,774 | 75 % |
 | **KV pool at 1M** | **665,625** | **4,699,724** | **14 %** |
+| **the same, with the draft page fix at both ranks** (§3.5) | **1,303,571** | 4,413,223 | **30 %** |
 | draft acceptance at C1 | 64.1 % | 63.9 % | equal |
 | Boot | 396 s, no fast-load | 265 s, fast-load | — |
 | Gates | 10/10 · 12/12 | 10/10 · 12/12 | equal |
+
+Two rows in that table are arm C's and were measured **without** the draft page fix and **without**
+the settle gate; §3.5 re-measured the same configuration with the gate and got 601,562 tokens and no
+long-prompt path at all. Read the 14 % row as "two ranks, neither node's stack fixed"; the 30 % row
+is the fair comparison once both rank counts run the setting this repository ships.
 
 And with the full-scope checkpoint, one arm at each rank count — not like for like, because arm D
 ran at `max_model_len` 65,536 and production 9 at 1,000,000, but the direction is not in doubt:
@@ -405,12 +536,20 @@ peers to three does not add all of that. The bandwidth term wins, and it is not 
 is a real answer for anyone who owns two Sparks, and it is the whole reason this page exists — but it
 is not a latency argument, and this repository will not make one.
 
-**Where the seven-fold pool difference comes from, since it is the largest number in the table.**
+**Where the pool difference comes from, since it is the largest number in the table.**
 164 GiB of weights over two nodes is about 82 GiB per node before anything else is allocated;
 121.6 GiB of unified memory minus that, minus the ~9 GiB vLLM takes at init and the ~4.7 GiB of
-`max_model_len`-scaled buffers, leaves single-digit GiB for KV. Over three nodes the same weights are
-~55 GiB per node and the remainder roughly quadruples. The third node buys 1.5× the memory and
-delivers 7× the pool, because what is left over after a fixed cost is not linear in the memory.
+`max_model_len`-scaled buffers, leaves single-digit GiB for KV — we measured 9.97 GiB on the binding
+rank at 0.85 `[measured-here]`. Over three nodes the same weights are ~55 GiB per node and the
+remainder roughly quadruples. The third node buys 1.5× the memory and delivers several times the
+pool, because what is left over after a fixed cost is not linear in the memory.
+
+**With the draft page fixed at both rank counts the gap narrows from seven-fold to about 3.4×**, and
+the reason is in §3.5: the page defect was costing two ranks more than three, so fixing it helps the
+two-node side more. The third node is still the larger memory argument by a wide margin. What
+changed is that at two ranks the pool is now above one full-length request instead of below it —
+concurrency 1.30x against 0.60x — which is the difference between a configuration that serves 8K
+prompts and one that silently never schedules them.
 
 ---
 
@@ -419,10 +558,10 @@ delivers 7× the pool, because what is left over after a fixed cost is not linea
 [CONTRIBUTING](../CONTRIBUTING.md) has the format. The four things worth most from a two-node
 cluster, in order:
 
-1. **`HAREM_SW_BLOCK_SIZE=256` at TP=2.** The one item in §3.3 with a large expected effect and no
-   measurement at all. Report the KV pool before and after, C1–C8, and TTFT.
-2. **A second boot.** Every TP=2 number here is single-boot, and the three-node boot-to-boot spread
-   is up to 7.4 % at C4.
+1. **A second boot of the draft page arms in §3.5.** That measurement is done — pool +117 %, the
+   long-prompt path opened, gates unchanged — but it is one boot per arm, and the three-node
+   boot-to-boot spread is up to 7.4 % at C4. The pool and cliff findings are far too large to be
+   boot noise; the speed rows are not, and C1 per stream is the one that most needs a second look.
 3. **Expert parallelism on at two ranks.** Legal, never measured, and it changes which kernel path
    the MoE stage takes ([05](05-expert-parallel-and-cuda-exl3-fixes.md)).
 4. **The memory ladder at two ranks.** 0.85 is where our arms ran and it is also where arm A found

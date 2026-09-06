@@ -172,11 +172,17 @@ caching `[measured-here]`.
 
 ---
 
-> **At TP=2 this fix has never been run** `[not tested]`. The 825,000-token figure in the opening
-> paragraph is the un-fixed two-node pool, and it fell there for exactly the mechanism §3 describes —
-> turning DFlash2 on at two ranks took the pool from 1,987,179 to 825,000, **−58 %**. Setting
-> `HAREM_SW_BLOCK_SIZE=256` at two ranks should recover most of it, but nobody has measured that and
-> the hybrid allocator can override the page entirely. [15](15-tp2-track.md) §3.1 and §3.3.
+> **At TP=2 this fix is now measured, and it matters more there than here** `[measured-here]`. The
+> 825,000-token figure in the opening paragraph is the un-fixed two-node pool, and it fell there for
+> exactly the mechanism §3 describes — turning DFlash2 on at two ranks took the pool from 1,987,179
+> to 825,000, **−58 %**. On 6 September 2026 we ran the control and the fix back to back at two
+> ranks: the pool went **601,562 → 1,303,571 (+117 %)**, C8 +6.3 %, TTFT −23 to −27 %, gates
+> unchanged — and, more importantly, the control **could not schedule a 6,253-token prompt at all**
+> while the fixed arm served 8,268 tokens in 6.3 s. The drafter's share of the blocks-per-request
+> divisor is **60.2 %** at two ranks against 53 % here, because the platform raises the attention
+> block to 4,608 tokens there and the target's own share shrinks. The hybrid allocator did **not**
+> swallow the page, which was the open worry. [15](15-tp2-track.md) §3.5 and
+> [`results/speed/tp2-draft-page.md`](../results/speed/tp2-draft-page.md).
 
 ## 3. Root cause: the drafter's page is 16 tokens
 
@@ -264,6 +270,14 @@ cause was memory scarcity at two nodes, and the third node fixed most of it with
 all: weights per rank 81.53 → 54.86 GiB, KV memory 17.27 → 39.86 GiB, pool 825,000 → 2,947,441
 `[retracted]`. The page layout was the *second-order* term, and it was worth another 82 % once the
 first-order term was gone.
+
+**The "second-order" half of that sentence has itself been corrected by measurement.** We ran the
+page fix at two ranks on 6 September 2026 and it was worth **+117 %** there, against +82 % here
+([15](15-tp2-track.md) §3.5). Second-order in *memory*, yes — the drafter still costs 0.6 % of a
+block. But in the counter that actually divides the pool it is the **larger** term at two ranks, not
+the smaller one: 60.2 % of blocks per request against 53 % at three. Ranking the two causes by which
+one the third node fixed was the mistake; they are independent, and the page term grows as the node
+count falls.
 
 **"The draft group costs 0.6 %, so it cannot be the problem."** Both halves of that sentence are
 true and the conclusion is false. See §1: memory per block and blocks per request are different

@@ -20,6 +20,7 @@ header.
 |---|---|
 | `speed/concurrency-sweeps.csv` | Every arm × C1/C2/C4/C6/C8: aggregate and per-stream tok/s, the round-3-to-5 spread, TTFT, TPOT, draft acceptance, accepted tokens per step, KV pool. Machine-readable. |
 | `speed/concurrency-sweeps.md` | The same table, readable, with a line on what each arm is. |
+| `speed/tp2-draft-page.md` | The draft KV page at **two** ranks, control against fix: the per-group block-counter decomposition from both boots, every sweep round, the long-prompt admission ceiling on each arm, and what the fix cost. |
 | `speed/category-prefill-and-mixed-load.md` | Decode rate by content type (prose / code / math / JSON) at C1 and C4; prefill, warm and fresh; the mixed-load probe; cold versus warm single stream. |
 | `gates/quality-gates.md` | The correctness probe and code exam for every arm, cold and after the benchmark; the MMLU sample; long-form generation. |
 | `boot/boot-ledger.md` | Boot time per phase across the four arms, the bit-identity evidence, the block-layer forensics, memory and swap. |

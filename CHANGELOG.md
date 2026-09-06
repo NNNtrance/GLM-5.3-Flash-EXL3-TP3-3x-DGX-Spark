@@ -11,6 +11,68 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — the draft KV page at two ranks: the pool more than doubles, and the long-prompt path only exists with it
+
+**A two-node owner read [docs/15](docs/15-tp2-track.md) and said the KV cache bug was the thing
+standing between them and a usable configuration. They were right, and this page's own projection
+was low.** `HAREM_SW_BLOCK_SIZE=256` — the draft KV page, 16 to 256 tokens — was the largest
+untested item on the TP=2 page, carrying an `[estimate]` of "perhaps 0.8-1.2 M from arm C's
+665,625". We ran the control and the fix back to back at two ranks on 6 September 2026, one boot
+each, the only difference one token in `EXTRA_ENV`. New section
+[docs/15](docs/15-tp2-track.md) §3.5, raw record
+[`results/speed/tp2-draft-page.md`](results/speed/tp2-draft-page.md) `[measured-here]`.
+
+**KV pool 601,562 to 1,303,571, +116.7 %** (+109.6 % after normalising for the 3.4 % more KV memory
+the fix arm's binding rank happened to get). C8 aggregate 127.54 to 135.59 (+6.3 %), C2/C4/C6
++0.7/+2.3/+4.0 %, TTFT −23 % at C1 and −27 % at C8, C1 aggregate equal. Quality gates 10/10 · 12/12
+· 0 empty, cold and warm, on both arms. Settings otherwise identical: two nodes, TP=2, EP off, image
+`exl3-zeus:62f53e6`, routed-experts-only checkpoint at `b20c49ba`, KV fp8, DFlash2 k=7,
+`gpu-memory-utilization 0.85`, `--block-size 256`, `--max-num-batched-tokens 2048`,
+`--max-model-len 1000000`, medians of three rounds, both booted through the host-side settle gate.
+
+**The headline is not the pool, it is the cliff.** Without the fix the control does not serve a long
+prompt slowly — it never schedules it: a 6,253-token prompt sits at `Running: 0, Waiting: 1, GPU KV
+cache usage: 0.0 %` indefinitely, and both prefill benchmarks time out. The arithmetic is one line:
+block ids are global to a single pool, and one request wants 640 of the pool's 385 blocks. With the
+fix it wants 280 of 365, and 8,268 tokens serve in 6.3 s, with fresh-prompt prefill at 1,478 tok/s.
+
+**Why the projection was low: the defect is worse at two ranks than at three.** The engine's own
+per-group decomposition shows the drafter taking **60.2 %** of the blocks-per-request divisor at
+TP=2 against 53 % at TP=3 — not because the drafter changed, its 385 blocks are identical, but
+because the platform raises the attention block to 4,608 tokens at two ranks where it is 3,328 at
+three, cutting the target's share from 301 blocks to 218. A smaller denominator makes the same
+defect a larger share. [docs/07](docs/07-kv-and-draft-page.md) §4's "the page layout was the
+*second-order* term" is corrected in place: second-order in memory, first-order in the counter, and
+it grows as the node count falls.
+
+**What it cost.** Per-block memory rises about 9.1 %, the same price as at three ranks. The draft
+group's prefix-cache matching unit coarsens from 16 to 256 tokens, which costs nothing measurable
+here because the hit rate is already 0 % behind a 4,608-token block. Acceptance falls 1.9 points,
+inside this stack's boot-to-boot band. And C1 per-stream decode reads 7.9 % lower, which one boot
+does not establish: the fix arm's own three rounds span 9.3 %, the C1 aggregate is equal and TTFT is
+23 % better. No C1 gain, and no proven C1 loss.
+
+**One retraction, and it is about our instrument rather than the stack.** The control arm
+re-measured today gives **601,562** where 5 September published **665,625** for the same untouched
+env file, −9.6 %. The 5 September TP=2 harness had no settle gate; this one waits for `MemAvailable`
+to come back over 112 GiB on both nodes. That is exactly the bias
+[docs/07](docs/07-kv-and-draft-page.md) §1.1 describes, in the direction it predicts. It matters
+more than a percentage: 5 September's 426 blocks were just above the long-prompt cliff and served a
+7,382-token prompt at 1,135 tok/s; today's cleaner 385 are just below it and cannot.
+**Without the page fix, whether two ranks can serve an 8K prompt depends on the host's state at
+boot.** The arm C prefill and pool figures in §3.2 and §4 are flagged as measured on an unpinned
+baseline, and the "arm C had 4.4 GiB of available KV" figure that §3.4's retracted arithmetic rested
+on is contradicted by today's 9.97 GiB; it is now marked an inference rather than a log line.
+
+The patch is [`patches/tp3/patch-swblock-tp3.py`](patches/tp3/patch-swblock-tp3.py) unchanged — it
+is `tp`-agnostic and gated on its own environment variable, so the control ran the same image with
+the knob unset. `HAREM_SW_BLOCK_SIZE=256` moves from "keep, never run at TP=2" to **mandatory in
+practice** in the §2.5 flag table. Still `[not tested]` at two ranks: a second boot, the fp8 draft
+cache, fast load, the memory ladder, expert parallelism on, and the page fix on top of the
+full-scope checkpoint.
+
+---
+
 ## 2026-09-05 (after the release pass) — two documents: the TP=2 track, and what other published recipes report
 
 **[docs/15 — Running this recipe at TP=2](docs/15-tp2-track.md).** This is a three-node recipe and

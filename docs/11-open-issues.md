@@ -1371,7 +1371,7 @@ page is the reason — §1.9 row 8's "the sidecar removed the obstacle" was wron
 | What | Why not |
 |---|---|
 | Anything at **max reasoning effort** | Days of cluster time. Everything published here is at `low`. |
-| **MMLU at TP=3 on the fallback checkpoint** | Now run on the *production* checkpoint at TP=3 (86.47 ±0.74). The 86.4 ±0.7 the fallback carries is still a TP=2 figure, so the two are not a like-for-like pair; the gates are identical between arrangements, so there is no signal that justifies the hours — but it is an absence. |
+| **MMLU at TP=3 on the fallback checkpoint** | Now run on the *production* checkpoint at TP=3 (86.47 ±0.74). The 86.4 ±0.7 the fallback carries is still a TP=2 figure, so the two are not a like-for-like pair; the gates are identical between arrangements, so there is no signal that justifies the hours — but it is an absence. **6 September: the fallback checkpoint and its image (`62f53e6`) were removed from our cluster to make room; we will not run this.** |
 | **IFEval, GSM8K, needle-in-a-haystack, tool-eval-bench, ExtractBench** | All exist for the NVFP4 sibling recipe; none re-run on this stack. Anyone comparing the two on quality should treat this repository as having the gates and one MMLU sample. |
 | **The newer checkpoint revision** (`aba59d21`, four days newer than the one we pinned) | Not tested. |
 | **`NCCL_MAX_NCHANNELS=8` on the NVFP4 stack** | Same plugin, same fabric, same TP=3, so it should transfer — one line per node, reversible. Not applied there. |

@@ -93,6 +93,34 @@ if [ "${HAREM_TILELANG_FAILLOUD:-}" = "1" ]; then
   run python3 "$TP3_DIR/patch-tilelang-failloud-tp3.py" --root "$VLLM_PY"
 fi
 
+# --- sm_12x stack patches (6 September 2026, Zeuss5/cuda-exl3 issue #6) -------
+# Production configuration 11 carries the CORRECTNESS SET ONLY. Item 4 (the DSA
+# indexer's Triton specialisation) and the diagnostic stats hook are deliberately
+# NOT in this tree: measured on 6 September, neither a benefit nor a cost could be
+# resolved for item 4, and the instrument stalls the step it fires in. Item 4 is
+# kept in tracks/tp3/patches-optional/sm12/ for anyone who wants it.
+#   HAREM_SM12_ITEMS unset  => no script runs => the tree behaves like production 10
+#   pdl    item 1     the PDL gate; runtime knob HAREM_PDL_SM12=0|1 (0/unset = PDL OFF)
+#   kpool  items 2+3  the K-pool top-k buffer init AND its reader's upper bound
+#
+# READ-ONLY OVERLAY: model_executor/layers/sparse_attn_indexer_kpool.py is bind-
+# mounted read-only from $OVERLAY_DIR, and item 2 targets exactly that file, so it
+# cannot be written from inside the container. Pre-apply item 2 to a host-side copy
+# of the overlay directory and point OVERLAY_DIR at that copy; patch-kpool-init.py
+# then reports "already applied" for it and writes only the image's own
+# kpool_compress.py (item 3). This applies to ANY future patch on an overlaid file.
+# Same fail-closed `run` wrapper as every arm above: a drifted anchor stops the rank.
+if [ -n "${HAREM_SM12_ITEMS:-}" ]; then
+  echo "[tp3-prelude] SM12 items=${HAREM_SM12_ITEMS} HAREM_PDL_SM12=${HAREM_PDL_SM12:-unset}"
+  # Fail closed on a typo: an unrecognised item must stop the rank, not be skipped.
+  # Silently skipping "kpol" would serve a stack the operator believes is patched.
+  _sm12_rest=",${HAREM_SM12_ITEMS},"
+  for _it in pdl kpool; do _sm12_rest="${_sm12_rest//,$_it,/,}"; done
+  [ "$_sm12_rest" = "," ] || { echo "[tp3-prelude] FAILED: unknown HAREM_SM12_ITEMS entries: ${_sm12_rest}" >&2; exit 21; }
+  case ",${HAREM_SM12_ITEMS}," in *,pdl,*)   run python3 "$TP3_DIR/patch-pdl-gate.py"   --root "$VLLM_PY" ;; esac
+  case ",${HAREM_SM12_ITEMS}," in *,kpool,*) run python3 "$TP3_DIR/patch-kpool-init.py" --root "$VLLM_PY" ;; esac
+fi
+
 # --- Full-scope EXL3 (5 September 2026) ------------------------------------------
 # One patch, three layers, one knob:
 #   S1  packed_modules_mapping on both glm5next model classes

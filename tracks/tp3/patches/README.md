@@ -28,7 +28,9 @@ that lands in `patches/tp3/` does not reach here on its own. Merging them is the
 | `check-padload-tp3.py` | **new** — the image gate, run in the prelude before any weight is read |
 | `pad-tp3full.py` | **new** — the sidecar generator: padded `config.json` **plus** a rewritten `quantization_config.json` carrying the packed mapping |
 | `mk-env-tp3full.sh` | **new** — derives `.env.tp3-full` from *this node's own* `.env.tp3` with `sed` |
-| `tp3full-prelude.sh` | **changed** — `tp3/tp3-prelude.sh` plus the two `HAREM_EXL3_FULLSCOPE` steps |
+| `tp3full-prelude.sh` | **changed** — `tp3/tp3-prelude.sh` plus the two `HAREM_EXL3_FULLSCOPE` steps and the `HAREM_SM12_ITEMS` block |
+| `patch-pdl-gate.py` | **new in production 11** — sm_12x item 1: Programmatic Dependent Launch off on sm_12x by default, `HAREM_PDL_SM12=1` restores upstream |
+| `patch-kpool-init.py` | **new in production 11** — sm_12x items 2 + 3: the K-pool top-k buffer starts at −1 and its reader is bounded from above |
 | `patch-vllm-tp3.py` | **changed** — two constants: vocab `padding_size` 192 → **384**, shared expert 2112 → **2304** |
 | `preflight-tp3.py` | **changed** — the same two, as `lcm(128, tp)`, plus three new 128-alignment gates |
 | everything else | **byte-identical copies** of the file of the same name in `patches/tp3/` |
@@ -40,7 +42,16 @@ checks ([docs/08](../../../docs/08-fast-boot.md) §12):
 for f in tracks/tp3/patches/*.py tracks/tp3/patches/overlay/cuda_exl3/*.py; do b=${f#tracks/tp3/patches/}; [ -e "patches/tp3/$b" ] && { cmp -s "$f" "patches/tp3/$b" && echo "same $b" || echo "DIFFERS $b"; }; done
 ```
 
-Expected: `DIFFERS` for `patch-vllm-tp3.py` and `preflight-tp3.py` only.
+Expected: `DIFFERS` for `patch-vllm-tp3.py` and `preflight-tp3.py` only. The two `sm12` files have
+no counterpart in `patches/tp3/` — they are full-scope-track only — so the loop skips them.
+
+**`patch-kpool-init.py` writes a file the container cannot write.** One of its two targets,
+`model_executor/layers/sparse_attn_indexer_kpool.py`, is bind-mounted **read-only** from
+`$OVERLAY_DIR` by the launcher. Pre-apply it to a host-side copy of the overlay directory and point
+`OVERLAY_DIR` at the copy; the prelude then reports "already applied" for that file and writes only
+the image's own `kpool_compress.py`. Verify the copy with `diff -r` against the overlay it came from:
+exactly one file should differ, by exactly item 2's two hunks. This applies to **any** future patch
+that lands on an overlaid file.
 
 **Two files that are on the nodes and deliberately not here.** `start-tp3.sh` — the launcher lives
 once, in [`scripts/`](../../../scripts/start-tp3.sh); the nodes carry a copy inside each tree and that is
@@ -91,6 +102,9 @@ In order, and all ten held on the first production 9 boot
 
 ```
 [tp3-prelude] TP3FULL arm rank=2 tp=3 ep=1 fullscope=1
+[tp3-prelude] SM12 items=pdl,kpool HAREM_PDL_SM12=unset
+patch-kpool-init: item 2 already applied (.../model_executor/layers/sparse_attn_indexer_kpool.py)
+patch-kpool-init: applied item 3 to .../models/glm5next/nvidia/ops/kpool_compress.py (pid < pool_len bound)
 [padload] cuda-exl3 padded-load support: padded-output-gate (f3e3090)=yes  vocab-loader-prefix (754421f)=yes  row-parallel-suh-pad (f3e3090)=yes
 [fullscope] anchors 1/1: A1 A2 A3 A4 A5 A6 A7 A8 A9 A10
 EXL3 language_model.lm_head: vocab padded 154880 -> 155136; the 256 pad columns are 2 whole Hadamard blocks and are zeroed through svh.
@@ -104,6 +118,13 @@ number the model-free meta-device run predicted for rank 2 before the boot, arri
 
 - **One line:** delete `HAREM_EXL3_FULLSCOPE=1` from `EXTRA_ENV`. The patch reads the knob at run
   time, so the patched image takes the upstream path and serves the routed-experts-only checkpoint.
+- **The sm_12x set:** delete `HAREM_SM12_ITEMS=pdl,kpool` from `EXTRA_ENV`. With it unset no script
+  runs and the tree behaves like production 10 — but the tree still *hashes* differently, so this
+  rollback does not restore production 10's sidecar; keep pointing `FASTLOAD_DIR` at production 11's.
+- **Production 10 whole:** start with `ENV_FILE` pointing at the production 10 env file (ours is
+  `.env.tp3.bak-prod10-083`). That reverts the memory rung, the tree, the overlay and the sidecar in
+  one move, because all four are named in the env file, and production 10's sidecar was never
+  deleted. No dump boot.
 - **Whole arm:** start with `ENV_FILE` pointing at the production 8 env file (ours is
   `.env.tp3.bak-prod8-62f53e6`). That reverts the checkpoint, the image, the tree and the sidecar in
   one move, because all four are named in the env file. `patches/tp3/` and production 8's sidecar

@@ -37,14 +37,30 @@ read-bandwidth ruler drifted 6.5 % between three runs on the same idle machine t
 `tracks/tp3/patches/` tree. It is the first entry on this page in which the model itself is different,
 and it is the largest single move the stack has made ([13](13-full-scope-checkpoint.md)).
 
-**Production configuration 10 is what actually ships**, and it is production 9 with one line changed:
-`gpu-memory-utilization` 0.80 → **0.83**. It buys **+8.7 % of KV pool** (5,168,044 → **5,619,834**)
-and moves no speed number outside the spread in §1.1 — C1 70.5, C4 144.6, C8 194.0, gates full cold
-and warm, swap flat through the rounds `[measured-here]`. It is also the configuration the
-autostart unit and the reboot test were measured on ([systemd](../systemd/README.md)). Because it
-changes nothing but a memory fraction, **the whole of this page's analysis is production 9's and
-applies unchanged**; the rung, its cost and why 0.85 stays refused are in
-[11](11-open-issues.md) §2.4.
+**Production configuration 10** was production 9 with one line changed: `gpu-memory-utilization`
+0.80 → **0.83**. It bought **+8.7 % of KV pool** (5,168,044 → **5,619,834**) and moved no speed number
+outside the spread in §1.1 — C1 70.5, C4 144.6, C8 194.0, gates full cold and warm, swap flat through
+the rounds `[measured-here]`.
+
+**Production configuration 11 is what actually ships**, since 6 September 13:25. It is production 10
+with exactly two changes, taken in one boot: `gpu-memory-utilization` 0.83 → **0.87**, the top of a
+ladder whose next rung is rejected on swap traffic
+([`../results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md)), and the **sm_12x correctness
+set** — `patch-pdl-gate.py` and `patch-kpool-init.py` behind `HAREM_SM12_ITEMS=pdl,kpool`
+([11](11-open-issues.md) §2.27). Measured against a **same-session** production 10 reference, pooled
+over six rounds and two boots: KV pool **6,382,920 (+12.1 %)**, C1 **69.6 (+0.6 %)**, C8 **201.1
+(+1.8 %)**, prefill equal, gates 10/10 and 12/12 cold and warm on both boots, tool-call 8/8,
+needle-lite 6/6, and swap traffic exactly zero on all three nodes on the clean boot `[measured-here]`.
+The one number that moved is C4, and it moved back: 135.0 on the load boot, **145.9** on the clean
+boot, against the reference's 144.2 — an 11.1 % six-round spread at the level §1.1 already names as
+the noisiest.
+
+Both configurations were reboot-tested as a whole cluster with the autostart unit enabled
+([systemd](../systemd/README.md), [`../results/boot/boot-ledger.md`](../results/boot/boot-ledger.md)):
+315 s to `/health` on production 10, **312 s** on production 11. Because 10 and 11 change nothing but
+a memory fraction and two guard patches, **the whole of this page's analysis is production 9's and
+applies unchanged**; the ladder, its cost and why 0.88 was declined are in [11](11-open-issues.md)
+§2.4 and [07](07-kv-and-draft-page.md) §6.
 
 **One caption note.** The settings block at the top of this page describes production 8 and still
 governs every section from §4 onwards, which was measured on it. For §1 and §2.3, substitute the

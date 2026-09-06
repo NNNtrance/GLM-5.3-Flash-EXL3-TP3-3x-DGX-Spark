@@ -138,5 +138,29 @@ it lands well inside the 6 % this figure used to swing by before the settle gate
 ([docs/07](../../docs/07-kv-and-draft-page.md) §1.1). It is the strongest evidence we have that the
 gate measures what it claims to.
 
+### The same test on production 11, 6 September 2026
+
+Repeated on production configuration 11 (the same stack at `gpu-memory-utilization` 0.87 with the
+sm_12x correctness set), one trial, `reboot` issued to all three nodes at once `[measured-here]`:
+
+| | production 10, 5 Sep | production 11, 6 Sep |
+|---|---|---|
+| `/health` 200 from the reboot command | 242 s by the harness counter, **315 s** by the wall clock | **312 s**, wall clock, one figure only |
+| `harem-exl3.service` on all three | active | active |
+| ConnectX-7 on all three | 4/4 | 4/4 |
+| KV pool on that boot | 5,652,892 | **6,382,920** |
+| gates after it | 10/10 · 12/12 | 10/10 · 12/12 **cold and warm**, tool-call 8/8, needle-lite 6/6 |
+| swap traffic during the battery that followed | not sampled | **si + so exactly 0 on all three nodes** |
+
+**312 against 315 s: the autostart cost did not move**, and this time there is no contradiction to
+print, because the driver timed the reboot command itself rather than trusting a harness counter. The
+pool cross-check holds at the higher rung too — 6,382,920 from the reboot against 6,366,391 from a
+settled `docker run` of the same configuration, **+0.3 %**.
+
+The clean boot was also the campaign's noise check. Production 11's load boot had read C4 at 135.0
+against the reference's 144.2, the only number that had moved; the clean boot read **145.9**, above
+the reference. A whole-cluster reboot is a slow instrument, but it is the one that settles whether a
+single boot's outlier is real.
+
 Unit, preflight and the install order (including `Conflicts=` and disabling the sibling unit):
 [`systemd/`](../../systemd/README.md).

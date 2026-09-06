@@ -366,13 +366,21 @@ not.
 
 Published rungs on this page run 0.75, 0.80, 0.83, 0.845, 0.85 and 0.87, with two recipes recording
 swap at 0.87, one campaign selecting **0.75** as its winner on a four-node fleet, and one recipe
-crash-looping at 0.87 and settling on 0.85 `[reported]`. Our production 10 is at 0.83 and our own 0.85
-arm was **rejected** on a swap reading — 1.6 GB of swap growth under load on the head node — with 0.85
-marked as not to be attempted again on this stack ([11](11-open-issues.md) §2.4,
-[00](00-hardware-and-os.md) §11). Recipes reaching different verdicts about the same knob on the same
-part is expected rather than contradictory: the number that matters is host memory free at that rung,
-and that depends on node count, on what else the node is doing, on whether the vision tower is loaded,
-and on `max_model_len`.
+crash-looping at 0.87 and settling on 0.85 `[reported]`. **Our production 11 is at 0.87** — which is
+where a recipe on this page crash-loops, and where two others see swap. We do not: our ladder puts the
+swap wall at **0.90**, and 0.87 runs with swap traffic at exactly zero
+([`../results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md)). The earlier verdict on this
+page — that our own 0.85 arm was rejected on 1.6 GB of swap growth and would not be attempted again —
+is `[retracted]`: it was measured before the fast-load page-cache fix and against a `MemFree` rule
+that has since been replaced ([11](11-open-issues.md) §2.4, [00](00-hardware-and-os.md) §11.2,
+[07](07-kv-and-draft-page.md) §6).
+
+Recipes reaching different verdicts about the same knob on the same part is expected rather than
+contradictory, and this is the sharpest example of it on the page: the number that matters is host
+memory free at that rung, and that depends on node count, on what else the node is doing, on whether
+the vision tower is loaded, on `max_model_len` — and, as our own retraction shows, on what the loading
+path does to the page cache on the way in. **A published rung is not transferable; only the method
+is.** Ours: climb one rung at a time and watch swap traffic and `MemAvailable`, not `MemFree`.
 
 ### 5.4 Synthetic against realistic, once more, because it is the biggest number on the page
 

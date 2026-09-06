@@ -60,6 +60,28 @@ requests with EMPTY content: 0
 CODE EXAM: 12/12  (100.0%)
 ```
 
+## Production 11, both boots, plus two gates the older arms never ran
+
+Production configuration 11 (`gpu-memory-utilization` 0.87 + the sm_12x correctness set) was gated on
+two boots — the load boot and the clean boot after a whole-cluster reboot — beside a same-session
+production 10 reference measured on the engine as the memory-ladder campaign left it. All three arms
+also ran the **tool-call gate** (`toolcall-gate.py`, eight checks: a well-formed call, tool selection,
+no spurious call, no `None` leak from a `content: null` assistant turn, answering from the result,
+out-of-order results, a second-round call, argument fidelity) and a **needle-lite** probe (three
+depths at ~64K and three at ~128K prompt tokens, thinking on at `reasoning_effort: low`), 6 September
+2026 `[measured-here]`:
+
+| Arm | probe cold | code cold | probe warm | code warm | tool-call | needle-lite |
+|---|---|---|---|---|---|---|
+| production 10 reference, same session, 0.83 | 10/10 | 12/12 | **10/10** | **12/12** | **8/8** | **6/6** |
+| production 11, load boot | 10/10 | 12/12 | **10/10** | **12/12** | **8/8** | **6/6** |
+| production 11, clean boot after the triple reboot | 10/10 | 12/12 | **10/10** | **12/12** | **8/8** | **6/6** |
+
+Every rung of the memory ladder those figures came out of — 0.85, 0.87, 0.88 and the **rejected**
+0.90 — also passed 10/10 and 12/12 cold and warm
+([`../memory/ladder-6sep.md`](../memory/ladder-6sep.md)). The gates do not see the failure the ladder
+was rejected on, which is the point of measuring swap traffic instead.
+
 ## Broader quality
 
 | Test | Result | Where |
@@ -73,6 +95,8 @@ like pair, and the difference is worth naming rather than averaging: different c
 TP. Only production 9's was measured at TP=3 on what production serves; the 86.4 ±0.7 that
 configurations 7 and 8 carry is the TP=2 number **carried forward**, not re-measured on those arms
 `[not tested]`. Production 10 was not re-measured either, because it differs from production 9 by a
-memory fraction.
+memory fraction. Production 11 was not re-measured either, for the same reason plus one more: the two
+sm_12x patches it adds are a buffer initialisation and a bounds check, neither of which touches the
+arithmetic of a correct row `[not tested]`.
 
 Nothing on this page was measured at max reasoning effort.

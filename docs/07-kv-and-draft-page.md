@@ -319,37 +319,48 @@ back without all of the pool.
 
 ---
 
-## 6. The memory ladder above 0.80
+## 6. The memory ladder, climbed properly
 
-One rung was climbed, measured, and rejected `[measured-here]`:
+**This section was rewritten on 6 September 2026.** What it used to say — "0.85 was rejected and 0.88
+was never attempted" — was true of one boot on a machine that no longer exists, and it was measured
+with the wrong ruler. The ladder has since been climbed rung by rung in a single session and the
+whole thing is in [`results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md). The short
+version:
 
-| | 0.80 (production) | 0.85 |
-|---|---|---|
-| KV pool | 4,413,223 | **5,256,198** (+19 %) |
-| C1 / C4 / C8 | 52.8 / 117.1 / 162.8 | 53.8 / 112.7 / 161.8 (within spread) |
-| prefill-fresh, warm | 1,703 | 1,663 |
-| gates | 10/10 · 12/12 | 10/10 · 12/12 |
-| free RAM | 11–12 GB, swap 0 | head **1.9 GiB**, worker-1 6, worker-2 8 |
-| swap | 0 | head 1.6 GB, worker-2 1.7 GB |
+| | 0.80 | 0.83 | 0.85 | **0.87** | 0.88 | 0.90 |
+|---|---:|---:|---:|---:|---:|---:|
+| KV pool | 5,165,289 | 5,674,931 | 6,016,528 | **6,363,636** | 6,542,699 | 6,870,523 |
+| Swap traffic under load | 0 | ~0 | **0** | **0** | 4 KiB | **si 143 MiB + so 1,519 MiB** |
+| `MemAvailable` min, head node | — | 8.35 GiB | 5.99 | **3.49** | 1.86 | 1.04 |
+| Verdict | prod 9 | prod 10 | pass | **pass — production 11** | pass, thin | **rejected** |
 
-19 % more pool, no measurable speed change, and free memory on the head node below the 4 GiB rule
-with real swap in use. **0.85 was rejected and 0.88 was never attempted** `[not tested]`.
+Speed at every rung, including the rejected one, stayed inside its band `[measured-here]`.
 
-The reason is unified memory: on this hardware the KV pool and host RAM come out of the same 121 GiB,
-so every rung of the ladder is taken directly from the host. The swap that appeared was the engine's
-own process pages — the API process, the worker and the engine core — being paged out, which is
-exactly the state you do not want under load.
+**The old verdict was wrong in its ruler, not only in its number.** It used `MemFree` against a 4 GiB
+floor. On a unified-memory part most of what the kernel holds at that moment is reclaimable page
+cache, so `MemFree` is not headroom; `MemAvailable` is, and it was never read. And the 0.85 boot the
+verdict came from predates the fast-load work ([08](08-fast-boot.md) §5), which removed a large
+page-cache spike during loading and added `MADV_DONTNEED` plus `malloc_trim` at the end of it.
 
-**Climb it yourself, one rung at a time, and check free memory and swap at each rung.** The ladder is
-not forbidden — it is just that on this stack it runs into the free-memory rule before it runs into
-anything else.
+**The criterion that replaced it is swap *traffic*, not swap used.** `si`/`so` from `vmstat -n -t 1`
+on all three nodes, summed over the window between "engine up" and "battery finished". Swap *used* is
+a stock and sits at ~0.04 GiB from boot at every rung, including the rejected one — it discriminates
+nothing. Traffic is a flow, and it is what a stall is made of. At 0.90 the head node moved 1.5 GB out
+and read 143 MB back, 250 of 598 seconds were not zero, and the arm's first prefill went 5.0 → 9.8 s
+while C1, C4 and C8 all stayed inside their bands. **The aggregate tok/s is the last place this
+failure shows up**, which is why it must not be the thing you watch.
 
-**The 0.85 rejection is older than the machine it was measured on.** That boot predates the fast-load
-work, which removed a large page-cache spike during loading and added `MADV_DONTNEED` plus
-`malloc_trim` at the end of it ([08](08-fast-boot.md) §5). Since then the same production
-configuration sits at 11–12 GiB free with **zero** swap and 3.0–3.5 GiB of page cache, where the
-0.85 boot had hit 1.9 GiB free and 1.6 GB of swap. The rung at **0.82–0.83** was never tried at all,
-and 0.85 deserves a re-run rather than a carried-forward verdict `[not tested]`.
+**Why the shipped rung is 0.87 and not 0.88.** 0.88 measures clean and buys another 2.8 % of pool.
+What it costs is the diagnostic budget: `MemAvailable` on the head node falls to 1.86 GiB and the
+kernel's page cache to 2.59 GiB. Swap traffic is still zero there *because the kernel can still find
+room in the cache* — and the next rung asks for about 2.4 GiB more, which is about all the cache has
+left. 0.87 leaves 3.49 GiB, which is the budget the model-free benches and profilers that run beside
+this engine live in. Every 1 % of the fraction costs about **1.2 GiB** of host headroom on this
+hardware.
+
+**Climb it yourself, one rung at a time**, and watch swap traffic and `MemAvailable` rather than
+`MemFree`. The pool is not the binding constraint at three nodes ([17](17-memory-ledger.md)); this is
+headroom for concurrency, not a capability that was missing.
 
 There is a second, sharper instrument nobody here has used: **`--kv-cache-memory`**, which sizes the
 pool in bytes instead of as a fraction of the device. It skips the memory profile altogether — vLLM

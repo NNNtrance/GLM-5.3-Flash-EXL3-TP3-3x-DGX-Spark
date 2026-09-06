@@ -664,9 +664,10 @@ Remember §4.4: at 5.8–5.9 GB/s your NVMe is the limit, not the fabric.
 
 ### 11.1 The rule
 
-**Never let free host RAM fall below 4 GiB on any node.** On a GB10 the GPU shares host memory, so
-this figure *is* your safety margin, and it is why this recipe runs at
-`gpu-memory-utilization 0.80` rather than higher.
+**Never let swap move under load, and keep `MemAvailable` above about 3 GiB on every node.** On a
+GB10 the GPU shares host memory, so the host's free share *is* your safety margin. This rule replaced
+a "4 GiB of `MemFree`" rule on 6 September 2026 — see §11.2 for the ruler and the ladder it was
+measured on. The shipping fraction is `gpu-memory-utilization 0.87`.
 
 Measured at rest on production configuration 9 `[measured-here]`:
 
@@ -675,33 +676,44 @@ Measured at rest on production configuration 9 `[measured-here]`:
 | Free | 12.1 GiB | 13.5 GiB | 13.4 GiB |
 | Swap used | ~0.1 GiB | ~0.1 GiB | ~0.1 GiB |
 
-### 11.2 Why not higher
+### 11.2 How high, and what the ruler is
 
-We climbed to `0.85` and measured a KV pool of **5,256,198 tokens** — and free RAM on the head node
-at **1.9 GiB with 1.6 GB of swap in use** `[measured-here]`. That breaks the rule, so 0.85 was
-rejected and nothing above it was attempted on this stack.
+**Rewritten 6 September 2026.** This section used to say "we climbed to 0.85, saw 1.9 GiB free and
+1.6 GB of swap, and nothing above it will be attempted". Both halves have been retired: the ruler was
+wrong and the machine that reading came from no longer exists.
 
-**`0.83` has since been run and is production configuration 10** — production 9 with one line
-changed `[measured-here]`:
+**The ruler.** `MemFree` is not headroom on a unified-memory part — most of what the kernel is
+holding is reclaimable page cache. The two figures that decide a rung are **`MemAvailable`**, which is
+the honest headroom, and **swap traffic under load** (`si`/`so` per second from `vmstat`, summed over
+the benchmark window), which is what a stall is actually made of. Swap *used* is a stock: it sits at
+~0.04 GiB from boot at every rung, including the one that fails, and discriminates nothing.
 
-| | production 9 @ 0.80 | production 10 @ 0.83 |
-|---|---|---|
-| KV pool | 5,168,044 | **5,619,834** (+8.7 %) |
-| C1 / C4 / C8 tok/s | 69.8 / 134.6 / 192.4 | 70.5 / 144.6 / 194.0 — inside the bands |
-| Quality gates, cold and warm | full | full |
-| Swap under load | ~0.1 GB | ~0.1 GB, **flat through the rounds** |
-| `MemAvailable` after the rounds | 12–13 GB | 8–10 GB |
-| `MemFree` after the rounds | — | 0.9–1.2 GiB (reclaimable page cache) |
+**The ladder, climbed rung by rung in one session** — full tables in
+[`results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md), the reasoning in
+[07](07-kv-and-draft-page.md) §6 `[measured-here]`:
 
-`MemFree` at 0.83 sits below the headline figure, and the reason that is acceptable is specific:
-**0.85 was rejected for swap growth, not for `MemFree` in the abstract**, and at 0.83 swap does not
-grow. `MemAvailable` is the honest headroom number here and 8–10 GB is well clear. **0.85 will not be
-attempted on this stack.** The full ladder is in [07](07-kv-and-draft-page.md) and
-[11](11-open-issues.md) §2.4.
+| | 0.83 (prod 10) | 0.85 | **0.87 (prod 11)** | 0.88 | 0.90 |
+|---|---:|---:|---:|---:|---:|
+| KV pool | 5,674,931 | 6,016,528 | **6,363,636** | 6,542,699 | 6,870,523 |
+| Swap traffic under load | ~0 | **0** | **0** | 4 KiB | **si 143 MiB + so 1,519 MiB** |
+| `MemAvailable` min, head node | 8.35 GiB | 5.99 | **3.49** | 1.86 | 1.04 |
+| Speed | reference | in band | in band | in band | in band |
+| Verdict | — | pass | **shipped** | pass, thin | **rejected** |
 
-**The device ceiling is not the binding limit.** The driver takes about 14.2 GiB permanently and does
-not give it back on reboot, which puts the device-side ceiling near 0.88; **host memory binds first**
-on this stack, well below that.
+**0.90 is where it stops**, and the tok/s is the last place that shows: at 0.90 every concurrency
+level is still inside its band while the head node pages 1.5 GB out and reads 143 MB back, and the
+arm's first prefill goes 5.0 → 9.8 s.
+
+**0.88 passed and was not taken.** It leaves 1.86 GiB of `MemAvailable` and 2.59 GiB of page cache on
+the head node — enough for the engine, not enough for the model-free benches, profilers and
+diagnostic containers that run beside it here. 0.87 leaves 3.49 GiB and gives up 2.8 % of pool for it.
+
+**Every 1 % of `gpu-memory-utilization` costs about 1.2 GiB of host headroom** on this hardware. That
+is the exchange rate to plan with.
+
+**The device ceiling is not the binding limit** — and the "driver takes 14.2 GiB" figure that used to
+put it near 0.88 is itself stale by about 10 GiB ([17](17-memory-ledger.md)). What binds is the
+host's share at run time.
 
 ### 11.3 The settle gate — a host-side wait before `docker run`
 

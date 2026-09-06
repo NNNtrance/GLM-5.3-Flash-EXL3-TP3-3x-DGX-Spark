@@ -106,3 +106,45 @@ three-round median on a cold tuner would still be polluted.
 Raw per-round JSON is not included in this repository; the medians above are the published
 figures. Re-running `scripts/bench-sweep.py` reproduces them — five times on an image without the
 tuner cache, three times on one with it.
+
+
+## Production 11 against a same-session production 10 reference
+
+6 September 2026 `[measured-here]`. The reference is the shipping 0.83 configuration measured on the
+engine as the memory-ladder campaign left it — no restart, boot age 385 s — so this pair carries no
+cross-day drift. Production 11 is the pool of **six** rounds over **two boots**: the fast-load boot
+and the clean boot after all three nodes were rebooted together. Both arms ran the same battery:
+gates cold and warm, the tool-call gate, needle-lite, prefill fresh and repeated, three sweep rounds.
+
+| Arm | C | rounds | agg tok/s | min–max | per stream | TTFT med s | accept % | KV pool |
+|---|---:|---:|---:|---|---:|---:|---:|---:|
+| production 10 reference (0.83) | 1 | 3 | 69.2 | 68.5–69.9 | 74.5 | 0.278 | 60.7 | 5,694,214 |
+| production 10 reference (0.83) | 2 | 3 | 98.7 | 97.6–102.0 | 54.3 | 0.410 | 61.1 | 5,694,214 |
+| production 10 reference (0.83) | 4 | 3 | 144.2 | 143.9–147.0 | 42.4 | 0.583 | 65.3 | 5,694,214 |
+| production 10 reference (0.83) | 6 | 3 | 173.0 | 171.9–174.6 | 33.6 | 0.701 | 62.5 | 5,694,214 |
+| production 10 reference (0.83) | 8 | 3 | 197.5 | 193.4–197.9 | 29.0 | 0.799 | 61.9 | 5,694,214 |
+| **production 11 (0.87 + sm_12x set)** | 1 | 6 | **69.6** | 68.9–70.6 | 74.7 | 0.278 | 61.3 | **6,382,920** |
+| **production 11 (0.87 + sm_12x set)** | 2 | 6 | **99.3** | 95.4–102.3 | 53.9 | 0.422 | 61.1 | **6,382,920** |
+| **production 11 (0.87 + sm_12x set)** | 4 | 6 | **141.0** | 133.1–148.7 | 42.3 | 0.577 | 63.1 | **6,382,920** |
+| **production 11 (0.87 + sm_12x set)** | 6 | 6 | **173.8** | 167.7–179.1 | 33.4 | 0.696 | 62.0 | **6,382,920** |
+| **production 11 (0.87 + sm_12x set)** | 8 | 6 | **201.1** | 196.7–207.2 | 29.5 | 0.806 | 62.8 | **6,382,920** |
+
+C1 +0.6 %, C2 +0.6 %, C6 +0.4 %, C8 +1.8 %, C4 −2.2 %. Prefill on fresh unseen ~8K prompts: 1,742
+tok/s on the reference against 1,768 and 1,752 on the two production-11 boots; the repeated 7K prompt
+1,602 against 1,597 and 1,610.
+
+**C4 is the row to read carefully, and it is the reason this arm is pooled over two boots.** The
+load boot read 135.0 and the clean boot 145.9, against the reference's 144.2 — a **11.1 %** six-round
+spread at that level, against 2.5 % at C1 and 5.3 % at C8. Three independent readings say the low one
+is boot noise rather than a cost of the change: the same morning's memory ladder measured C4 at 0.87
+**without** these patches as 144.18 against 143.03 at 0.83
+([`../memory/ladder-6sep.md`](../memory/ladder-6sep.md)); the sm_12x A/B moved C4 arbitrarily between
+137.8 and 142.0 across every arm **including unpatched production**
+([`../kernels/sm12-stack-patches-ab.md`](../kernels/sm12-stack-patches-ab.md)); and the clean boot,
+which is the slowest and cleanest instrument available, put it back above the reference. The low
+reading stays printed.
+
+The reference's own swap traffic was **higher** than production 11's: 0.7 / 0.9 / 0.4 MiB of swap-in
+across the three nodes against 0.08 / 0 / 0.02 MiB on production 11's load boot and **exactly zero**
+on the clean boot. `MemAvailable` under load is the cost — 3.4 / 4.7 / 4.7 GiB against the reference's
+8.3 / 9.1 / 9.6.

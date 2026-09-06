@@ -372,7 +372,7 @@ Sub-items left open by the closure, both small `[not tested]`:
   is most of the 6.7 % a dump boot reads low. Worth ~2.3 GiB of pool on dump boots only, so it changes
   no production number and is low priority.
 
-### 2.4 The memory ladder above 0.80 — 0.83 was approved, run, and is production 10
+### 2.4 The memory ladder above 0.80 — climbed to the top and stopped at 0.87 (production 11)
 
 **The full per-node accounting this rung is spent against is [17](17-memory-ledger.md)**: what fills
 the 121.6 GiB, what the fraction is a fraction *of* (the total, not the free), and the six give-back
@@ -400,10 +400,32 @@ base did not.
 has used as a floor. The number that decides whether that matters is **swap growth, and it did not
 move** — 0.85's rejection was never about `MemFree` in the abstract, it was about 1.6 GB of swap
 appearing under load. `MemAvailable` at 8–10 GB per node is the honest headroom figure and it is well
-clear. **0.85 will not be attempted on this stack**; the rung after 0.83 is a soak, not another rung.
+clear.
 
-The design, the arithmetic and the reasoning that produced it are kept below, because the method is
-the transferable part.
+**Superseded on 6 September 2026, including the sentence this item ended with.** "0.85 will not be
+attempted on this stack" was written the day 0.83 shipped, and the whole ladder was climbed the next
+morning: **0.85, 0.87 and 0.88 all pass; 0.90 is rejected on swap traffic**, and **0.87 is production
+configuration 11**. The rung that decided it was not the highest that passed — 0.88 leaves 1.86 GiB
+of `MemAvailable` on the head node, 0.87 leaves 3.49 — and the criterion that decided it was not the
+one this item used. Full tables in
+[`../results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md); the ruler correction is in
+[07](07-kv-and-draft-page.md) §6 and [00](00-hardware-and-os.md) §11.2.
+
+| | 0.83 (prod 10) | 0.85 | **0.87 (prod 11)** | 0.88 | 0.90 |
+|---|---:|---:|---:|---:|---:|
+| KV pool | 5,674,931 | 6,016,528 | **6,363,636** | 6,542,699 | 6,870,523 |
+| Swap traffic under load | ~0 | 0 | **0** | 4 KiB | **si 143 MiB + so 1,519 MiB** |
+| `MemAvailable` min, head node | 8.35 GiB | 5.99 | **3.49** | 1.86 | 1.04 |
+| Verdict | reference | pass | **shipped** | pass, thin | **rejected** |
+
+**What the campaign is worth beyond the rung.** Speed was inside its band at every rung *including
+the rejected one*, so a ladder judged on tok/s would have taken 0.90 and shipped a stack that pages
+under load. The failure is visible in `vmstat` a whole rung before it is visible in a throughput
+number, and it surfaces at the client as a first-prefill stall (5.0 → 9.8 s) rather than as a lower
+median.
+
+The design, the arithmetic and the reasoning that produced the 0.83 rung are kept below, because the
+method is the transferable part.
 
 <details>
 <summary>The original item, as written before the rung was run</summary>
@@ -1088,7 +1110,7 @@ on its own; it is worth carrying into the next arm that touches the drafter.
 
 </details>
 
-### 2.27 The four sm_12x stack patches — measured, free, and deliberately not shipped
+### 2.27 The four sm_12x stack patches — three ride with production 11, one stays out
 
 **Closed as a question, open as an option.** Four findings against this stack on sm_12x hardware
 ([Zeuss5/cuda-exl3 issue #6](https://github.com/Zeuss5/cuda-exl3/issues/6), found by
@@ -1118,13 +1140,23 @@ value, and the tree's own warmup already covers most of them, so at most one col
 process is at stake — and across cold, freshly booted processes we could not see it from the client
 at all.
 
-**The decision, and the reason it is not "adopt".** Items 2 and 3 are correctness-class: their value
-rests on a mechanism, not on a measurement, and **this A/B did not show that mechanism firing**. What
-it showed is that fitting the insurance costs nothing. Those are different statements. A change
-without a reason is not made to a configuration that passed a three-node reboot test, so the three
-adoptable patches sit in [`../tracks/tp3/patches-optional/sm12/`](../tracks/tp3/patches-optional/sm12/)
-and **ride with the next production change** rather than earning a boot of their own. Full tables,
-arms, floors and the two instrument caveats:
+**The decision, and what happened to it.** Items 2 and 3 are correctness-class: their value rests on
+a mechanism, not on a measurement, and **this A/B did not show that mechanism firing**. What it
+showed is that fitting the insurance costs nothing. Those are different statements, and a change
+without a reason is not made to a configuration that has passed a three-node reboot test — so the
+verdict on the day was "adoptable, but not on a boot of its own; ride with the next production
+change".
+
+**That next change came the same afternoon.** Items 1, 2 and 3 are in **production configuration
+11**, adopted alongside the 0.87 memory rung so that one boot carries both, and they now live in the
+track's own patch tree ([`../tracks/tp3/patches/`](../tracks/tp3/patches/)) behind
+`HAREM_SM12_ITEMS=pdl,kpool`. Measured against a same-session production 10 reference, the combined
+change is **C1 +0.9 %, C8 +0.8 %**, both gates full cold and warm, tool-call 8/8, needle-lite 6/6 —
+so the second, larger sample says the same thing the A/B did `[measured-here]`. **Item 4 is not
+adopted** and stays in
+[`../tracks/tp3/patches-optional/sm12/`](../tracks/tp3/patches-optional/sm12/): what it removes could
+not be measured from the client at all, so there is nothing to weigh against the risk of carrying it.
+Full tables, arms, floors and the two instrument caveats:
 [`../results/kernels/sm12-stack-patches-ab.md`](../results/kernels/sm12-stack-patches-ab.md).
 
 **What the campaign's instrument closed elsewhere, which is the larger result.** Arm 1 also carried a

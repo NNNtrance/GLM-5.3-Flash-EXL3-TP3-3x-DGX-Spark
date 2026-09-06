@@ -11,6 +11,68 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — production configuration 11: the memory ladder to 0.87, and the sm_12x guards that ride with it
+
+**Two changes in one boot, and the second one paid for the first.** `gpu-memory-utilization` 0.83 →
+**0.87** and the **sm_12x correctness set** — [`patch-pdl-gate.py`](tracks/tp3/patches/patch-pdl-gate.py)
+(item 1) and [`patch-kpool-init.py`](tracks/tp3/patches/patch-kpool-init.py) (items 2 + 3), behind
+`HAREM_SM12_ITEMS=pdl,kpool`. The memory fraction is not part of the fast-load manifest identity but
+the patch files are, so the patches force a dump boot (590 s, ~53 GB per node) that the rung rides
+along on for free.
+
+**Measured against a same-session production 10 reference**, pooled over six sweep rounds and two
+boots: **KV pool 5,694,214 → 6,382,920, +12.1 %**; C1 69.2 → **69.6** (+0.6 %), C8 197.5 → **201.1**
+(+1.8 %), prefill 1,742 → 1,760, TTFT unchanged at 0.278 / 0.806 s. Gates 10/10 and 12/12 cold **and**
+warm on both boots, tool-call **8/8**, needle-lite **6/6** at 64K and 128K. The cost is host headroom:
+`MemAvailable` under load 8.3 / 9.1 / 9.6 → **3.4 / 4.7 / 4.7 GiB**.
+
+**The ladder, and the ruler that had to be replaced first.** New page:
+[`results/memory/ladder-6sep.md`](results/memory/ladder-6sep.md). 0.85, 0.87 and 0.88 all pass; **0.90
+is rejected**. The criterion is no longer `MemFree` against a 4 GiB floor — on a unified-memory part
+most of what the kernel holds there is reclaimable page cache — but **swap traffic under load**,
+`si`/`so` per second summed over the benchmark window. Swap *used* is a stock and sits at ~0.04 GiB at
+every rung including the failing one.
+
+**At 0.90 every concurrency level is still inside its band** while the head node pages 1,519 MiB out
+and reads 143 MiB back, 250 of 598 load seconds are non-zero, and the longest unbroken run is 85 s. A
+ladder judged on tok/s would have shipped it. What surfaces at the client is the arm's first prefill
+going **5.0 → 9.8 s**. **0.88 passed and was not taken**: 1.86 GiB of `MemAvailable` and 2.59 GiB of
+page cache left on the head node, against 0.87's 3.49 — and that headroom is what anything running
+beside the engine lives in. Every 1 % of the fraction costs about **1.2 GiB** of host memory here.
+
+**Two of our own verdicts are withdrawn.** "0.85 will not be attempted on this stack" and "0.88 was
+never attempted" `[retracted]` — both were true of a boot that predates the fast-load page-cache fix,
+and both were reached with the wrong ruler. Corrected in [README](README.md),
+[docs/00](docs/00-hardware-and-os.md) §11, [docs/07](docs/07-kv-and-draft-page.md) §6,
+[docs/11](docs/11-open-issues.md) §2.4, [docs/16](docs/16-comparison-with-published-recipes.md) §5.3
+and in both `results/configs/` CSVs, where the superseded note is kept beside the correction rather
+than overwritten. Note what §5.3 now says: **0.87 is where one published recipe crash-loops and two
+others see swap.** A published rung is not transferable; only the method is.
+
+**The sm_12x set was adopted, not re-litigated.** Yesterday's A/B closed with "adoptable, free, but a
+change without a reason is not made to a configuration that passed a reboot test — ride with the next
+production change" ([docs/11](docs/11-open-issues.md) §2.27). This was the next production change. The
+two files moved from `patches-optional/sm12/` into the track's own patch tree; **item 4 did not** — what
+it removes could not be measured from the client in either direction, so there is nothing to weigh.
+The prelude's item list is now **fail-closed**: an unrecognised entry stops the rank instead of being
+skipped, because silently ignoring `kpol` would serve a stack the operator believes is patched.
+
+**One patch cannot be applied from inside the container**, and the pattern is written down because it
+will recur. `patch-kpool-init.py` targets `sparse_attn_indexer_kpool.py`, which the launcher
+bind-mounts **read-only** from `$OVERLAY_DIR`. The way through is a host-side copy of the overlay with
+that item pre-applied; the prelude then reports "already applied" for it and writes only the image's
+own file. Verify the copy with `diff -r`: exactly one file, exactly one patch's hunks.
+
+**Reboot-tested as a whole cluster, and the reboot doubled as the noise check.** `/health` 200 at
+**312 s** from the reboot command, against production 10's 315 s by the same wall clock — autostart
+cost unchanged; all three units up on their own, ConnectX-7 4/4, KV 6,382,920, gates full cold and
+warm, swap traffic exactly zero. It also settled the campaign's one open number: production 11's load
+boot had read **C4 135.0** against the reference's 144.2, and the clean boot read **145.9**. C4's
+six-round spread on this configuration is **11.1 %** against 2.5 % at C1 and 5.3 % at C8; the low
+reading is boot noise and it is printed rather than smoothed.
+
+---
+
 ## 2026-09-06 — the memory ledger: where 121.6 GiB per node goes, and the six give-backs that measure zero
 
 **A read-only accounting of every gigabyte on a node, with the engine left running.** No boot, no

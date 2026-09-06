@@ -10,11 +10,11 @@
 > is withdrawn in public. Assembling a working cluster from other people's parts is where this work
 > starts, not where it ends.
 
-> **Status: release.** Numbers, flags and patches are current as of **5 September 2026** and describe
-> **production configuration 10** — configuration 9 with `gpu-memory-utilization` at 0.83 — which is
-> what our three nodes serve, start at boot and were rebooted into as a whole cluster with the gates
-> read afterwards. Every analysis section is configuration 9's and applies unchanged, because the two
-> differ by one line. The stack is still moving and this file is overwritten in place when it does.
+> **Status: release.** Numbers, flags and patches are current as of **6 September 2026** and describe
+> **production configuration 11** — configuration 10 at `gpu-memory-utilization` 0.87 with the sm_12x
+> correctness set — which is what our three nodes serve, start at boot and were rebooted into as a
+> whole cluster with the gates read afterwards. Every analysis section is configuration 9's and
+> applies unchanged, because 9, 10 and 11 differ by a memory fraction and two guard patches. The stack is still moving and this file is overwritten in place when it does.
 > Sections marked *open* in [docs/11-open-issues.md](docs/11-open-issues.md) are the honest edge of
 > what we know; [docs/11 §1](docs/11-open-issues.md) is what we published and then had to withdraw,
 > and [audit/](audit/README.md) §6 indexes it. **Read the retractions before you quote a number.**
@@ -34,25 +34,26 @@ units — so they cannot be mixed by accident.
 | **1 DGX Spark** | No serving recipe: 153.8 GiB of weights against 121.6 GiB of unified memory. Still yours — the image build, the GB10 kernel fixes, the measurement protocol, the model-free benches and the failure index. [docs/00 §1](docs/00-start-here.md) |
 | **4 DGX Spark** | Nothing measured `[not tested]`. The padding and expert-parallel arithmetic, the cabling problem and what we would want reported are in [HELP-WANTED.md](HELP-WANTED.md) §1 |
 
-### Three nodes — production configuration 10
+### Three nodes — production configuration 11
 
 Three DGX Spark nodes, one 4-bit EXL3 checkpoint, realistic prompts, temperature 0, reasoning effort
-`low`, 5 September 2026 `[measured-here]`:
+`low`, 6 September 2026 `[measured-here]`. Speed is the pool of six sweep rounds over **two boots** of
+this configuration:
 
 | | |
 |---|---|
-| Single-stream decode (C1) | **70.5** tok/s aggregate (**76.9** per stream) |
-| Aggregate at 8 concurrent streams (C8) | **194.0** tok/s (197.2 on production 9's promotion boot; C8's boot-median spread is 2.5 %) |
-| Prefill, fresh unseen ~8K prompts | **1,769** tok/s (median of three; the five-round arm read 1,747) |
-| KV pool at `max_model_len` 1,000,000 | **5,619,834** tokens at `gpu-memory-utilization 0.83` — about 5.6 concurrent 1M-token requests |
-| Quality | correctness probe **10/10**, code exam **12/12** cold and warm; MMLU sample (1,995 q) **86.47 ±0.74** |
-| Cold boot, `docker run` → API ready | **251 s** |
-| **Boot from power-on**, all three nodes rebooted together, autostart unit enabled | `/health` 200 at **242 s** by the harness's own counter — **315 s** by the wall clock in the same log, and that is the figure to plan with. Both are printed because they disagree ([systemd](systemd/README.md), [09](docs/09-measurement-protocol.md) §11.4) |
+| Single-stream decode (C1) | **69.6** tok/s aggregate (**74.7** per stream) |
+| Aggregate at 8 concurrent streams (C8) | **201.1** tok/s |
+| Prefill, fresh unseen ~8K prompts | **1,760** tok/s |
+| KV pool at `max_model_len` 1,000,000 | **6,382,920** tokens at `gpu-memory-utilization 0.87` — about 6.4 concurrent 1M-token requests |
+| Quality | correctness probe **10/10**, code exam **12/12** cold and warm; tool-call gate **8/8**; needle-lite **6/6** at 64K and 128K; MMLU sample (1,995 q) **86.47 ±0.74**, carried from production 9 `[not tested]` on this configuration |
+| Cold boot, `docker run` → API ready | **271 s** (the one-off dump boot that writes the sidecar is 590 s) |
+| **Boot from power-on**, all three nodes rebooted together, autostart unit enabled | `/health` 200 at **312 s** by the wall clock, timed from the reboot command ([systemd](systemd/README.md), [`results/boot/boot-ledger.md`](results/boot/boot-ledger.md)) |
 
 ### Two nodes — the TP=2 production candidate
 
 Two DGX Spark nodes, TP=2, **expert parallelism off**, the same full-scope checkpoint,
-`gpu-memory-utilization` **0.85** — the three-node 0.83 rung is not transferable and the two-node
+`gpu-memory-utilization` **0.85** — the three-node rung is not transferable and the two-node
 ladder has never been derived — same harness and same protocol, 6 September 2026 `[measured-here]`:
 
 | | |
@@ -65,7 +66,7 @@ ladder has never been derived — same harness and same protocol, 6 September 20
 | Cold boot, fast-load | **272 s** (the one-off dump boot that writes the sidecar is 998 s) |
 | Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes. **No reboot test yet** `[not tested]` |
 
-**Two ranks are 80–83 % of the speed on 38 % of the pool, at quality that is inside one error bar.**
+**Two ranks are 77–84 % of the speed on a third of the pool, at quality that is inside one error bar.**
 The side-by-side comparison, and why the third node wins on latency as well as on memory, is further
 down this page and in [docs/15](docs/15-tp2-track.md) §7. A second candidate, on the
 routed-experts-only checkpoint, is kept for anyone who already has those 164 GB: it is slower on every
@@ -110,10 +111,26 @@ This section is the three-node track in full: what each configuration changed, w
 measurements that overturned four of our own targets.
 
 Production 10 is production 9 with `gpu-memory-utilization` 0.80 → **0.83**: **+8.7 % of KV pool**, no
-speed number outside its band, gates full, swap flat under load. Everything below and every analysis
-page is production 9's and applies unchanged. **Before you read a few-percent difference anywhere in
-this repository as a result, read [docs/10 §1.1](docs/10-results-and-roofline.md)**: on this stack C1
-boot medians span 1.1 %, C8 2.5 % and **C4 7.4 %**.
+speed number outside its band, gates full, swap flat under load.
+
+**Production 11 is production 10 with exactly two changes**, taken in one boot on 6 September:
+`gpu-memory-utilization` 0.83 → **0.87** and the **sm_12x correctness set**
+([docs/11](docs/11-open-issues.md) §2.27) behind `HAREM_SM12_ITEMS=pdl,kpool`. Against a same-session
+production 10 reference: **KV pool +12.1 %**, C1 **+0.6 %**, C8 **+1.8 %**, prefill equal, every gate
+full cold and warm on both boots, tool-call 8/8, needle-lite 6/6, and swap traffic **exactly zero** on
+all three nodes on the clean boot. Everything below and every analysis page is production 9's and
+applies unchanged.
+
+**Two changes in one boot on purpose.** The memory fraction is not part of the fast-load manifest
+identity but the patch files are, so adding the patches forces a dump boot (590 s, ~53 GB per node)
+that the rung can ride along on for free ([docs/08](docs/08-fast-boot.md) §4).
+
+**Before you read a few-percent difference anywhere in this repository as a result, read
+[docs/10 §1.1](docs/10-results-and-roofline.md)**: on this stack C1 boot medians span 1.1 %, C8 2.5 %
+and **C4 7.4 %** — and production 11 is the case in point. Its load boot read C4 at 135.0 against the
+reference's 144.2, the single number that moved; the clean boot after a whole-cluster reboot read
+**145.9**. The six-round spread at C4 on this configuration is **11.1 %**, against 2.5 % at C1 and
+5.3 % at C8. The low reading is boot noise and it is printed rather than smoothed.
 
 Settings for every row: image `exl3-zeus:754421f`, TP=3 + expert parallel, **full-scope** EXL3
 weights (`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw), `kv-cache-dtype fp8` **and an fp8 draft cache**
@@ -141,16 +158,38 @@ same script, because that arm's documented run-to-run spread is about 7 %.
 | Free host RAM at rest / swap | 12.1 / 13.5 / 13.4 GiB · ~0.1 GiB | 12.3 / 13.5 / 13.5 · ~0.1 | rule: never below 4 GiB free `[measured-here]` |
 | Speed by category, C1 | code **61.7** · math **79.6** · JSON **72.8** · prose **29.1** tok/s | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 | acceptance 46 / 58 / 54 / **13 %** — every category +30–35 %, and prose is still where a k=7 draft is wasted `[measured-here]` |
 | KV pool at the 0.83 rung (**production 10**) | **5,619,834 tokens** | — | +8.7 % again, one line changed, no speed number outside its band; swap flat `[measured-here]` |
+| KV pool at the 0.87 rung (**production 11**) | **6,382,920 tokens** | — | **+12.1 %** against a same-session 0.83 reference, top of a ladder whose next rung is rejected `[measured-here]` |
 | Host memory at 0.83 under load | `MemAvailable` **8–10 GB** per node · `MemFree` **0.9–1.2 GiB** · swap ~0.1 GB, flat | 12–13 GB `MemAvailable` at 0.80 | the rule and why it still passes: see below `[measured-here]` |
+| Host memory at 0.87 under load (**production 11**) | `MemAvailable` **3.4 / 4.7 / 4.7 GiB** · swap traffic **0** | 8–10 GB at 0.83 | that headroom is the cost, and it is what 0.88 was declined over `[measured-here]` |
 
-**The memory rule, said plainly, because production 10 sits against it.** On a GB10 the GPU shares
-host memory, so free host RAM *is* the safety margin, and this page has used **2 GiB of `MemFree`** as
-a floor. At 0.83, `MemFree` is **below it** — 0.9–1.2 GiB, all of it reclaimable page cache. We took
-the rung anyway, and the number that justifies it is the one 0.85 was actually rejected on: **swap**.
-0.85 produced 1.6 GB of swap growth under load on the head node; 0.83 produces **none** — swap sits at
-~0.1 GB and stays flat through every round, and `MemAvailable`, which is the honest headroom figure,
-is 8–10 GB. **0.85 will not be attempted on this stack**, and the rung after 0.83 is a soak rather
-than another rung ([docs/11 §2.4](docs/11-open-issues.md), [docs/00 §11](docs/00-hardware-and-os.md)).
+**The memory rule, said plainly, because production 11 sits against it.** On a GB10 the GPU shares
+host memory, so the host's free share *is* the safety margin — but **`MemFree` is the wrong ruler for
+it**, because most of what the kernel holds at that moment is reclaimable page cache. This page used a
+2 GiB `MemFree` floor until 6 September and it has been replaced by two figures: **`MemAvailable`**,
+and **swap traffic under load** (`si`/`so` per second from `vmstat`, summed over the benchmark
+window). Swap *used* is a stock and sits at ~0.04 GiB at every rung including the failing one; it
+discriminates nothing.
+
+The ladder was then climbed rung by rung, in one session, against a same-session 0.83 reference
+([`results/memory/ladder-6sep.md`](results/memory/ladder-6sep.md)):
+
+| | 0.83 (prod 10) | 0.85 | **0.87 (prod 11)** | 0.88 | 0.90 |
+|---|---:|---:|---:|---:|---:|
+| KV pool | 5,674,931 | 6,016,528 | **6,363,636** | 6,542,699 | 6,870,523 |
+| Swap traffic under load | ~0 | **0** | **0** | 4 KiB | **si 143 MiB + so 1,519 MiB** |
+| `MemAvailable` min, head node | 8.35 GiB | 5.99 | **3.49** | 1.86 | 1.04 |
+| Speed | reference | in band | in band | in band | **in band** |
+| Verdict | — | pass | **shipped** | pass, thin | **rejected** |
+
+**Read the bottom two rows together.** At 0.90 every concurrency level is still inside its band while
+the head node pages 1.5 GB out and reads 143 MB back for 250 of 598 seconds — a ladder judged on
+tok/s would have taken it. What surfaces at the client is not a lower median but the arm's first
+prefill going **5.0 → 9.8 s**. And **0.88 passed and was not taken**: it leaves 1.86 GiB of
+`MemAvailable` and 2.59 GiB of page cache on the head node, which is the budget anything running
+beside the engine lives in; 0.87 leaves 3.49 GiB and gives up 2.8 % of pool for it. Every 1 % of the
+fraction costs about **1.2 GiB** of host headroom here
+([docs/11 §2.4](docs/11-open-issues.md), [docs/00 §11](docs/00-hardware-and-os.md),
+[docs/07 §6](docs/07-kv-and-draft-page.md)).
 
 **Production configuration 9 is a different checkpoint, and it is the largest single move this stack
 has made.** Every configuration from 1 to 8 served `scope: glm53_routed_experts_only` weights:
@@ -294,22 +333,24 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 
 The two-node track is a complete measured recipe of its own, not a cut-down of the above. Same
 harness, same protocol, same day; two nodes, TP=2, **expert parallelism off**, the same full-scope
-checkpoint, `gpu-memory-utilization` **0.85** (the three-node 0.83 rung is not transferable and the
-two-node ladder has never been derived), 6 September 2026 `[measured-here]`:
+checkpoint, `gpu-memory-utilization` **0.85** (the three-node rung is not transferable and the
+two-node ladder has never been derived — the three-node column is now **0.87**, so the memory row
+below understates the two-node share by a rung rather than overstating it), 6 September 2026
+`[measured-here]`:
 
-| | **TP=2 candidate** (2 nodes) | TP=3 production 10 (3 nodes) | two-node share |
+| | **TP=2 candidate** (2 nodes) | TP=3 production 11 (3 nodes) | two-node share |
 |---|---|---|---|
-| Single-stream decode (C1) | **58.5** tok/s aggregate (**62.6** per stream) | 70.5 (76.9) | 83 % / 81 % |
-| Aggregate at 8 concurrent streams (C8) | **155.8** tok/s | 194.0 | 80 % |
-| Prefill, fresh unseen ~8.4K prompts | **1,400** tok/s | 1,769 | 79 % |
-| KV pool at `max_model_len` 1,000,000 | **2,128,571** tokens — 2.1 concurrent 1M-token requests | 5,619,834 | 38 % |
-| TTFT, C1 / C8 | 0.407 / 1.077 s | 0.280 / 0.826 s | +45 % / +30 % worse |
-| Quality | correctness **10/10**, code exam **12/12** cold and warm, tool-call **8/8**, needle-lite **6/6**; MMLU sample **86.02 ±0.75** | 10/10 · 12/12; MMLU 86.47 ±0.74 | **equal** |
-| Cold boot, `docker run` → API ready | **272 s** (fast-load; the one-off dump boot that writes the sidecar is 998 s) | 251 s | — |
-| Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes, no reboot test yet | 315 s from power-on, reboot-tested | — |
+| Single-stream decode (C1) | **58.5** tok/s aggregate (**62.6** per stream) | 69.6 (74.7) | 84 % / 84 % |
+| Aggregate at 8 concurrent streams (C8) | **155.8** tok/s | 201.1 | 77 % |
+| Prefill, fresh unseen ~8.4K prompts | **1,400** tok/s | 1,760 | 80 % |
+| KV pool at `max_model_len` 1,000,000 | **2,128,571** tokens — 2.1 concurrent 1M-token requests | 6,382,920 | 33 % |
+| TTFT, C1 / C8 | 0.407 / 1.077 s | 0.278 / 0.806 s | +46 % / +34 % worse |
+| Quality | correctness **10/10**, code exam **12/12** cold and warm, tool-call **8/8**, needle-lite **6/6**; MMLU sample **86.02 ±0.75** | 10/10 · 12/12, tool-call 8/8, needle-lite 6/6; MMLU 86.47 ±0.74 | **equal** |
+| Cold boot, `docker run` → API ready | **272 s** (fast-load; the one-off dump boot that writes the sidecar is 998 s) | 271 s (dump boot 590 s) | — |
+| Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes, no reboot test yet | 312 s from power-on, reboot-tested twice | — |
 | Consumed memory per node | 84.8 GiB | 58.3–59.1 GiB | the whole story |
 
-**Two ranks are 80–83 % of the speed on 38 % of the pool, at identical quality.** What the third node
+**Two ranks are 77–84 % of the speed on a third of the pool, at identical quality.** What the third node
 buys is memory first and bandwidth second — a decode step here is weight-bandwidth bound, so a third
 rank cuts each rank's weight traffic by a third and the collective it costs in exchange does not
 repay it. See [docs/15](docs/15-tp2-track.md) §7.

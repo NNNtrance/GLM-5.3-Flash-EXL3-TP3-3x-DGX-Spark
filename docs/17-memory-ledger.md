@@ -173,7 +173,7 @@ every gate full cold and warm, a 969,468-token single request and eight concurre
 correct, and no speed level outside its band `[measured-here]`. Full tables, the bound's derivation,
 the four safety layers and what promotion costs:
 [`../results/memory/indexer-workspace-ab.md`](../results/memory/indexer-workspace-ab.md). The patch is
-[`../tracks/tp3/patches-optional/indexer-workspace/`](../tracks/tp3/patches-optional/indexer-workspace/)
+[`../tracks/tp3/patches/indexer-workspace/`](../tracks/tp3/patches/indexer-workspace/)
 and it is **not in production** ([11](11-open-issues.md) §2.28). The upstream half — vLLM sizing this
 from `max_model_len` without the `compress_ratio` division it applies elsewhere — is
 [HELP-WANTED](../HELP-WANTED.md) §9.

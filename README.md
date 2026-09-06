@@ -11,10 +11,11 @@
 > starts, not where it ends.
 
 > **Status: release.** Numbers, flags and patches are current as of **6 September 2026** and describe
-> **production configuration 11** — configuration 10 at `gpu-memory-utilization` 0.87 with the sm_12x
-> correctness set — which is what our three nodes serve, start at boot and were rebooted into as a
-> whole cluster with the gates read afterwards. Every analysis section is configuration 9's and
-> applies unchanged, because 9, 10 and 11 differ by a memory fraction and two guard patches. The stack is still moving and this file is overwritten in place when it does.
+> **production configuration 12** — configuration 11 at `gpu-memory-utilization` 0.88 with the
+> sparse-indexer K-gather workspace bound to its real ceiling — which is what our three nodes serve,
+> start at boot and were rebooted into as a whole cluster with the gates read afterwards. Every
+> analysis section is configuration 9's and applies unchanged, because 9 through 12 differ by a
+> memory fraction, two guard patches and one buffer size. The stack is still moving and this file is overwritten in place when it does.
 > Sections marked *open* in [docs/11-open-issues.md](docs/11-open-issues.md) are the honest edge of
 > what we know; [docs/11 §1](docs/11-open-issues.md) is what we published and then had to withdraw,
 > and [audit/](audit/README.md) §6 indexes it. **Read the retractions before you quote a number.**
@@ -34,7 +35,7 @@ units — so they cannot be mixed by accident.
 | **1 DGX Spark** | No serving recipe: 153.8 GiB of weights against 121.6 GiB of unified memory. Still yours — the image build, the GB10 kernel fixes, the measurement protocol, the model-free benches and the failure index. [docs/00 §1](docs/00-start-here.md) |
 | **4 DGX Spark** | Nothing measured `[not tested]`. The padding and expert-parallel arithmetic, the cabling problem and what we would want reported are in [HELP-WANTED.md](HELP-WANTED.md) §1 |
 
-### Three nodes — production configuration 11
+### Three nodes — production configuration 12
 
 Three DGX Spark nodes, one 4-bit EXL3 checkpoint, realistic prompts, temperature 0, reasoning effort
 `low`, 6 September 2026 `[measured-here]`. Speed is the pool of six sweep rounds over **two boots** of
@@ -42,13 +43,14 @@ this configuration:
 
 | | |
 |---|---|
-| Single-stream decode (C1) | **69.6** tok/s aggregate (**74.7** per stream) |
-| Aggregate at 8 concurrent streams (C8) | **201.1** tok/s |
-| Prefill, fresh unseen ~8K prompts | **1,760** tok/s |
-| KV pool at `max_model_len` 1,000,000 | **6,382,920** tokens at `gpu-memory-utilization 0.87` — about 6.4 concurrent 1M-token requests |
+| Single-stream decode (C1) | **69.7** tok/s aggregate (**75.6** per stream) |
+| Aggregate at 8 concurrent streams (C8) | **196.1** tok/s |
+| Prefill, fresh unseen ~8K prompts | **1,744** tok/s |
+| KV pool at `max_model_len` 1,000,000 | **7,041,322** tokens at `gpu-memory-utilization 0.88` — about 7.0 concurrent 1M-token requests |
 | Quality | correctness probe **10/10**, code exam **12/12** cold and warm; tool-call gate **8/8**; needle-lite **6/6** at 64K and 128K; MMLU sample (1,995 q) **86.47 ±0.74**, carried from production 9 `[not tested]` on this configuration |
-| Cold boot, `docker run` → API ready | **271 s** (the one-off dump boot that writes the sidecar is 590 s) |
-| **Boot from power-on**, all three nodes rebooted together, autostart unit enabled | `/health` 200 at **312 s** by the wall clock, timed from the reboot command ([systemd](systemd/README.md), [`results/boot/boot-ledger.md`](results/boot/boot-ledger.md)) |
+| Long-context stress | one **969,468-token** request correct in 569.6 s; **eight concurrent ~128K lanes** 8/8, 640,904 prompt tokens in 227.5 s |
+| Cold boot, `docker run` → API ready | **272 s** (the one-off dump boot that writes the sidecar is 590 s) |
+| **Boot from power-on**, all three nodes rebooted together, autostart unit enabled | `/health` 200 at **311 s** by the wall clock, timed from the reboot command ([systemd](systemd/README.md), [`results/boot/boot-ledger.md`](results/boot/boot-ledger.md)) |
 
 ### Two nodes — the TP=2 production candidate
 
@@ -118,8 +120,29 @@ speed number outside its band, gates full, swap flat under load.
 ([docs/11](docs/11-open-issues.md) §2.27) behind `HAREM_SM12_ITEMS=pdl,kpool`. Against a same-session
 production 10 reference: **KV pool +12.1 %**, C1 **+0.6 %**, C8 **+1.8 %**, prefill equal, every gate
 full cold and warm on both boots, tool-call 8/8, needle-lite 6/6, and swap traffic **exactly zero** on
-all three nodes on the clean boot. Everything below and every analysis page is production 9's and
-applies unchanged.
+all three nodes on the clean boot.
+
+**Production 12 is production 11 with exactly two changes**, again in one boot, later the same day:
+`gpu-memory-utilization` 0.87 → **0.88** — the rung the ladder below measured, passed and *declined* —
+and the **sparse-indexer K-gather workspace bound**
+([`tracks/tp3/patches/indexer-workspace/`](tracks/tp3/patches/indexer-workspace/)) behind
+`HAREM_INDEXER_WS_MODE=bound`, which takes a buffer that upstream sizes at `40 × max_model_len`
+entries from **5,036.40 MB to 513.00 MB**. Against a same-session production 11 reference:
+**KV pool +10.3 %** (7,041,322 tokens on the reboot boot, 7,170,798 on the best of three), C1
+**+0.08 %** and C8 **−0.08 %** pooled over six rounds and two boots — no measurable speed cost —
+every gate full cold and warm, tool-call 8/8, needle-lite 6/6, one **969,468-token** request correct,
+**eight concurrent ~128K lanes** 8/8, and swap *in* exactly zero in every sample on every node.
+Everything below and every analysis page is production 9's and applies unchanged.
+
+**What the second change had to survive to ship, and did.** A workspace bounded at 2.03× the
+scheduler's ceiling is only safe if the ceiling is right, so promotion was gated on the two cases that
+can actually crowd that buffer — a single ~1M-token prefill and eight long-context prefills at once —
+and on the buffer never growing after `lock_workspace()`. After both stress cases every rank still
+logs **exactly one** workspace resize, `0.00 → 513.00 MB`, and zero assertions: none of the patch's
+four safety layers fired. `VLLM_DEBUG_WORKSPACE=1` is carried in production for exactly this reason —
+it is upstream's own variable, it costs three INFO lines a boot and nothing in the hot path, and it is
+what makes that check readable from the engine's own log on every future boot rather than only in an
+A/B.
 
 **Two changes in one boot on purpose.** The memory fraction is not part of the fast-load manifest
 identity but the patch files are, so adding the patches forces a dump boot (590 s, ~53 GB per node)
@@ -130,7 +153,10 @@ that the rung can ride along on for free ([docs/08](docs/08-fast-boot.md) §4).
 and **C4 7.4 %** — and production 11 is the case in point. Its load boot read C4 at 135.0 against the
 reference's 144.2, the single number that moved; the clean boot after a whole-cluster reboot read
 **145.9**. The six-round spread at C4 on this configuration is **11.1 %**, against 2.5 % at C1 and
-5.3 % at C8. The low reading is boot noise and it is printed rather than smoothed.
+5.3 % at C8. The low reading is boot noise and it is printed rather than smoothed. Production 12
+repeated the lesson from the other side: its load boot read C6 at 167.8 and C4 at 140.8, its clean
+boot 177.4 and 151.6 — 5.7 % and 7.7 % apart — while C1 and C8 pooled to within a tenth of a percent
+of the reference. **C1 and C8 are the levels that carry a verdict on this stack.**
 
 Settings for every row: image `exl3-zeus:754421f`, TP=3 + expert parallel, **full-scope** EXL3
 weights (`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw), `kv-cache-dtype fp8` **and an fp8 draft cache**
@@ -158,9 +184,12 @@ same script, because that arm's documented run-to-run spread is about 7 %.
 | Free host RAM at rest / swap | 12.1 / 13.5 / 13.4 GiB · ~0.1 GiB | 12.3 / 13.5 / 13.5 · ~0.1 | rule: never below 4 GiB free `[measured-here]` |
 | Speed by category, C1 | code **61.7** · math **79.6** · JSON **72.8** · prose **29.1** tok/s | code 47.9 · math 59.0 · JSON 57.7 · prose 22.4 | acceptance 46 / 58 / 54 / **13 %** — every category +30–35 %, and prose is still where a k=7 draft is wasted `[measured-here]` |
 | KV pool at the 0.83 rung (**production 10**) | **5,619,834 tokens** | — | +8.7 % again, one line changed, no speed number outside its band; swap flat `[measured-here]` |
-| KV pool at the 0.87 rung (**production 11**) | **6,382,920 tokens** | — | **+12.1 %** against a same-session 0.83 reference, top of a ladder whose next rung is rejected `[measured-here]` |
+| KV pool at the 0.87 rung (**production 11**) | **6,382,920 tokens** | — | **+12.1 %** against a same-session 0.83 reference `[measured-here]` |
+| KV pool at 0.88 **with the indexer workspace bound** (**production 12**) | **7,041,322 tokens** | — | **+10.3 %** again, against a same-session 0.87 reference; three boots read 7,170,798 / 7,088,154 / 7,041,322 `[measured-here]` |
+| Consumed memory per node, production 12 | **54.3 – 54.6 GiB** | 58.3 – 59.1 (prod 9–11) | the 4.42 GiB the workspace bound releases, measured on the far side `[measured-here]` |
 | Host memory at 0.83 under load | `MemAvailable` **8–10 GB** per node · `MemFree` **0.9–1.2 GiB** · swap ~0.1 GB, flat | 12–13 GB `MemAvailable` at 0.80 | the rule and why it still passes: see below `[measured-here]` |
-| Host memory at 0.87 under load (**production 11**) | `MemAvailable` **3.4 / 4.7 / 4.7 GiB** · swap traffic **0** | 8–10 GB at 0.83 | that headroom is the cost, and it is what 0.88 was declined over `[measured-here]` |
+| Host memory at 0.87 under load (**production 11**) | `MemAvailable` **3.4 / 4.7 / 4.7 GiB** · swap traffic **0** | 8–10 GB at 0.83 | that headroom is the cost, and it is what 0.88 was first declined over `[measured-here]` |
+| Host memory at 0.88 under load (**production 12**) | `MemAvailable` **1.5 / 3.4 / 3.4 GiB** on the arm that also ran both stress cases, **3.2 / 4.5 / 4.5** on the clean boot · swap **in** exactly 0 | 3.4 / 4.7 / 4.7 at 0.87 | the cost of the rung, taken deliberately; swap *out* 1,340 / 5 / 10 KiB in 8 of 353 samples against the reference's own 10 / 5 / 5 `[measured-here]` |
 
 **The memory rule, said plainly, because production 11 sits against it.** On a GB10 the GPU shares
 host memory, so the host's free share *is* the safety margin — but **`MemFree` is the wrong ruler for
@@ -173,21 +202,29 @@ discriminates nothing.
 The ladder was then climbed rung by rung, in one session, against a same-session 0.83 reference
 ([`results/memory/ladder-6sep.md`](results/memory/ladder-6sep.md)):
 
-| | 0.83 (prod 10) | 0.85 | **0.87 (prod 11)** | 0.88 | 0.90 |
+| | 0.83 (prod 10) | 0.85 | 0.87 (prod 11) | **0.88 (prod 12)** | 0.90 |
 |---|---:|---:|---:|---:|---:|
-| KV pool | 5,674,931 | 6,016,528 | **6,363,636** | 6,542,699 | 6,870,523 |
+| KV pool | 5,674,931 | 6,016,528 | 6,363,636 | **6,542,699** | 6,870,523 |
 | Swap traffic under load | ~0 | **0** | **0** | 4 KiB | **si 143 MiB + so 1,519 MiB** |
-| `MemAvailable` min, head node | 8.35 GiB | 5.99 | **3.49** | 1.86 | 1.04 |
+| `MemAvailable` min, head node | 8.35 GiB | 5.99 | 3.49 | **1.86** | 1.04 |
 | Speed | reference | in band | in band | in band | **in band** |
-| Verdict | — | pass | **shipped** | pass, thin | **rejected** |
+| Verdict | — | pass | shipped (prod 11) | **pass, thin — shipped as prod 12** | **rejected** |
+
+The 0.88 column is the ladder's own arm, measured on the production-10 stack; production 12 later
+took that rung together with the workspace bound, and the pool it reads there is 7.04–7.17 M rather
+than 6.54 M because the two gains add **in absolute tokens**. 0.89 was never measured, and the
+workspace bound does not change that — it gives memory back on the GPU side, not the host side.
 
 **Read the bottom two rows together.** At 0.90 every concurrency level is still inside its band while
 the head node pages 1.5 GB out and reads 143 MB back for 250 of 598 seconds — a ladder judged on
 tok/s would have taken it. What surfaces at the client is not a lower median but the arm's first
-prefill going **5.0 → 9.8 s**. And **0.88 passed and was not taken**: it leaves 1.86 GiB of
+prefill going **5.0 → 9.8 s**. And **0.88 passed and was not taken on the day it was measured**: it leaves 1.86 GiB of
 `MemAvailable` and 2.59 GiB of page cache on the head node, which is the budget anything running
 beside the engine lives in; 0.87 leaves 3.49 GiB and gives up 2.8 % of pool for it. Every 1 % of the
-fraction costs about **1.2 GiB** of host headroom here
+fraction costs about **1.2 GiB** of host headroom here. It **was** taken, hours later, as production
+12 — a decision about what the cluster is for, not a new measurement: with 0.88 in production the
+budget for anything running beside the engine is about 2 GiB, and a profiling run has to stop the
+engine first
 ([docs/11 §2.4](docs/11-open-issues.md), [docs/00 §11](docs/00-hardware-and-os.md),
 [docs/07 §6](docs/07-kv-and-draft-page.md)).
 

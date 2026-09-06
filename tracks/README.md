@@ -32,7 +32,7 @@ tracks/
     patches/                     the in-container patch tree, 22 files
     patches-optional/sm12/       measured, free, NOT in production -- the one sm_12x fix
                                  that did not ride with production 11
-    patches-optional/indexer-workspace/
+    patches/indexer-workspace/
                                  measured, +10.25 % KV pool, NOT in production -- the
                                  sparse-indexer K-gather workspace bound
   tp2/

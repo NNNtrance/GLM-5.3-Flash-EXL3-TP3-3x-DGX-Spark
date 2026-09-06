@@ -3,8 +3,9 @@
 **A single buffer, sized by a constant that was never meant for this `max_model_len`, is the largest
 item in the "non-torch" residual — and giving it its real bound is worth +10.25 % of the KV pool at
 an unchanged memory fraction, with no measured speed cost.** Measured on 6 September 2026 as a
-three-arm A/B in one session `[measured-here]`. **This is a measured candidate — production
-configuration 12 — and it is not in production.** What promotion costs is §7.
+three-arm A/B in one session `[measured-here]`. **It shipped the same day as production
+configuration 12**, together with the `gpu-memory-utilization` 0.88 rung; the promotion boot's own
+numbers are §7.1.
 
 **Applies to: the three-node TP=3 track as measured here.** The patch is rank-agnostic and the
 arithmetic is not; at two ranks the same buffer is the same size, because it is sized from
@@ -331,7 +332,7 @@ speed inside its bands — is met on all three, and the mechanism the whole item
 rather than assumed: the buffer that gets locked really is the indexer's, its size really is
 5,036.40 MB, and no other consumer sets it.
 
-**It is not in production as of this commit**, and the reason is disk rather than doubt (§7).
+**It is in production as of production configuration 12** (6 September 2026); what promotion cost, and what the promotion boot measured that this A/B could only estimate, is §7.1.
 
 ## 5. What this cost
 
@@ -371,9 +372,9 @@ promoting it means a fresh sidecar of about **53 GB per node** — which does no
   swept. A smaller buffer is not obviously better — nothing measured says the extra 260 MB buys
   anything, and nothing says it does not.
 
-## 7. What promotion would take
+## 7. What promotion took
 
-Three steps, and the third is not a technical decision:
+Three steps, and the third was not a technical decision. All three were taken on 6 September:
 
 1. **The patch into the production tree**, with the prelude hook beside the other TP=3 patches. One
    half of it lands on `sparse_attn_indexer_kpool.py`, which the launcher bind-mounts **read-only**
@@ -383,18 +384,44 @@ Three steps, and the third is not a technical decision:
 2. **One environment line per node**, derived on that node with `sed`, never copied:
    `HAREM_INDEXER_WS_MODE=bound`.
 3. **A fresh fast-load sidecar.** Step 1 changes the manifest identity, so the existing production
-   sidecar is refused on the next `FASTLOAD_MODE=load` boot. A new one is **~53 GB per node**, and on
-   our cluster two nodes have 36 and 39 GB free — **an older sidecar has to be deleted first**, which
-   is an owner's decision, not a measurement's. The obvious candidate is the production-9/10 sidecar,
-   dead since production 11; the production-11 sidecar must stay, because it is what makes the
-   rollback a single move.
+   sidecar is refused on the next `FASTLOAD_MODE=load` boot. A new one is **~53 GB per node**, and two
+   of our nodes had 36 and 39 GB free — **an older sidecar had to be deleted first**, which is an
+   owner's decision, not a measurement's. The one deleted was the production-9/10 sidecar, dead since
+   production 11; the production-11 sidecar stayed, because it is what makes the rollback a single
+   move. The trade was one for one: free space went 36 / 39 / 117 GB → 88 / 91 / 169 after the
+   deletion → 36 / 39 / 117 again once the new sidecar was written.
+
+### 7.1 What the promotion boot measured that this A/B could only estimate
+
+Both arms above are **eager** boots, so the production KV figure was an `[estimate]` of ≈7.03 M and
+the gates had not been read on a fast-load boot at the shipped fraction. Production 12 settled both,
+against a same-session production-11 reference (running engine, no restart) `[measured-here]`:
+
+| | production 11 reference (0.87) | **production 12** (0.88 + bound) |
+|---|---:|---:|
+| KV pool | 6,385,674 | **7,170,798 / 7,088,154 / 7,041,322** over three boots — headline the reboot boot, **+10.3 %** |
+| Consumed per node | 58.3 – 59.1 GiB | **54.3 – 54.6 GiB** |
+| Locked workspace | 5,036.40 MB | **513.00 MB**, exactly one resize per rank |
+| C1 / C8, pooled over 6 rounds and 2 boots | 69.66 / 196.22 | **69.72 / 196.06** — +0.08 % and −0.08 % |
+| Prefill, fresh | 1,739 | 1,737 (load boot) · 1,750 (clean boot) |
+| Gates, cold and warm | 10/10 · 12/12 | 10/10 · 12/12 on both boots and on the systemd-started engine |
+| One ~1M-token request | not run | **1/1**, 969,468 tokens, 569.6 s |
+| Eight concurrent ~128K lanes | not run | **8/8**, 640,904 tokens, 227.5 s, 2,817 tok/s prefill |
+| Safety layers fired | — | **none**, before or after the stress |
+| Swap **in** under load | 0 | **0**, every sample, every node |
+
+**The prediction was checked in absolute tokens, and it held.** This A/B priced the bound at
++644,628 tokens and the ladder priced the 0.87 → 0.88 rung at +179,063; the sum predicts 7,209,365
+against a measured 7.04–7.17 M — inside the documented 6 % boot-to-boot pool spread. The two gains
+add in **tokens**, not in percent, because the second one lands on a base the first has already
+enlarged.
 
 **Rollback is one line either way.** Unset the knob and the patched tree behaves as upstream; point
 `ENV_FILE` at the production-11 environment file and the tree, overlay and sidecar all revert
 together.
 
 The patch, the knobs and the install note are in
-[`tracks/tp3/patches-optional/indexer-workspace/`](../../tracks/tp3/patches-optional/indexer-workspace/).
+[`tracks/tp3/patches/indexer-workspace/`](../../tracks/tp3/patches/indexer-workspace/).
 The mechanism in its ledger context is [docs/17](../../docs/17-memory-ledger.md) §2.5; the standing
 item is [docs/11](../../docs/11-open-issues.md) §2.28; the upstream half is
 [HELP-WANTED](../../HELP-WANTED.md) §9.

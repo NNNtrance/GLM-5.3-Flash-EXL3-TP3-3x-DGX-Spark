@@ -484,7 +484,7 @@ is the eight-anchor TP=2 form of the same patch, which [docs/13](docs/13-full-sc
 referenced as "not yet in repo" for a day; it is here now, and it is kept rather than superseded
 because it is the smaller, more readable statement of the same three loader layers.
 
-[`tracks/tp3/patches-optional/indexer-workspace/patch-indexer-workspace-tp3.py`](tracks/tp3/patches-optional/indexer-workspace/patch-indexer-workspace-tp3.py)
+[`tracks/tp3/patches/indexer-workspace/patch-indexer-workspace-tp3.py`](tracks/tp3/patches/indexer-workspace/patch-indexer-workspace-tp3.py)
 was added on 6 September. It is ours, the finding behind it is ours — read out of vLLM's own source
 and then confirmed with an upstream debug switch — and it is **not in production**: it bounds the
 sparse indexer's K-gather workspace, worth +10.25 % of KV pool

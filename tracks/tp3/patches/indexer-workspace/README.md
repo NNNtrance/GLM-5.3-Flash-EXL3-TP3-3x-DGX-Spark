@@ -1,13 +1,12 @@
-# `patches-optional/indexer-workspace` — the K-gather workspace bound
+# `patches/indexer-workspace` — the K-gather workspace bound
 
-**Measured, and not in production as of this commit.** One patch that sizes the sparse indexer's
-K-gather workspace from its real bound instead of `40 × max_model_len`, freeing **4.42 GiB per node**
-and growing the KV pool by **+10.25 %** at an unchanged memory fraction, with **no measured speed
-cost**. It is here rather than in [`../../patches/`](../../patches/) because promoting it costs a
-fresh fast-load sidecar and the disk for one has to be found first — see
-[Why it is not in the recipe](#why-it-is-not-in-the-recipe).
+**In production as of 6 September 2026 — production configuration 12.** One patch that sizes the
+sparse indexer's K-gather workspace from its real bound instead of `40 × max_model_len`, freeing
+**4.42 GiB per node** and growing the KV pool by **+10.25 %** at an unchanged memory fraction, with
+**no measured speed cost**. It moved from `patches-optional/` into the recipe when the disk for a
+fresh fast-load sidecar was found — see [What promotion cost](#what-promotion-cost).
 
-**Applies to: TP=3 as measured; the patch itself is rank-agnostic.** The buffer is sized from
+**Applies to: TP=3 as measured and shipped; the patch itself is rank-agnostic.** The buffer is sized from
 `max_model_len` alone, so a two-node stack reserves the same 4.92 GiB — where the pool is far
 scarcer, and therefore worth more `[not tested]`.
 
@@ -78,9 +77,9 @@ cannot write it. Pre-apply the patch to a **host-side copy** of the overlay dire
 `OVERLAY_DIR` at the copy; the prelude then reports "already patched" for that file and writes only
 `indexer.py` inside the container. Verify the copy with `diff -r` against the overlay it came from:
 exactly one file should differ, by exactly this patch's two hunks. This is the same pattern
-[`patch-kpool-init.py`](../../patches/patch-kpool-init.py) already needs, and it applies to **any**
+[`patch-kpool-init.py`](../patch-kpool-init.py) already needs, and it applies to **any**
 future patch that lands on an overlaid file
-([`../../patches/README.md`](../../patches/README.md)).
+([`../README.md`](../README.md)).
 
 ## The sidecar consequence: read this before you copy anything
 
@@ -98,22 +97,35 @@ node. There are two ways round it and we took the second:
 The A/B in `results/` used the second, because two of our three nodes did not have 53 GB free. **The
 memory fraction is not part of the identity**, so a rung change costs no dump boot — only files do.
 
-## Why it is not in the recipe
+## What promotion cost
 
-Not doubt: **disk, and an owner's decision**. Promotion means installing into the production tree,
-which forces a fresh sidecar (~53 GB per node) that does not fit until an older one is deleted. The
-measurement itself is unambiguous — pool +10.25 %, gates 10/10 and 12/12 cold and warm, tool-call
-8/8, needle-lite 6/6, one ~1M-token request and eight concurrent long-context lanes all correct,
-every speed level inside its band, and **none of the four safety layers fired**. Full tables:
-[`results/memory/indexer-workspace-ab.md`](../../../../results/memory/indexer-workspace-ab.md).
+**Disk, and an owner's decision** — never doubt about the measurement. Promotion installs the patch
+into the production tree, which invalidates the fast-load sidecar and forces a fresh one (~53 GB per
+node) that did not fit until an older sidecar was deleted. Both were settled on 6 September: an
+obsolete sidecar was deleted, one 590 s dump boot was taken, and the patch shipped as production
+configuration 12 together with the `gpu-memory-utilization` 0.88 rung.
 
-Two things a promoted arm still owes: the KV pool from a **fast-load** boot — both A/B arms were
-eager, and the production figure is an `[estimate]` until one is taken — and a re-read of the gates on
-that boot.
+**The two things the A/B still owed have been paid.**
+
+| What the A/B owed | What a production boot measured |
+|---|---|
+| the KV pool from a **fast-load** boot — both A/B arms were eager, so the production figure was an `[estimate]` of ≈7.03 M | **7,170,798 / 7,088,154 / 7,041,322** tokens over three boots — the estimate was low, and the headline is the reboot boot `[measured-here]` |
+| the gates re-read on that boot | correctness probe **10/10** and code exam **12/12** cold **and** warm on two boots and again on the systemd-started engine; tool-call **8/8**; needle-lite **6/6** `[measured-here]` |
+
+Promotion also re-ran the two stress cases at the higher fraction, where host memory is thinner: one
+**969,468-token** request correct in 569.6 s, and eight concurrent ~128K lanes 8/8 (640,904 prompt
+tokens, 227.5 s, 2,817 tok/s aggregate prefill). After both, every rank still logs **exactly one**
+workspace resize, `0.00 → 513.00 MB`, and zero assertions — none of the four safety layers fired.
+
+**`VLLM_DEBUG_WORKSPACE=1` is carried in production**, not just used in the A/B. It is upstream's own
+variable, it touches nothing in the hot path (`vllm/v1/worker/workspace.py` reads it only in `lock`,
+`unlock` and the resize branch), and it costs three INFO lines a boot. What it buys is that the
+independent check above — did the buffer *really* end up at 513 MB, and did it grow afterwards — is
+readable from the engine's own log on every future boot, instead of only inside an A/B.
 
 ## What the script guarantees
 
-The same contract as the production patch tree ([`../../patches/README.md`](../../patches/README.md)):
+The same contract as the production patch tree ([`../README.md`](../README.md)):
 
 - `--root <vllm package dir>`; `--check` verifies anchors and never writes.
 - Every anchor must occur **exactly once**. Anything else refuses loudly and returns non-zero. A

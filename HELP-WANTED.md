@@ -426,7 +426,7 @@ pool **6,289,256 → 6,933,884 tokens, +10.25 %**, with the gates full cold and 
 single request and eight concurrent long-context lanes all correct, and no speed level outside its
 band. Tables: [`results/memory/indexer-workspace-ab.md`](results/memory/indexer-workspace-ab.md).
 Our env-gated patch, which is a local workaround rather than a proposed fix, is
-[`tracks/tp3/patches-optional/indexer-workspace/`](tracks/tp3/patches-optional/indexer-workspace/).
+[`tracks/tp3/patches/indexer-workspace/`](tracks/tp3/patches/indexer-workspace/).
 
 **Three things we put in the thread that were not already in it**, and any of them can be argued
 with:

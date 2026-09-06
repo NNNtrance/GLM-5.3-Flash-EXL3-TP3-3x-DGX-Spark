@@ -1258,7 +1258,7 @@ promoted boot prints it.
 
 Full tables: [`../results/memory/indexer-workspace-ab.md`](../results/memory/indexer-workspace-ab.md).
 The patch and its knobs:
-[`../tracks/tp3/patches-optional/indexer-workspace/`](../tracks/tp3/patches-optional/indexer-workspace/).
+[`../tracks/tp3/patches/indexer-workspace/`](../tracks/tp3/patches/indexer-workspace/).
 The mechanism in its ledger context: [17](17-memory-ledger.md) §2.5. **The upstream half of it — a
 sizing constant that grows linearly with `max_model_len` and skips a division the sibling path
 applies — was reported upstream on 3 September, three days before we measured it, as part 2 of

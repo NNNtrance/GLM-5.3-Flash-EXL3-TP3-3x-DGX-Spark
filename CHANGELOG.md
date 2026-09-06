@@ -11,6 +11,67 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — Production configuration 12: the workspace bound shipped, and the rung we had declined
+
+**Production 12 is production 11 with exactly two changes, taken in one boot:**
+`gpu-memory-utilization` 0.87 → **0.88** and the sparse-indexer K-gather workspace bound
+(`HAREM_INDEXER_WS_MODE=bound`), which moves from `patches-optional/` into
+[`tracks/tp3/patches/indexer-workspace/`](tracks/tp3/patches/indexer-workspace/). Measured against a
+**same-session production-11 reference** — the same three-round battery on the running engine, no
+restart `[measured-here]`.
+
+**KV pool 6,385,674 → 7,041,322 tokens, +10.3 %**, and 7,170,798 on the best of three boots. Speed,
+pooled over six rounds and two boots the way configuration 11 was: **C1 +0.08 %, C8 −0.08 %**, C2
++2.40 %, C4 +3.38 %, C6 −0.46 % — every level inside its band and the two banded ones within a tenth
+of a percent. Prefill 1,739 → 1,737 and 1,750. Consumed memory per node **58.3–59.1 → 54.3–54.6 GiB**,
+which is the 4.42 GiB the patch releases, read off the far side.
+
+**The prediction was written down first and checked in absolute tokens.** The A/B priced the bound at
++644,628 tokens and the memory ladder priced the rung at +179,063; the sum predicts **7,209,365**
+against a measured 7.04–7.17 M, inside the documented 6 % boot-to-boot pool spread. The two gains add
+in tokens and **not** in percent, because the second lands on a base the first has already enlarged —
+which is why the headline is +10.3 % rather than the +13.4 % a percentage sum would promise.
+
+**What had to survive for it to ship.** A workspace bounded at 2.03× the scheduler's ceiling is only
+safe if the ceiling is right, so promotion was gated on the two cases that can crowd that buffer, and
+at the *higher* fraction where host memory is thinner: one **969,468-token** request, correct in
+569.6 s, and **eight concurrent ~128K lanes**, 8/8, 640,904 prompt tokens in 227.5 s. After both,
+every rank still logs **exactly one** workspace resize — `0.00 → 513.00 MB` — and zero assertions:
+none of the patch's four safety layers fired. Gates 10/10 and 12/12 cold **and** warm on both boots
+and again on the systemd-started engine; tool-call 8/8; needle-lite 6/6.
+
+**The memory criterion, which is the whole argument for 0.88.** Swap **in** was exactly zero in every
+sample on every node, in both windows. Swap *out* was 1,340 / 5 / 10 KiB on the arm that also ran the
+two stress cases — 8 of 353 samples, longest unbroken run 10 s — against the reference's own
+10 / 5 / 5, and 5 / 10 / 10 with swap **used** exactly 0.000 GiB on the clean boot. For scale, the
+rejected 0.90 rung was 1,519 MiB out **and 143 MiB back in**, 250 of 598 samples, 85 s unbroken.
+OOM-killer 0 on all three; the `NVRM ... NV_ERR_NO_MEMORY` lines in `dmesg` are the profiler's ceiling
+probe and appear on every boot at every fraction.
+
+**What it cost, and the line is not left empty.** `MemAvailable` under load falls to
+**1.5 / 3.4 / 3.4 GiB** on the stress arm (3.2 / 4.5 / 4.5 on a clean boot). That is the budget
+anything running *beside* the engine lives in, and at 0.88 it is about 2 GiB — a profiling run now has
+to stop the engine first. This is exactly the headroom the 6 September ladder declined 0.88 over; the
+decision changed, the measurement did not. Second, the indexer's own diagnostic margin goes from 20×
+the largest load the scheduler can produce to **2.03×** — against a startup refusal, two armed
+run-time guards and upstream's own post-lock assertion, none of which fired. Third, one 590 s dump
+boot and 53 GB per node, paid for by deleting the production-9/10 sidecar; the production-11 sidecar
+was kept, which is what makes the rollback a single `cp`.
+
+**`VLLM_DEBUG_WORKSPACE=1` is now carried in production**, not just in the A/B. Upstream's own
+variable, three INFO lines a boot, nothing in the hot path — and it is what makes "did the buffer
+really reach 513 MB, and did it grow afterwards" readable from the engine's own log on every future
+boot.
+
+**Boot from power-on, all three nodes rebooted together, nothing touched:** `/health` 200 at **311 s**
+against configuration 11's 312 s — unchanged. Units active and enabled on all three, fabric 4/4, gates
+read afterwards. Fast-load container boot **272 s** (weights 80 s); `systemctl start` 205 s.
+
+**Rollback** is `cp` of the production-11 environment file and a restart — its sidecar is still on
+disk — or, to disarm just the patch, deleting one word from `EXTRA_ENV`, which costs no boot at all.
+
+---
+
 ## 2026-09-06 — 4.92 GiB of dead buffer inside "non-torch": the indexer workspace, bounded, +10.25 % of KV pool
 
 **The 7.28 GiB "non-torch" line of [docs/17](docs/17-memory-ledger.md) had never been broken down, and
@@ -21,7 +82,7 @@ constant reserves **4.92 GiB**, during the profile run, locked for the life of t
 to the residual the profiler subtracts *before* it sizes the KV pool. It appears in no line an
 operator reads. New page:
 [`results/memory/indexer-workspace-ab.md`](results/memory/indexer-workspace-ab.md) `[measured-here]`;
-the patch is [`tracks/tp3/patches-optional/indexer-workspace/`](tracks/tp3/patches-optional/indexer-workspace/).
+the patch is [`tracks/tp3/patches/indexer-workspace/`](tracks/tp3/patches/indexer-workspace/).
 
 **The hypothesis was tested before the patch was.** `VLLM_DEBUG_WORKSPACE=1` is an upstream variable
 and needs no patch: the control arm printed **one** workspace resize per rank, grown by

@@ -121,6 +121,30 @@ if [ -n "${HAREM_SM12_ITEMS:-}" ]; then
   case ",${HAREM_SM12_ITEMS}," in *,kpool,*) run python3 "$TP3_DIR/patch-kpool-init.py" --root "$VLLM_PY" ;; esac
 fi
 
+# --- indexer K-gather workspace bound (6 September 2026, production 12) ------
+# Upstream sizes the sparse indexer's K-gather workspace as 40 * max_model_len
+# ENTRIES -- a constant chosen against DeepSeek-V3.2's 163840 context, where it
+# comes to 825 MB. At max_model_len = 1e6 that is 4.92 GiB, reserved during the
+# profile run, locked by lock_workspace() for the life of the engine and charged
+# to the residual the profiler subtracts before it sizes the KV pool. The buffer
+# only ever holds ONE indexer chunk's COMPRESSED context, so its real ceiling is
+# max_num_seqs * ceil((max_model_len + num_spec + 1) / index_kpool).
+# Measurements: results/memory/indexer-workspace-ab.md.
+#
+# The patch is applied UNCONDITIONALLY here and its BEHAVIOUR is env-gated,
+# default OFF:
+#   HAREM_INDEXER_WS_MODE unset / off / upstream  -> upstream sizing, byte for
+#       byte, guards L2+L3 disarmed (one environment read at import).
+#   HAREM_INDEXER_WS_MODE=bound                   -> real-bound sizing (512 MB)
+#       and the two run-time guards armed. This is production 12.
+# READ-ONLY OVERLAY, again: model_executor/layers/sparse_attn_indexer_kpool.py is
+# bind-mounted read-only from $OVERLAY_DIR -- the same file sm_12x item 2 lands
+# on -- so that half is pre-applied to the host-side overlay copy and the script
+# reports "already patched" for it here, writing only the image's own indexer.py.
+# Same fail-closed `run` wrapper as every arm above: a drifted anchor stops the
+# rank instead of serving a silently-wrong model.
+run python3 "$TP3_DIR/patch-indexer-workspace-tp3.py" --root "$VLLM_PY"
+
 # --- Full-scope EXL3 (5 September 2026) ------------------------------------------
 # One patch, three layers, one knob:
 #   S1  packed_modules_mapping on both glm5next model classes

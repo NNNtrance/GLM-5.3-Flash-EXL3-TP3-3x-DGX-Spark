@@ -116,8 +116,9 @@ NOTE: adding a file under the production patch tree changes the fast-load
 manifest identity (harem_fastload_id.file_identity() hashes every
 ``patch-*.py`` plus tp3-prelude.sh), so the first boot with this patch present
 cannot reuse the production sidecar.  Check ``df`` before you decide how to
-boot it: a second sidecar is ~53 GB per node, and two of our three nodes did
-not have room for one.  The README beside this file has the two ways round it.
+boot it: a second sidecar is ~53 GB per node.  Promoting this patch here cost
+one 590 s dump boot, and the disk for the new sidecar had to be found by
+deleting an older one first.
 
 Usage:  patch-indexer-workspace-tp3.py [--check]
                                        [--root /usr/local/lib/python3.12/dist-packages/vllm]

@@ -384,7 +384,59 @@ profile it, which sub-kernel or code path accounts for the gap.
 
 ---
 
-## 9. The open items already written up in docs/11
+## 9. An upstream issue we have measured and not filed: the indexer workspace grows with `max_model_len`
+
+**Effort: an hour to write it up, if you would rather file it than we would. Nothing to measure — it
+is measured** `[measured-here]`. This is the one item on this page that needs no hardware at all, and
+the one we are least well placed to carry, because it belongs in vLLM rather than here.
+
+**The finding.** `get_max_prefill_buffer_size()`
+(`vllm/v1/attention/backends/mla/indexer.py`) returns `max_model_len * 40` **entries** for the sparse
+indexer's K-gather workspace. Upstream's own comment gives the provenance: 40 was chosen against
+DeepSeek-V3.2's `max_model_len` of 163,840, where 40 × 163,840 × 132 B = 825 MB. The constant is
+linear in the context length and nothing else, so a long-context deployment pays it in full:
+`zai-org/GLM-5.3-Flash` at `max_model_len` 1,000,000 reserves **40,000,000 entries = 4.92 GiB**,
+during the profile run, locked for the life of the engine, and charged to the residual vLLM subtracts
+before it sizes the KV cache. **It is not visible in any line an operator reads** — not in
+`Model loading took`, not in the KV pool, only inside `consumed memory (weights + non-torch)`.
+
+**And there is a second half, which is the part that makes it a bug rather than a tuning constant.**
+The buffer holds one indexer chunk's **compressed** context: the chunker works in
+`seq_lens // compress_ratio`, and `compress_ratio == index_kpool` (4 for this model). The
+DeepSeek-V4 path divides the same function's result by `compress_ratio` at its call site
+(`vllm/models/deepseek_v4/attention.py`); the `glm5next` path does not. So the buffer is sized at
+four times the resolution of the unit that fills it, on top of a constant already 6.1× larger than
+the model it was tuned for. The exact ceiling is
+`max_num_seqs × ceil((max_model_len + num_spec + 1) / compress_ratio)` — **251.8 MB** at our
+settings, against 4.92 GiB reserved.
+
+**What we measured, so an issue does not have to start from scratch** — three-node TP=3, one A/B in
+one session, everything else held: bounding the buffer to 512 MB (2.03× that ceiling) moves the KV
+pool **6,289,256 → 6,933,884 tokens, +10.25 %**, with the gates full cold and warm, a 969,468-token
+single request and eight concurrent long-context lanes all correct, and no speed level outside its
+band. Tables: [`results/memory/indexer-workspace-ab.md`](results/memory/indexer-workspace-ab.md).
+Our env-gated patch, which is a local workaround rather than a proposed fix, is
+[`tracks/tp3/patches-optional/indexer-workspace/`](tracks/tp3/patches-optional/indexer-workspace/).
+
+**What an upstream fix probably looks like**, and we say "probably" because we have not written it:
+divide by `compress_ratio` in the function rather than at one call site, and bound the result by
+`max_num_seqs × per-request` instead of leaving it linear in `max_model_len`. Both consumers take the
+value from the same function, so it is one change. The risk to weigh is that a smaller buffer makes
+the splitter emit more chunks — it does not make it emit wrong ones — and in our six-geometry check
+the chunk list came out **identical**, because the constraint never bound at either size.
+
+**What we cannot do here.** We run one model on one part with one set of patches; an upstream issue
+wants the DeepSeek paths checked too, and a maintainer's view on whether the 40 is protecting
+something we have not found. The comment calls it "a magic number for controlling the prefill buffer
+size" and does not say what it is holding at bay, so the honest position is that it may be a real
+constraint on a path we do not run. **If you
+file it, we will link it from here and from
+[docs/11](docs/11-open-issues.md) §2.28 rather than filing a second one.** If you would rather we
+filed it, say so in an issue and we will.
+
+---
+
+## 10. The open items already written up in docs/11
 
 `docs/11-open-issues.md` §2 is "open, with a known next step", §3 is "never run", and
 `CONTRIBUTING.md` lists twelve with their reasons. Rather than repeat them, the four that would move

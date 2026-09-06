@@ -6,7 +6,8 @@ two-node column beside it, and the KDA state finding is worse at two ranks than 
 Every number below is read from a boot log, `/proc/meminfo`, `nvidia-smi` or the image's own source.
 Nothing here was measured by starting or stopping anything: the engine was up and serving throughout,
 no container was `exec`'d into, no configuration file was changed and no lock was taken. 6 September
-2026 `[measured-here]`.
+2026 `[measured-here]`. **One section is different and says so: §2.5** was added after a two-arm A/B
+booted later the same day, and its numbers come from those boots rather than from this ledger's.
 
 **Three lines, before the tables.**
 
@@ -19,6 +20,9 @@ no container was `exec`'d into, no configuration file was changed and no lock wa
   side about 13, and a fixed driver reserve of ~3.5. **Inside the KV pool the largest single item is
   the MLA latent at 89.5 %, and the largest *avoidable* one is the KDA state's speculation slots** —
   36 blocks per request, 9.9 % of the divisor that sets the pool size.
+- **Inside the 7.28 GiB "non-torch" line the largest single item is one buffer: the sparse indexer's
+  K-gather workspace, 4.92 GiB, sized by upstream from `max_model_len` and reserved for the life of
+  the engine.** It has since been measured and bounded — §2.5.
 
 ---
 
@@ -53,7 +57,7 @@ Rank 0, engine up and idle. Sums to `MemTotal` = 121.63 GiB (127,535,272 kB).
 | **Engine CUDA allocation (unified memory)** | **99.06** | `nvidia-smi --query-compute-apps` → 101,434 MiB |
 | — model weights (target ≈49.6 + DFlash2 draft ≈2.0) | 51.62 | `[model_runner.py:374] Model loading took 51.62 GiB` |
 | — KV pool (2,058 blocks × 20,934,400 B) | 40.12 | `[gpu_worker.py:564] Available KV cache memory: 40.12 GiB` (binding rank) |
-| — non-torch: CUDA context, NCCL and mesh plugin buffers, cuBLAS and FlashInfer workspaces, EXL3 tune buffers | 7.28 | 58.9 consumed − 51.62 weights |
+| — non-torch: **the sparse indexer's K-gather workspace 4.92**, driver side 0.42, FlashInfer workspaces 0.4–0.8, indexer metadata builders ~0.15, allocator balance (§2.5) | 7.28 | 58.9 consumed − 51.62 weights |
 | — CUDA graph pool | **0.00** | `... and 0.0 GiB for CUDAGraph memory` |
 | — residual inside the CUDA figure | +0.04 | the four rows above against 99.06 |
 | **Host anonymous memory** (API server + EngineCore + worker) | 5.60 | `AnonPages` |
@@ -133,6 +137,51 @@ ceiling scan whose highest observed free was 107.43 of 121.63; today the three r
 `gpu-memory-utilization` is no longer the driver but **the host's share at run time** — worker RSS
 4.71 GiB per rank, API server 1.81, EngineCore 1.56, plus page cache. `Mlocked` is only 24 MiB, so
 there is no large pinned buffer hiding anywhere.
+
+### 2.5 What "non-torch" actually is, and the 4.92 GiB buffer inside it
+
+**"Non-torch" is not a category anything reports. It is a residual between two rulers**, and this page
+originally described it by listing what plausibly lives there — "CUDA context, NCCL and mesh plugin
+buffers, cuBLAS and FlashInfer workspaces, EXL3 tune buffers". That list was **wrong by omission**:
+its largest item was not on it.
+
+`consumed` is a **`MemAvailable` difference** (`total_consumed`, `vllm/utils/mem_utils.py`), while
+`Model loading took` is torch's **allocated** delta over the weight load. Subtracting one from the
+other leaves every device allocation made during the profile window that is still live at the end of
+it and is not weights. One allocation dominates:
+
+| Item | GiB | How it is known |
+|---|---:|---|
+| **Sparse indexer K-gather workspace**, `40 × max_model_len` entries × 132 B | **4.92** | **measured**: the `WorkspaceManager` logs `0.00 MB -> 5036.40 MB` on all three ranks, grown by `sparse_attn_indexer_kpool.py`, and it is the **only** resize event `[measured-here]` |
+| Driver side: CUDA context 194 MiB + NCCL and mesh plugin at 8 channels 221 MiB + cuBLAS 11 MiB | 0.42 | model-free measurement, engine down |
+| FlashInfer workspace buffers (the environment default plus the MLA path's own) | 0.4–0.8 | source `[estimate]` |
+| Indexer metadata-builder buffers, allocated after the load block | ~0.15 | source `[estimate]` |
+| EXL3 / `cuda-exl3` module and tune buffers | **0.00** | model-free measurement: `nvidia-smi` moves by 0 MiB |
+| CUDA-graph capture pool | **0.00** | `cudagraph_mode=NONE` here, §2.3 |
+| Allocator cache and fragmentation (`reserved − allocated` after `empty_cache`) | the balance | not separated |
+
+**The 4.92 GiB is the price of `max_model_len` 1,000,000, and it is charged twice.** The context
+length sets the KV divisor (§3.2) *and* this buffer, which upstream sizes as `max_model_len * 40`
+entries — a constant chosen against DeepSeek-V3.2's 163,840-token context, where it comes to 825 MB.
+The buffer only ever holds one indexer chunk's **compressed** context, so its exact ceiling here is
+`max_num_seqs × ceil((max_model_len + num_spec + 1) / index_kpool)` = 251.8 MB, and upstream's own
+DeepSeek-V4 call site divides by that `compress_ratio` where the glm5next path does not.
+
+**Bounding it has been measured, and it is the largest give-back this page has found**: workspace
+5,036.40 → 513.00 MB, KV pool **6,289,256 → 6,933,884 tokens, +10.25 %** at the same memory fraction,
+every gate full cold and warm, a 969,468-token single request and eight concurrent long-context lanes
+correct, and no speed level outside its band `[measured-here]`. Full tables, the bound's derivation,
+the four safety layers and what promotion costs:
+[`../results/memory/indexer-workspace-ab.md`](../results/memory/indexer-workspace-ab.md). The patch is
+[`../tracks/tp3/patches-optional/indexer-workspace/`](../tracks/tp3/patches-optional/indexer-workspace/)
+and it is **not in production** ([11](11-open-issues.md) §2.28). The upstream half — vLLM sizing this
+from `max_model_len` without the `compress_ratio` division it applies elsewhere — is
+[HELP-WANTED](../HELP-WANTED.md) §9.
+
+**Note what this does and does not move.** It lowers `non_kv_cache_memory`, so the freed memory goes
+straight into the pool and **`MemAvailable` does not improve** — it is not headroom, and it does not
+change the rung where 0.90 failed. It **stacks with** §5's `gpu-memory-utilization` row rather than
+competing with it: the ladder raises `requested`, this lowers what is subtracted from it.
 
 ---
 
@@ -307,6 +356,16 @@ one real target rather than one of two.
 | 13 | The "14.2 GiB driver" | **about 10 GiB of it was never there** | §2.4 | Not a lever — a **ruler correction**. The ceiling is now the host share, not the driver |
 | 14 | Host RSS: worker 4.71 GiB/rank + API server 1.81 + EngineCore 1.56 | not measured | `ps -o rss`; `docker stats` reads 7.75 / 6.54 / 6.52 GiB per node | **Open.** RSS at profile time affects the pool; RSS afterwards does not |
 
+**A fifteenth candidate is not in this table, because it is not in this arithmetic — and it is the
+one that has since been measured.** Every row above changes `num_blocks` or `blocks_per_request`
+inside the pool; the sparse indexer's K-gather workspace changes what is **subtracted before the pool
+is sized** (§2.5). Bounding it was measured at **+10.25 % of pool** on a same-session A/B — at
+`gpu-memory-utilization` 0.87 rather than this page's 0.83 boot, so the percentage is not comparable
+row-for-row with the table above, but the mechanism is additive to every row in it
+`[measured-here]`. It is larger than anything here except a KDA slot fix, it has none of that fix's
+correctness risk, and it is not in production:
+[`../results/memory/indexer-workspace-ab.md`](../results/memory/indexer-workspace-ab.md).
+
 ### 5.3 ReplaySSM: what a compact rollback would actually return, and why it is not here
 
 A third-party vLLM patch (`vllm-replayssm-spec.patch`, by `tpurtell`, Apache-2.0) lifts upstream's own
@@ -464,9 +523,11 @@ figure reads about 6.7 % low and must never be quoted as a result ([09](09-measu
   the same band in two independent states, so it is recorded as the driver's fixed reservation, but
   what is inside it — GPU page tables, a firmware carve-out, the module's own reservation — was **not
   measured**.
-- **The non-torch 7.28–7.55 GiB was not broken down** into CUDA context, NCCL and mesh plugin buffers,
-  cuBLAS and FlashInfer workspaces and EXL3 tune buffers. `Mlocked` at 24 MiB rules out a large
-  pinned buffer, and that is all we know.
+- **The non-torch 7.28–7.55 GiB is now broken down as far as §2.5 goes, and no further.** Its largest
+  item is measured — the indexer's 4.92 GiB K-gather workspace — and the driver side's 0.42 GiB is
+  measured. The FlashInfer workspaces (0.4–0.8) and the metadata builders (~0.15) are read off the
+  source rather than measured, and **the allocator's own cache and fragmentation is still only the
+  balance of a subtraction**. `Mlocked` at 24 MiB rules out a large pinned buffer.
 - **The KDA state's byte-level shape is derived, not read from the weights.** 1,610,752 B comes from
   `kda_state_shape` and the logged 5.79 % padding agrees with it; the TP=2 ↔ TP=3 scaling fits "a
   constant part plus ≈66,560 B per head". Confirming it properly means reading the model file.
@@ -474,5 +535,6 @@ figure reads about 6.7 % low and must never be quoted as a result ([09](09-measu
   **load** boot on a settled host, never from a dump boot ([09](09-measurement-protocol.md) §11.1).
 - **The two boots in §1 do not reconcile**, and the record cannot settle it because the
   production-10 container log was discarded.
-- **No engine time was spent on any of this.** Every give-back in §5 is arithmetic or a code reading;
-  none of it has been booted.
+- **No engine time was spent on any of §5.** Every give-back in that section is arithmetic or a code
+  reading and none of it has been booted. §2.5 is the exception on this page and it is marked as
+  such: that one was measured, in its own window, with its own control arm.

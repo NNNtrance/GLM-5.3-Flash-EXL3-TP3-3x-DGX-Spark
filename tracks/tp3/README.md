@@ -19,6 +19,7 @@ Two nodes instead of three: [tracks/tp2](../tp2/) and [docs/15](../../docs/15-tp
 | [`env.tp3.example`](env.tp3.example) | The routed-experts-only template — production configurations 1 to 8, and the rollback |
 | [`patches/`](patches/) | The in-container patch tree for the full-scope checkpoint: the ten-anchor loader patch, the image gate, the sidecar generator, the sm_12x correctness set, the prelude. [`patches/README.md`](patches/README.md) is the inventory |
 | [`patches-optional/sm12/`](patches-optional/sm12/) | **Not part of the recipe** — one file. The sm_12x correctness set moved out of here into `patches/` with production 11; what is left is item 4, whose effect could not be measured from the client in either direction. The sidecar warning that copying anything into the production tree costs a dump boot lives here too |
+| [`patches-optional/indexer-workspace/`](patches-optional/indexer-workspace/) | **Not part of the recipe — measured, and held on disk rather than on doubt.** One patch that bounds the sparse indexer's K-gather workspace from 4.92 GiB to 512 MB: **KV pool +10.25 %** at the same memory fraction, gates full, stress clean, no measured speed cost. Promoting it forces a fresh ~53 GB-per-node sidecar ([`results/memory/indexer-workspace-ab.md`](../../results/memory/indexer-workspace-ab.md)) |
 | [`harem-exl3.service`](harem-exl3.service) | The autostart unit, installed and `enabled` on all three of our nodes |
 | [`motor-onkosul-exl3.sh`](motor-onkosul-exl3.sh) | Its preflight: seven checks, at most ten minutes of waiting |
 

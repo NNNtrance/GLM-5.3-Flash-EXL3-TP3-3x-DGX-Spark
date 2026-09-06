@@ -484,6 +484,14 @@ is the eight-anchor TP=2 form of the same patch, which [docs/13](docs/13-full-sc
 referenced as "not yet in repo" for a day; it is here now, and it is kept rather than superseded
 because it is the smaller, more readable statement of the same three loader layers.
 
+[`tracks/tp3/patches-optional/indexer-workspace/patch-indexer-workspace-tp3.py`](tracks/tp3/patches-optional/indexer-workspace/patch-indexer-workspace-tp3.py)
+was added on 6 September. It is ours, the finding behind it is ours — read out of vLLM's own source
+and then confirmed with an upstream debug switch — and it is **not in production**: it bounds the
+sparse indexer's K-gather workspace, worth +10.25 % of KV pool
+([`results/memory/indexer-workspace-ab.md`](results/memory/indexer-workspace-ab.md)). The defect it
+works around belongs upstream rather than here, and we have not filed it
+([HELP-WANTED](HELP-WANTED.md) §9).
+
 The published copies are **scrubbed** — internal paths in comments replaced by references to these
 docs — so their `sha256` does not match the ones our nodes' manifests record. That only matters
 because the manifest hashes them: you will dump your own sidecar against your own copies.

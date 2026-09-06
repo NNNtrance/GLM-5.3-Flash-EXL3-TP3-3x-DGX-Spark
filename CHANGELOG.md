@@ -11,6 +11,50 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — 4.92 GiB of dead buffer inside "non-torch": the indexer workspace, bounded, +10.25 % of KV pool
+
+**The 7.28 GiB "non-torch" line of [docs/17](docs/17-memory-ledger.md) had never been broken down, and
+the largest thing inside it was a single buffer nothing reports.** vLLM sizes the sparse indexer's
+K-gather workspace as `40 × max_model_len` **entries** — a constant chosen upstream against
+DeepSeek-V3.2's 163,840-token context, where it comes to 825 MB. At `max_model_len` 1,000,000 the same
+constant reserves **4.92 GiB**, during the profile run, locked for the life of the engine, and charged
+to the residual the profiler subtracts *before* it sizes the KV pool. It appears in no line an
+operator reads. New page:
+[`results/memory/indexer-workspace-ab.md`](results/memory/indexer-workspace-ab.md) `[measured-here]`;
+the patch is [`tracks/tp3/patches-optional/indexer-workspace/`](tracks/tp3/patches-optional/indexer-workspace/).
+
+**The hypothesis was tested before the patch was.** `VLLM_DEBUG_WORKSPACE=1` is an upstream variable
+and needs no patch: the control arm printed **one** workspace resize per rank, grown by
+`sparse_attn_indexer_kpool.py`, at exactly the **5,036.40 MB** the code reading had predicted. No
+other consumer sets that buffer, so the gain was not capped by somebody else's requirement — which was
+the most likely way for the whole item to be worth nothing.
+
+**Bounded to 512 MB — 2.03× the exact ceiling — on a same-session A/B at production 11's 0.87, one
+line between the arms:** locked workspace 5,036.40 → **513.00 MB**, KV pool **6,289,256 → 6,933,884
+tokens, +10.25 %**; C1 69.69 → 70.69 and C8 199.76 → 196.81 aggregate, every level inside its band;
+gates 10/10 and 12/12 cold **and** warm on both arms, tool-call 8/8, needle-lite 6/6; one
+**969,468-token** request correct in 572.4 s; **eight concurrent long-context lanes**, 640,904 prompt
+tokens, every lane's needle correct; swap 0.000 GiB and **none of the four safety layers fired**.
+
+**What it cost, and the line is not left empty.** Diagnostic margin: the indexer had 20× the largest
+load the scheduler can produce and now has 2.03×, against a startup refusal, two armed run-time
+assertions and upstream's own locked-workspace assertion. Speed: nothing measurable, looked for at
+five concurrency levels, in fresh prefill and in TTFT. Host headroom: **nothing, in either direction**
+— the freed memory goes straight into the pool, so `MemAvailable` is unchanged and this is not a lever
+on the rung where 0.90 failed. It stacks with the ladder rather than competing with it.
+
+**It is a candidate, not a configuration.** Installing it into the production tree changes the
+fast-load manifest identity and forces a fresh ~53 GB-per-node sidecar, which does not fit until an
+older one is deleted — an owner's decision. Both A/B arms therefore ran from a copy of the tree with
+fast-load off, which is the item's one open caveat: the production pool figure with fast-load restored
+is an `[estimate]` until a promoted boot prints it. Narrative:
+[docs/11](docs/11-open-issues.md) §2.28; ledger context: [docs/17](docs/17-memory-ledger.md) §2.5.
+**The upstream half — a sizing constant linear in `max_model_len` that skips the `compress_ratio`
+division the DeepSeek-V4 call site applies — is not filed anywhere and is now
+[HELP-WANTED](HELP-WANTED.md) §9.**
+
+---
+
 ## 2026-09-06 — the MLA-prefill ceiling, falsified on our own hardware: the kernel author's correction holds, tighter than on his card
 
 **A prediction from someone else's issue thread, run on our own GB10 the same day it was made.** The

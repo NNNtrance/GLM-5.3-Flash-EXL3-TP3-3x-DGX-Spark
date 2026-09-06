@@ -30,7 +30,11 @@ tracks/
     harem-exl3.service           the autostart unit
     motor-onkosul-exl3.sh        its preflight
     patches/                     the in-container patch tree, 22 files
-    patches-optional/sm12/       measured, free, NOT in production -- three sm_12x fixes
+    patches-optional/sm12/       measured, free, NOT in production -- the one sm_12x fix
+                                 that did not ride with production 11
+    patches-optional/indexer-workspace/
+                                 measured, +10.25 % KV pool, NOT in production -- the
+                                 sparse-indexer K-gather workspace bound
   tp2/
     README.md                    what this track is, its settings and its numbers
     env.tp2-full.example         the two-node production candidate

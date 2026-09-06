@@ -1209,6 +1209,60 @@ bind-mounted **read-only** over the file two of these patches target, so those t
 to a host-side copy of the overlay instead of by the prelude. That exception applies to any future
 patch that lands on an overlaid file.
 
+### 2.28 The sparse indexer's K-gather workspace — opened, measured the same day, and waiting on disk
+
+**Open as a decision, closed as a question** `[measured-here]`. The 7.28 GiB "non-torch" line of
+[17](17-memory-ledger.md) had never been broken down, and the largest thing inside it turned out to be
+a single buffer nothing reports: vLLM sizes the sparse indexer's K-gather workspace as
+`40 × max_model_len` **entries**, a constant chosen upstream against DeepSeek-V3.2's 163,840-token
+context where it comes to 825 MB. At our `max_model_len` of 1,000,000 the same constant reserves
+40,000,000 entries × 132 B = **4.92 GiB**, allocated during the profile run, locked for the life of
+the engine, and — because it is neither weights nor KV — subtracted from the budget before the KV
+pool is sized.
+
+**The buffer holds one indexer chunk's compressed context and nothing else.** Its exact ceiling here
+is `max_num_seqs × ceil((max_model_len + num_spec + 1) / index_kpool)` = 2,000,016 entries =
+**251.8 MB**, and upstream's own DeepSeek-V4 call site divides by that `compress_ratio` where the
+glm5next path does not. Bounded to 512 MB — 2.03× the ceiling, 16.3× the one-request correctness
+floor — on a same-session A/B at the production-11 memory fraction:
+
+| | control (knob off) | patched (`HAREM_INDEXER_WS_MODE=bound`) |
+|---|---:|---:|
+| Locked workspace, all three ranks | 5,036.40 MB | **513.00 MB** |
+| **KV pool** | 6,289,256 | **6,933,884 (+10.25 %)** |
+| C1 / C8 aggregate tok/s | 69.69 / 199.76 | 70.69 / **196.81** — both in band |
+| Gates cold · warm, tool-call, needle-lite | 10/10 · 12/12, 8/8, 6/6 | 10/10 · 12/12, 8/8, 6/6 |
+| One 969,468-token request · eight concurrent long-context lanes | not run | **PASS · 8/8 PASS** |
+| Safety layers fired | — | **none** |
+
+**The hypothesis was tested before the patch was, which is the part worth copying.** An upstream
+environment variable, `VLLM_DEBUG_WORKSPACE=1`, prints every workspace resize with its caller. The
+control arm showed **one** resize event on each rank, grown by `sparse_attn_indexer_kpool.py`, at
+exactly the 5,036.40 MB the code reading predicted — so the gain was not capped by some other
+consumer, which was the most likely way for the whole item to be worth nothing.
+
+**What it cost.** Diagnostic margin: 20× the largest load the scheduler can produce, down to 2.03×,
+against four layers that turn an under-size into a loud failure rather than a silent out-of-bounds
+device write — one of them upstream's own locked-workspace assertion. Speed: nothing measurable, and
+it was looked for at five concurrency levels, in fresh prefill and in TTFT. Host headroom: nothing,
+in either direction — the freed memory goes straight into the pool, so `MemAvailable` is unchanged
+and this is **not** a lever on the rung where 0.90 failed (§2.4). It stacks with that ladder.
+
+**Why it is not in production, and it is not doubt.** Installing it into the production tree changes
+the fast-load manifest identity, so it forces a fresh sidecar of about **53 GB per node** — and two of
+our three nodes have 36 and 39 GB free. An older sidecar has to be deleted first, which is the stack
+owner's decision rather than a measurement's. The A/B itself was run from a **copy** of the tree with
+fast-load off for exactly that reason, which is also the item's one open caveat: both arms are eager
+boots, so the production pool figure with fast-load restored is an `[estimate]` (≈7.03M) until a
+promoted boot prints it.
+
+Full tables: [`../results/memory/indexer-workspace-ab.md`](../results/memory/indexer-workspace-ab.md).
+The patch and its knobs:
+[`../tracks/tp3/patches-optional/indexer-workspace/`](../tracks/tp3/patches-optional/indexer-workspace/).
+The mechanism in its ledger context: [17](17-memory-ledger.md) §2.5. **The upstream half of it — a
+sizing constant that grows linearly with `max_model_len` and skips a division the sibling path
+applies — is not filed anywhere yet and is [HELP-WANTED](../HELP-WANTED.md) §9.**
+
 ---
 
 ## 3. Never run

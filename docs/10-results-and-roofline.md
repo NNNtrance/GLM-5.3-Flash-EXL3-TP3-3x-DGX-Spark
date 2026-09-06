@@ -1124,7 +1124,7 @@ argued about (§5.2, [11](11-open-issues.md) §2.5) `[measured-here]`.
 ## 7. What we did not measure
 
 - **Anything at max reasoning effort** `[not tested]`. See [09](09-measurement-protocol.md) §7.
-- **MMLU at TP=3** `[not tested]` — the sample was run at TP=2.
+- **MMLU at TP=3** — run since 5 September on the production checkpoint: **86.47 ±0.74** on the 1,995-question sample (§1, §3); the earlier 86.4 ±0.7 figure was a TP=2 reading. The **full** 14,042-question MMLU at TP=3 is still not run (deferred, [results/gates/quality-battery-production-12.md](../results/gates/quality-battery-production-12.md)).
 - ~~**IFEval, GSM8K, tool-eval-bench**~~ **Done on 6–7 September** `[measured-here]` — §3.1 and
   [`../results/gates/quality-battery-production-12.md`](../results/gates/quality-battery-production-12.md).
   Still missing: **needle-in-a-haystack at 1M** and the **full MMLU**, both staged in that battery and

@@ -1334,35 +1334,95 @@ draft KV) read the same single-stream tok/s as its graphs-off successor, consist
 
 **What it costs.** The graph pool comes out of the KV budget. The two-node arrangement of this image
 charges **1.10 GiB** per rank for it `[measured-here]`; the memory profiler's estimator reserves up to
-**2.64 GiB** (its 0.85 → 0.8283 equivalent on that boot). At three ranks that is **−2 to −5 % of the
-pool** `[estimate]` — never measured at TP=3, because no TP=3 boot with graphs on exists since the
-fp8 draft cache. The one env-only way to get graphs back today is to drop `HAREM_DRAFT_KV_DTYPE=fp8`
-(drafter → FlashAttention → `UNIFORM_BATCH`): −4.5 % of pool for the bf16 cache, −6.5 to −9.5 % with
-the graph pool on top.
+**2.64 GiB** (its 0.85 → 0.8283 equivalent on that boot). At three ranks that predicted **−2 to −5 %
+of the pool** `[estimate]`. **Both figures are now superseded by a three-rank measurement below**:
+the capture charges 0.25–0.27 GiB per rank, the total price is −3.85 %, and the mechanism is the
+activation reservation rather than the pool. The one env-only way to get graphs back today is to drop
+`HAREM_DRAFT_KV_DTYPE=fp8` (drafter → FlashAttention → `UNIFORM_BATCH`): predicted −4.5 % of pool for
+the bf16 cache and −6.5 to −9.5 % with the graph pool on top, **measured −7.67 %**.
 
 | route | feasible | needs | risk | price |
 |---|---|---|---|---|
 | `cudagraph_mode=FULL_DECODE_ONLY` | **no** — `decode_mode()` is `FULL`, same gate | — | — | — |
 | `cudagraph_mode=PIECEWISE` | no | — | #53030: every draft silently rejected | — |
-| patch the gate (one anchor, `flashinfer.py:985`) | yes | a new `patch-*.py`, which **re-dumps the fast-load sidecar** ([08](08-fast-boot.md)) | medium: #40969, and EP + graphs unrun here | KV −2…−5 % |
+| patch the gate (one anchor, `flashinfer.py:985`) | yes | a new `patch-*.py`, which **re-dumps the fast-load sidecar** ([08](08-fast-boot.md)) | low, now that EP + graphs have run a full battery here | KV **−3.85 %** `[measured-here]` |
 | draft on `TRITON_ATTN` (declares `ALWAYS`) | possible | a selector patch, full gate battery | high: never measured, numerics unknown | unknown |
-| draft KV back to bf16 | **one env line**, sidecar stays valid | nothing | low | KV −6.5…−9.5 % |
-| leave it | — | — | none | an unmeasurable 1–2 % |
+| draft KV back to bf16 | **one env line**, sidecar stays valid | nothing | low | KV **−7.67 %** `[measured-here]` |
+| leave it | — | — | none | **+1.75 % at C1, unmeasurable on this bench** `[measured-here]` |
 
-**The A/B that would settle it — designed, not run** `[not tested]`: three arms on the production-12
-tree, all env-only, no dump. **A** = production 12. **B** = A without `HAREM_DRAFT_KV_DTYPE=fp8`
-(graphs on). **C** = B plus `ENFORCE_EAGER=1` (same KV geometry as B, graphs off), so **B − C is the
-graph lever alone** and A − C is the fp8-draft lever. `ab-quick2-full.sh` per arm — three sweep rounds,
-TTFT, prefill, acceptance, cold + warm gates, the tool-call gate — about 17 minutes an arm, one engine
-hour with the return boot. Kill criteria: any gate short; acceptance outside 60–65 % (an approach to
-1.00 is the #53030 signature); a hang or `EngineDeadError` (#40969); swap-in under load; and **B − C
-under +2 % at C1 closes the item** without the patch being written. Listed in
-[HELP-WANTED](../HELP-WANTED.md) §11 for a cluster with an hour to spare.
+**The A/B that would settle it — designed, then run the same evening**: three arms on the
+production-12 tree, all env-only, no dump. **A** = production 12. **B** = A without
+`HAREM_DRAFT_KV_DTYPE=fp8` (graphs on). **C** = B plus `ENFORCE_EAGER=1` (same KV geometry as B,
+graphs off), so **B − C is the graph lever alone** and A − C is the fp8-draft lever.
+`ab-quick2-full.sh` per arm — three sweep rounds, TTFT, prefill, acceptance, cold + warm gates, the
+tool-call gate. Kill criteria: any gate short; acceptance outside 60–65 % (an approach to 1.00 is the
+#53030 signature); a hang or `EngineDeadError` (#40969); swap-in under load; and **B − C under +2 %
+at C1 closes the item** without the patch being written.
 
-**Verdict, 6 September: left off.** The declaration is filed; the price is measurable and the gain is
-not; a fix on our side costs a sidecar re-dump for a number we could not grade. What changed on this
-page is the reason — §1.9 row 8's "the sidecar removed the obstacle" was wrong, and is retracted in
-§1.12.
+### Run on 6 September: the lever is +1.75 %, the pool it costs is 3.85 %, and the item closes
+
+One 53-minute engine window, arm A measured on the live production boot so only two boots were
+spent, arms B and C booted from `.env.tp3`-derived files on each node `[measured-here]`. Neither knob
+enters the fast-load manifest identity (`file_identity()` hashes the image tag, TP size, EP flag,
+node rank, the filter suffixes and every `patch-*.py` plus the prelude — not which of them runs), so
+all three arms loaded the production sidecar and booted in 217–275 s.
+
+| median of 3 rounds | A = production 12 | B = bf16 draft, graphs **on** | C = bf16 draft, graphs off | **B − C** | band |
+|---|---:|---:|---:|---:|---|
+| C1 agg tok/s | 69.90 | 71.67 | 70.44 | **+1.75 %** | ±4 % |
+| C2 | 100.05 | 103.30 | 102.10 | +1.18 % | ±6 % |
+| C4 | 145.32 | 144.76 | 147.34 | −1.75 % | ±9 % |
+| C6 | 171.89 | 168.47 | 177.70 | −5.19 % | ±6 % |
+| C8 | 195.78 | 198.18 | 201.97 | −1.88 % | ±3 % |
+| C1 per-stream decode | 73.64 | 79.51 | 76.12 | +4.45 % | — |
+| TTFT C1 / C8 (s) | 0.283 / 0.796 | 0.334 / 0.861 | 0.272 / 0.797 | | |
+| prefill-fresh / prefill7k | 1,746 / 1,552 | 1,755 / 1,629 | 1,736 / 1,607 | +1.1 % / +1.4 % | ±3 % |
+| acceptance C1 / C8 | 62.1 / 60.5 % | 61.4 / 62.5 % | 60.6 / 61.9 % | | 60–65 % |
+| **KV pool (tokens)** | **7,077,134** | 6,534,435 | 6,796,143 | **−3.85 %** | |
+| graph pool, ranks 0/1/2 (GiB) | 0 / 0 / 0 | **0.27 / 0.25 / 0.00** | 0 / 0 / 0 | | |
+| peak activation, rank 0 (GiB) | 1.66 | **2.62** | 1.66 | | |
+| boot (s) | 217 | 275 | 255 | | |
+
+**Every one of the five levels is inside its band and the signs are mixed** — C1 and C2 up, C4, C6
+and C8 down. Two more numbers from the same run say why that is the whole answer: the **round-to-round
+spread inside a single arm** was 3.52–10.69 % at C1 (per-stream 4.07–9.15 %), and B and C are separate
+boots, where this stack's spread is 15.9 % ([09](09-measurement-protocol.md) §2). The signal is
+smaller than either ruler. The per-stream +4.45 % is the one figure that grazes a band, and it is
+buried by the same two.
+
+**The graph pool at three ranks, measured for the first time — and it is a quarter of what this page
+estimated.** `Graph capturing finished in 44 secs, took 0.27 GiB` (rank 0), 43 s / 0.25 GiB (rank 1),
+43 s / **0.00 GiB** (rank 2) `[measured-here]`, against the 1.10 GiB carried over from TP=2 and the
+2.64 GiB estimator figure above. The **−2 to −5 % of pool** estimate nevertheless came out right —
+**−3.85 %**, 261,708 tokens — but for a different reason than it gave: the capture pool is nearly
+free, and the cost is the **peak-activation reservation the capture forces up, 1.66 → 2.62 GiB on
+rank 0**. Estimate right, mechanism wrong; recorded as a correction, not a confirmation.
+
+**Where B's whole 7.67 % against production 12 goes.** Per-token cost 7,599 → 8,036 B (**+5.75 %**,
+the bf16 draft page) and 2.35 % less memory left for KV (graph pool plus activation). **The pool is
+lost to the bf16 draft cache, not to the graphs** — which reverses the emphasis of the row above.
+
+**A − C, the fp8 draft cache, at equal graph state**: C1 −0.77 %, C2 −2.01 %, C4 −1.37 %, C6 −3.27 %,
+C8 −3.06 %, per-stream C1 −3.26 % — 1–3 % slower for **+4.14 % of pool**. Read it as the whole draft
+route, not as a dtype: A runs FlashInfer + the XQA kernel + fp8, C runs FlashAttention + bf16.
+
+**Gates and the #40969 question.** Correctness 10/10 and code 12/12 cold and warm on all three arms,
+tool-call 8/8 on all three; acceptance stayed in 59.4–65.6 % across every round of every arm, with no
+approach to 1.00, so the #53030 signature did not appear. Arm A's first warm code run read 11/12
+(`matrix`), passed 12/12 on an immediate re-run on the same engine, and is recorded as a single-item
+flake rather than a rejection — the same re-run rule was in force for B and C and neither needed it.
+Swap-in was 0 on all three nodes throughout, `MemAvailable` bottomed at 2–3 GiB, and the throttle
+mask was `0x0` on every sample of every node, so no arm's numbers are thermal. **And the combination
+this page listed as an unrun risk — TP=3 + expert parallel + `FULL_AND_PIECEWISE` + chunked prefill —
+ran a full battery without a hang, an `EngineDeadError` or an error line.** That risk row can be
+retired; the lever it guarded still cannot be measured.
+
+**Verdict, 6 September: left off, now on a measurement rather than an estimate.** B − C at C1 is
++1.75 %, under the +2 % the design set as the closing threshold, and smaller than the spread between
+rounds of one arm. The gate declaration stays filed as [vllm#55581](https://github.com/vllm-project/vllm/issues/55581); **the patch is not written**. What
+changed on this page besides the result: §1.9 row 8's "the sidecar removed the obstacle" was wrong
+and is retracted in §1.12, and the graph-pool price above is corrected downward in
+[17](17-memory-ledger.md) §2.3.
 
 ---
 

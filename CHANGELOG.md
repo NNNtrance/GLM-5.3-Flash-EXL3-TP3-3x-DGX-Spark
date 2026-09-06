@@ -11,6 +11,56 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — The CUDA-graph A/B: the lever is +1.75 % and closes the item, the graph pool at three ranks is a quarter of what we estimated
+
+**We ran the A/B we had published as unrun, the same evening we published it.** Three env-only arms
+on the production-12 tree in one 53-minute engine window: **A** production 12, **B** = A without
+`HAREM_DRAFT_KV_DTYPE=fp8` (drafter → FlashAttention → `UNIFORM_BATCH` → graphs capture), **C** = B
+plus `ENFORCE_EAGER=1`. **B − C is the graph lever at equal KV geometry, and it measured +1.75 % at
+C1** `[measured-here]` — under the +2 % the design had set as the closing threshold. Every one of the
+five concurrency levels is inside its band and **the signs are mixed** (C1 +1.75, C2 +1.18, C4 −1.75,
+C6 −5.19, C8 −1.88 %). The item closes: **the patch is not written.** The wrong division stays filed
+as [vllm#55581](https://github.com/vllm-project/vllm/issues/55581).
+[docs/11](docs/11-open-issues.md) §2.29 has the run; raw rows in
+[`results/speed/concurrency-sweeps.csv`](results/speed/concurrency-sweeps.csv).
+
+**The finding is that our ruler cannot see it, and that is written down as the finding.** Two numbers
+from the same run: the **round-to-round spread inside a single arm** was 3.52–10.69 % at C1
+(per-stream 4.07–9.15 %), and arms B and C are separate boots, where this stack spreads 15.9 %
+([docs/09](docs/09-measurement-protocol.md) §2). The signal is smaller than either. The one figure
+that grazes a band — per-stream C1 **+4.45 %** — is buried by the same two, and is reported rather
+than rounded away.
+
+**The graph pool at three ranks, measured for the first time, is 0.25–0.27 GiB per rank.** `Graph
+capturing finished in 44 secs, took 0.27 GiB` on rank 0, 0.25 on rank 1, **0.00 on rank 2**
+`[measured-here]` — against the **1.10 GiB** this repository had carried over from the two-node track
+and the estimator's 2.64 GiB. The **−2 to −5 % of pool** estimate came out right at **−3.85 %**
+(6,796,143 → 6,534,435 tokens) **for the wrong reason**: the capture pool is nearly free and the
+charge is the **peak-activation reservation the capture drives up, 1.66 → 2.62 GiB on rank 0**.
+Estimate right, mechanism wrong, corrected in [docs/17](docs/17-memory-ledger.md) §2.3. And the
+emphasis reverses on the full arm: B is −7.67 % of pool against production 12, of which +5.75 % is
+the bf16 draft page (7,599 → 8,036 B per token) — **the pool goes to the draft cache, not to the
+graphs.**
+
+**A risk row retires.** The combination this repository listed as never run — TP=3 + expert parallel
++ `FULL_AND_PIECEWISE` + chunked prefill, the shape of [#40969](https://github.com/vllm-project/vllm/issues/40969) — ran a full battery with no hang,
+no `EngineDeadError` and no error line. Gates were **10/10 and 12/12 cold and warm on all three
+arms**, tool-call **8/8** on all three, acceptance **59.4–65.6 %** across every round with no approach
+to 1.00 (so no [#53030](https://github.com/vllm-project/vllm/issues/53030) signature), swap-in 0 on
+every node, and the throttle mask `0x0` on every telemetry sample of every node — so no arm's numbers
+are thermal. Arm A's first warm code run read **11/12** on one item and **12/12** on an immediate
+re-run on the same engine; recorded as a single-item flake under a re-run rule that was in force for
+all three arms, not as a rejection.
+
+**A − C, the fp8 draft cache at equal graph state**: 1–3 % slower (C1 −0.77 %, C8 −3.06 %) for
+**+4.14 % of pool**. Read as the whole draft route rather than a dtype — A runs FlashInfer with the
+XQA kernel and fp8, C runs FlashAttention with bf16. Production 12 is unchanged and was restored at
+the end of the window: health 200, KV 7,030,303, gates 10/10 and 12/12.
+[HELP-WANTED](HELP-WANTED.md) §11 keeps one ask, and it is a smaller one: **a second boot** of arms B
+and C, because ours were one boot each.
+
+---
+
 ## 2026-09-06 — The workspace bound at two ranks: +32.14 % of pool on an A/B, +26.5 % as shipped, and candidate C becomes the TP=2 recipe
 
 **The same patch, the same file, three times the gain — and the reason is a denominator.** vLLM sizes

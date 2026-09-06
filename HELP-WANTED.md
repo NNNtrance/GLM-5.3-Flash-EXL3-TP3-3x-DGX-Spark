@@ -492,10 +492,30 @@ repository should be quoted as a max-effort number.
 
 ---
 
-## 11. CUDA graphs at three ranks — off because of a wrong declaration; the one-hour A/B nobody has run
+## 11. CUDA graphs at three ranks — off because of a wrong declaration. **The A/B is done; what is left is a second boot**
+
+> **Run on 6 September 2026 — closed.** We ran the three arms ourselves the evening this section was
+> written. **B − C = +1.75 % at C1**, under the +2 % threshold the design set, with every level
+> inside its band and mixed signs; the graph pool at three ranks is **0.25–0.27 GiB per rank**
+> (a quarter of what we had estimated from the two-node track) and the total price is **−3.85 % of
+> the KV pool**. Gates 10/10 and 12/12 cold and warm on all three arms, tool-call 8/8, acceptance
+> 59.4–65.6 % throughout, no hang. **We did not write the patch and we are not asking anyone else
+> to.** Full numbers: [docs/11](docs/11-open-issues.md) §2.29 and
+> [docs/17](docs/17-memory-ledger.md) §2.3; raw rows in
+> [`results/speed/concurrency-sweeps.csv`](results/speed/concurrency-sweeps.csv).
+>
+> **What is still worth an hour, if you have three nodes:** a **second boot of arms B and C**. Ours
+> were one boot each, and boot-to-boot spread on this stack is 15.9 % at C8
+> ([docs/09](docs/09-measurement-protocol.md) §2) — enough to swallow the whole result twice over.
+> A repeat that lands on +1.75 % again would turn "unmeasurable" into "measured and small"; one that
+> lands somewhere else would tell us the bench, not the lever, produced the number. Either is worth
+> more than the patch.
+>
+> The section below is kept as written on the morning of 6 September, because the finding it
+> describes — the wrong division — is unchanged and still unfixed upstream.
 
 **Effort: nothing, if you only want the finding — it is filed. One engine hour on a three-node
-cluster, if you want the price.**
+cluster, if you want to repeat the price measurement on a second boot.**
 
 At TP=3 this stack serves with `cudagraph_mode=NONE`, and the reason is not the one we published
 until 6 September. FlashInfer's `get_cudagraph_support()` divides the *target* model's per-rank query
@@ -509,16 +529,17 @@ ranks the division is 32 % 4 = 0 and the same image captures graphs. [docs/11](d
 |---|---|
 | Issue | [vllm-project/vllm#55581](https://github.com/vllm-project/vllm/issues/55581) — the gate uses the wrong model's head count |
 | Fix | one parameter: derive the head count from the group's own layers, as the builder does. Offered in the issue; no PR at the time of writing |
-| What we did with it | **nothing** — the ceiling is +1.2–2.3 % single-stream (inside our ±4 % band) and the graph pool is 1.1–2.6 GiB per rank out of KV |
+| What we did with it | **nothing** — the ceiling was +1.2–2.3 % single-stream (inside our ±4 % band), and on 6 September the measurement landed at **+1.75 %** |
 
-**What would settle the price** `[not tested]`: three env-only arms on the production-12 tree —
+**What settled the price** `[measured-here]`: three env-only arms on the production-12 tree —
 **A** production 12, **B** = A without `HAREM_DRAFT_KV_DTYPE=fp8` (drafter → FlashAttention → graphs
 on), **C** = B + `ENFORCE_EAGER=1`. B − C is the graph lever at equal KV geometry; A − C is the fp8
 draft cache. `scripts/ab-quick2-full.sh` per arm, cold + warm gates and the tool-call gate mandatory
-(a bad capture shows up as acceptance or gate failures, not as an error), about 17 minutes an arm.
-If B − C is under +2 % at C1 the item closes without anyone writing the patch. Expect it to be — and
-say so if a three-round median cannot resolve it, because that is the finding too. A fix on our side
-would be a new patch file, which re-dumps the fast-load sidecar ([docs/08](docs/08-fast-boot.md)).
+(a bad capture shows up as acceptance or gate failures, not as an error), about 15 minutes an arm.
+The rule was that B − C under +2 % at C1 closes the item without anyone writing the patch; it came in
+at +1.75 %, and the three-round median could not resolve it against a 3.5–10.7 % within-arm spread —
+**which is the finding, and it is written down as one**. A fix on our side would still be a new patch
+file, which re-dumps the fast-load sidecar ([docs/08](docs/08-fast-boot.md)); it is not being written.
 
 ## What we would rather you did not send
 

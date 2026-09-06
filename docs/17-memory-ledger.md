@@ -119,12 +119,27 @@ On the NVFP4 sibling stack the CUDA-graph estimator was a **3.9 GiB** item and t
 real give-back. **On this stack it charges nothing**, so that lever does not exist here — do not carry
 it over ([10](10-results-and-roofline.md) §5.8).
 
-**Why it is zero, and what it would cost to make it non-zero (6 September).** The `NONE` comes from a
-wrong declaration, not from a kernel limit — FlashInfer's support gate divides the target's 22 heads
-by the draft's 3 KV heads ([11](11-open-issues.md) §2.29, [vllm#55581](https://github.com/vllm-project/vllm/issues/55581)). If the gate were fixed the graph
-pool would come *out of this ledger*: the two-node arrangement of the same image charges **1.10 GiB**
-per rank for it `[measured-here]` and the profiler's estimator reserves up to 2.64 GiB — at three ranks
-**−2 to −5 % of the KV pool** for a single-stream gain bounded at 1.2–2.3 % `[estimate]`. Left off.
+**Why it is zero, and what it costs to make it non-zero — measured at three ranks, 6 September.** The
+`NONE` comes from a wrong declaration, not from a kernel limit — FlashInfer's support gate divides the
+target's 22 heads by the draft's 3 KV heads ([11](11-open-issues.md) §2.29,
+[vllm#55581](https://github.com/vllm-project/vllm/issues/55581)). Dropping `HAREM_DRAFT_KV_DTYPE=fp8`
+puts the drafter on FlashAttention, which declares `UNIFORM_BATCH`, and the engine captures. That arm
+was run, and the pool it charges came *out of this ledger*:
+
+| | rank 0 | rank 1 | rank 2 |
+|---|---:|---:|---:|
+| `Graph capturing finished in …` | 44 s | 43 s | 43 s |
+| capture pool charged | **0.27 GiB** | **0.25 GiB** | **0.00 GiB** |
+| peak activation, graphs off → on | **1.66 → 2.62 GiB** | | |
+
+**0.25–0.27 GiB per rank `[measured-here]`, not the 1.10 GiB this ledger carried over from the
+two-node arrangement, and nothing like the estimator's 2.64 GiB.** The KV pool still moves by
+**−3.85 %** (6,796,143 → 6,534,435 tokens at equal draft-KV geometry), so the old −2 to −5 %
+`[estimate]` was right in size and wrong in mechanism: **most of the charge is the peak-activation
+reservation the capture drives up, not the graph pool itself.** Against production 12 the whole arm
+costs −7.67 % of pool, of which +5.75 % is the bf16 draft page (7,599 → 8,036 B per token) and only
+2.35 % is memory taken away from KV. The single-stream gain measured **+1.75 % at C1** — inside the
+±4 % band and smaller than one arm's own round-to-round spread. Left off, now on a measurement.
 
 ### 2.4 The "driver takes 14.2 GiB" figure is stale by about 10 GiB
 

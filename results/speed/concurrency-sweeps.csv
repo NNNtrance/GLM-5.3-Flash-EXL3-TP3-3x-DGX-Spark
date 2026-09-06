@@ -104,3 +104,18 @@ production 11 (0.87 + sm_12x correctness set),8,6,201.1,196.7,207.2,29.5,0.806,,
 "TP=2 production candidate C (full-scope + workspace bound, 0.85)",4,3,120.9,119.1,121.0,34.6,0.734,,28.89,65.3,5.57,2692857
 "TP=2 production candidate C (full-scope + workspace bound, 0.85)",6,3,140.8,139.4,141.5,27.3,0.928,,36.66,62.5,5.38,2692857
 "TP=2 production candidate C (full-scope + workspace bound, 0.85)",8,3,157.7,157.3,158.3,23.5,1.054,,42.63,62.6,5.38,2692857
+"CUDA-graph A/B, arm A = production 12 (fp8 draft KV, graphs off)",1,3,69.9,64.65,71.56,73.64,0.28,0.67,13.58,62.08,5.35,7077134
+"CUDA-graph A/B, arm A = production 12 (fp8 draft KV, graphs off)",2,3,100.05,95.66,102.19,52.49,0.41,0.89,19.05,61.45,5.3,7077134
+"CUDA-graph A/B, arm A = production 12 (fp8 draft KV, graphs off)",4,3,145.32,136.22,147.88,41.83,0.57,1.32,23.91,63.32,5.43,7077134
+"CUDA-graph A/B, arm A = production 12 (fp8 draft KV, graphs off)",6,3,171.89,171.62,176.58,34.52,0.71,1.58,28.97,61.89,5.33,7077134
+"CUDA-graph A/B, arm A = production 12 (fp8 draft KV, graphs off)",8,3,195.78,187.09,203.46,29.36,0.8,1.86,34.06,60.53,5.24,7077134
+"CUDA-graph A/B, arm B (bf16 draft KV, graphs ON)",1,3,71.67,70.74,73.23,79.51,0.33,0.63,12.58,61.41,5.3,6534435
+"CUDA-graph A/B, arm B (bf16 draft KV, graphs ON)",2,3,103.3,102.63,104.11,57.26,0.46,1.05,17.46,63.11,5.42,6534435
+"CUDA-graph A/B, arm B (bf16 draft KV, graphs ON)",4,3,144.76,138.03,146.41,43.24,0.64,1.48,23.13,65.23,5.57,6534435
+"CUDA-graph A/B, arm B (bf16 draft KV, graphs ON)",6,3,168.47,168.42,171.36,32.73,0.76,1.73,30.56,61.9,5.33,6534435
+"CUDA-graph A/B, arm B (bf16 draft KV, graphs ON)",8,3,198.18,196.41,198.3,28.91,0.86,1.98,34.59,62.48,5.37,6534435
+"CUDA-graph A/B, arm C (bf16 draft KV, enforce-eager)",1,3,70.44,69.72,73.49,76.12,0.27,0.29,13.14,60.59,5.24,6796143
+"CUDA-graph A/B, arm C (bf16 draft KV, enforce-eager)",2,3,102.1,97.99,104.51,55.29,0.4,0.94,18.09,62.29,5.36,6796143
+"CUDA-graph A/B, arm C (bf16 draft KV, enforce-eager)",4,3,147.34,147.23,147.98,41.94,0.57,1.24,23.84,64.81,5.54,6796143
+"CUDA-graph A/B, arm C (bf16 draft KV, enforce-eager)",6,3,177.7,174.42,179.31,33.75,0.7,1.69,29.63,62.71,5.39,6796143
+"CUDA-graph A/B, arm C (bf16 draft KV, enforce-eager)",8,3,201.97,197.46,202.45,30.25,0.8,1.85,33.06,61.94,5.34,6796143

@@ -11,6 +11,69 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — The audit page grades against production 12, and the free-RAM floor leaves the script
+
+**`audit/` had drifted one configuration behind the cluster.** Since 6 September its §1 said
+production 11 was what the nodes serve while its §2 expectations were still production 9's, and the
+promotion to 12 widened the gap: a reader grading a fresh boot against §2 would have compared a
+7.04 M-token pool to a 5.17 M expectation and concluded something was wrong. **No measurement
+changed here.** §2 is re-derived on production 12, production 9's figures are kept beside it in a
+`[history]` column or a collapsed block, and the script's hard-coded constants follow, with the old
+ones left in place as comments.
+
+**Every speed row now carries the band it is graded in**, from the declared boot-to-boot spreads in
+[docs/09](docs/09-measurement-protocol.md) §1.2 — C1 ±4 %, C2 ±6 %, C4 ±9 %, C6 ±6 %, C8 ±3 %, and
+±6 % on the KV pool — rather than a bare figure a reader has to guess the tolerance for:
+
+| | Production 12 | Pass range |
+|---|---|---|
+| KV pool | **7,041,322** (three boots: 7,170,798 / 7,088,154 / 7,041,322) | **6,618,843 – 7,463,801** |
+| C1 aggregate / per stream | **69.72** / 75.55 tok/s | **66.93 – 72.51** |
+| C8 aggregate / per stream | **196.06** / 28.44 tok/s | **190.18 – 201.94** |
+| C2 · C4 · C6 | 101.20 · 146.14 · 176.00 | 95.13–107.27 · 132.99–159.29 · 165.44–186.56 |
+| Prefill, fresh | 1,744 tok/s | 1,692 – 1,796 |
+| TTFT C1 / C8 · acceptance | 0.25 / 0.80 s · 62.5 / 62.4 % at 5.35 per step | — |
+| Consumed per node · available KV per rank | 54.62 / 54.48 / 54.28 GiB · 50.75 / 50.89 / 51.09 GiB | — |
+| Boot: fast-load · `systemctl start` · power-on · dump | 272 · 205 · **311** · 590 s | — |
+
+**The memory section is the one that needed rewriting rather than re-numbering.** It graded on
+`MemFree` against a 4 GiB floor, and the script printed that floor as a RULE line; both are
+`[retracted]` and both are gone. What replaces them is the criterion the 6 September ladder was
+actually climbed with, with its thresholds stated rather than implied: swap **traffic** under load
+(`si`/`so` from `vmstat -n -t 1`, summed over the window between "engine up" and "battery done"),
+C1 inside ±4 % and C8 inside ±3 % of a same-session reference, and both gates full cold and warm —
+three conditions together. Swap *used* is a stock, sits near 0.04 GiB at every fraction including the
+one that failed, and discriminates nothing. Both ends of the scale are printed so "≈ 0" is readable:
+production 12 passed with swap-**in** exactly zero everywhere and 1,340 / 5 / 10 KiB out in 8 of 353
+samples (longest unbroken run 10 s), against the rejected 0.90 rung's 1,519 MiB out **and 143 MiB back
+in**, 250 of 598 samples, 85 s unbroken. `MemAvailable` is published as what it is — a budget, about
+2 GiB at 0.88, not a gate — with the 1.2 GiB per 1 % of fraction that sizes any rung you are
+considering. The script grew a `pswpin`/`pswpout` snapshot on the same
+"read it twice and diff" pattern the fabric counters already use.
+
+**Two boot gates added, because production 11 and 12 each brought a guard patch.** `SM12
+items=pdl,kpool`, and the `HAREM-IDXWS bound` line with its `headroom 2.03x`. Beside them, the check
+that matters most on a bounded buffer: `VLLM_DEBUG_WORKSPACE=1` is upstream's own variable and prints
+**exactly one** `0.00 MB -> 513.00 MB` resize per rank, independently of anything our patch claims
+about itself. A second line on a rank means the buffer grew after `lock_workspace()` and the pool
+just read is not the one that will be kept — so the section says to re-read it after a long-context
+load, which is when it would happen.
+
+**Two things are marked `[not tested]` rather than carried forward silently:** category speed, which
+is production 9's, and the MMLU sample, which is production 9's 86.47 ±0.74 on 10, 11 and 12 alike.
+A memory fraction and a buffer bound cannot touch what the drafter accepts — but that is an argument,
+not a measurement.
+
+**§5 and §6 follow.** The provenance table's "Production 12 candidate — **not in production**,
+`production-configurations.csv` carries no row 12" was true when it was written that afternoon and
+was false by the evening; it is corrected and three shipped rows are added (speed and pool, host
+memory and swap traffic, quality and the whole-cluster reboot). Retraction 2.4 now records the whole
+arc rather than half of it: the ladder passed 0.88 and declined it on diagnostic headroom, and the
+same rung shipped hours later as production 12. **The measurement did not change; the decision about
+what the cluster is for did.**
+
+---
+
 ## 2026-09-06 — Production configuration 12: the workspace bound shipped, and the rung we had declined
 
 **Production 12 is production 11 with exactly two changes, taken in one boot:**

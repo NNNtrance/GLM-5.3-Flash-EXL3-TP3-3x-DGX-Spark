@@ -36,34 +36,54 @@ Change any row and the expected values change with it.
 | Parallelism | TP=3, expert parallelism on, three nodes |
 | KV | `kv-cache-dtype fp8`, **and an fp8 draft cache** (`HAREM_DRAFT_KV_DTYPE=fp8`), `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256` |
 | Speculative | DFlash2, k=7 |
-| Memory | `--gpu-memory-utilization 0.80` (production 9) or **0.83** (production 10), `SETTLE_MIN_GIB=112` |
+| Memory | `--gpu-memory-utilization` **0.88**, `SETTLE_MIN_GIB=112` |
+| Guard patches | `HAREM_SM12_ITEMS=pdl,kpool` (the sm_12x correctness set) and `HAREM_INDEXER_WS_MODE=bound` (the sparse-indexer K-gather workspace, 5,036.40 → 513.00 MB), with `VLLM_DEBUG_WORKSPACE=1` for the per-boot proof of the second |
 | Batching | `--max-num-seqs 8`, `--max-num-batched-tokens 2048` |
 | Fabric | mesh plugin `19924dcc` + patches `0004`/`0005`/`0006`, `NCCL_MAX_NCHANNELS=8`, `NCCL_MESH_LINKS_PER_PEER=0`, `NCCL_MESH_PTR_CUDA=1` |
 | Boot | per-rank fast-load sidecar, warm `CUDA_EXL3_TUNE_CACHE` |
 | Sampling | temperature 0, thinking on, reasoning effort **low** |
-| Date | 5 September 2026 |
+| Date | 6 September 2026 |
 
-**This is production configuration 9, and production 10 is the same thing with one line changed** —
-`GPU_MEMORY_UTILIZATION` 0.80 → 0.83, which buys **+8.7 % of KV pool** and moves no speed number
-outside its noise band. Every expectation below is production 9's unless a row says otherwise.
-Anything you publish from this script must carry that table with it. A tok/s figure without its
-configuration is not a measurement.
+**This is production configuration 12 — what our three nodes serve, start at boot and were rebooted
+into as a whole cluster with the gates read afterwards. §2 grades a fresh boot against it.** Anything
+you publish from this script must carry that table with it. A tok/s figure without its configuration
+is not a measurement.
 
-**Production 11 — 0.87 plus the sm_12x correctness set — is what our three nodes serve today**, and
-its numbers are in §5 rather than in §2: the expectations below were not re-derived on it. The three
-configurations differ by a memory fraction and two guard patches, so §2 still reads correctly against
-a production 11 engine everywhere except the KV pool, which is larger.
+**The line, in one line.** Production 10 (5 September 2026) is `gpu-memory-utilization` **0.83** →
+production 11 (6 September 2026) is **0.87** plus the sm_12x correctness set → production 12
+(6 September 2026, promoted 16:53) is **0.88** plus the indexer workspace bound. Each step is a
+memory fraction and one env-gated patch set, and nothing else moves: same image, same checkpoint,
+same fabric settings, same batching, same sampling. Production 9
+(5 September 2026, 0.80) is the configuration every *analysis* page in this repository was written
+on, and it applies unchanged — 9 through 12 differ by a memory fraction, two guard patches and one
+buffer size.
+
+**Production 9's expectations are kept beside production 12's below**, in a `production 9 [history]`
+column or a collapsed block, so a number quoted from an older commit can still be located. Grade
+against the production 12 column.
+
+**Two things below were not re-derived on production 12, and both say so**: §2's category speed,
+which is production 9's and which a memory fraction and a buffer bound cannot touch, and §4's MMLU
+sample, which is production 9's 86.47 ±0.74 carried forward `[not tested]` on 10, 11 and 12.
 
 **Everything here is at reasoning effort `low`.** Max effort would cost 5–12× the tokens and days of
 cluster time. Nothing on this page is a max-effort number and none of it should be quoted as one.
 
 ---
 
-## 2. What to expect
+## 2. What to expect — production configuration 12
 
 Work down this list in order. Each step rules out the ones after it, and there is a reason for that
 ordering: **a fast engine that answers wrong is worthless, and a machine that is swapping produces
 speed numbers that mean nothing.**
+
+**Every expected value below is production 12's, and every speed row carries the band it is graded
+in** — the declared boot-to-boot bands for this stack, from
+[docs/09](../docs/09-measurement-protocol.md) §1.2: **C1 ±4 %, C2 ±6 %, C4 ±9 %, C6 ±6 %, C8 ±3 %**,
+and **±6 % on the KV pool**. C4 is the noisiest level on this stack and C1 and C8 are the two that
+carry a verdict; a C4 or C6 reading from a single boot is not evidence of anything. Speed figures are
+the **pool of six sweep rounds over two boots** — the load boot and the clean boot after a
+whole-cluster reboot — which is the protocol configurations 11 and 12 were both promoted under.
 
 ### versions — before anything else
 
@@ -104,31 +124,63 @@ It is what patch `0005` fixes. See [docs/06](../docs/06-nccl-mesh.md) §6.
 Read from the engine's own start-up log line `GPU KV cache size: N tokens`, on a **load** boot with
 a settled memory baseline.
 
+| | Expected (production 12) |
+|---|---|
+| **KV pool** | **7,041,322 tokens** — three boots of this configuration read 7,170,798 / 7,088,154 / 7,041,322 |
+| **Pass range**, ±6 % of the headline | **6,618,843 – 7,463,801** |
+| Available KV, per rank | 50.75 / 50.89 / 51.09 GiB |
+| Consumed per node (weights + non-torch) | **54.28 – 54.62 GiB** |
+| Locked indexer workspace | **513.00 MB**, and **exactly one** resize line per rank |
+| Concurrent 1M-token requests | about **7.0** |
+
+The pool at each earlier configuration, so a number quoted from an older commit can be located:
+
 | Configuration | `gpu-memory-utilization` | KV pool (tokens) |
 |---|---|---|
 | Production 7 (routed-experts-only, fp8 draft cache) | 0.80 | 4,696,969 |
 | Production 8 (image `62f53e6`) | 0.80 | 4,696,969 |
-| **Production 9 (full-scope checkpoint)** | **0.80** | **5,165,289** (5,168,044 on the verification boot) |
-| **Production 10 (production 9 + one line)** | **0.83** | **5,619,834** |
-| 0.85, **rejected** on the free-memory rule | 0.85 | 5,256,198 |
+| Production 9 (full-scope checkpoint) | 0.80 | 5,165,289 (5,168,044 on the verification boot) |
+| Production 10 (production 9 + one line) | 0.83 | 5,619,834 |
+| Production 11 (0.87 + sm_12x correctness set) | 0.87 | 6,382,920 |
+| **Production 12 (0.88 + indexer workspace bound)** | **0.88** | **7,041,322** |
 
-About **5.2 concurrent 1M-token requests** at production 9, **5.6** at production 10.
+**Where production 12's pool comes from, and why it is not a percentage sum.** The workspace bound
+was priced at **+644,628 tokens** by its own A/B and the 0.87 → 0.88 rung at **+179,063** by the
+memory ladder; the two add **in absolute tokens**, predicting 7,209,365 against a measured
+7.04–7.17 M — inside the ±6 % boot-to-boot band. They do not add in percent, because the second lands
+on a base the first has already enlarged, which is why the headline is +10.3 % against production 11
+and not the +13.4 % a percentage sum would promise
+([`results/memory/indexer-workspace-ab.md`](../results/memory/indexer-workspace-ab.md) §7.1).
 
-**Why 0.83 is in production and 0.85 is not**, given that 0.85's pool is only measured against
-production 3's checkpoint: at 0.85 the head node had 1.9 GiB free and **1.6 GB of swap in use**. At
-0.83, on the current stack, `MemAvailable` is 8–10 GB per node and **swap stays flat at ~0.1 GB
-through a full sweep** `[measured-here]`. `MemFree` does dip to 0.9–1.2 GiB, which is below the
-headline rule, but that memory is reclaimable page cache and the number that matters — swap growth —
-did not move. **"0.85 will not be attempted on this stack" is `[retracted]`** (§6): the ladder was
-climbed on 6 September against swap *traffic*, 0.85 and 0.88 both pass, 0.90 is rejected, and **0.87
-is production configuration 11** at a **6,382,920**-token pool
-([`results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md)).
+**The workspace bound is checkable from the engine's own log, and should be checked on every boot.**
+`VLLM_DEBUG_WORKSPACE=1` is carried in production for exactly this: upstream's own `WorkspaceManager`
+prints `Resized workspace ... 0.00 MB -> 513.00 MB`, once per rank, independently of anything our
+patch claims about itself. **More than one resize line on a rank, or a figure other than 513.00 MB,
+means the buffer grew after `lock_workspace()` and the pool you just read is not the one you will
+keep.** Ours reads one line per rank on the load boot, on the systemd-started engine, on the clean
+boot after a whole-cluster reboot, and again after a 969,468-token request and eight concurrent ~128K
+lanes.
 
 A pool within a few percent of ours is a match. A pool well below it usually means one of: no fp8
 draft cache (`HAREM_DRAFT_KV_DTYPE`), `--block-size` left at a large value,
-`--max-num-batched-tokens` raised, or — most likely — **a boot taken without the memory settle
-gate**. That last one is not a real difference in your machine; it is the instrument. See
-[docs/07](../docs/07-kv-and-draft-page.md) §1.1.
+`--max-num-batched-tokens` raised, the workspace bound not armed (`HAREM_INDEXER_WS_MODE`), or —
+most likely — **a boot taken without the memory settle gate**. That last one is not a real difference
+in your machine; it is the instrument. See [docs/07](../docs/07-kv-and-draft-page.md) §1.1.
+
+<details>
+<summary>The 0.85 verdict this section used to carry, and what replaced it</summary>
+
+The table here used to end with a rejected `0.85 | 5,256,198` row and the sentence **"0.85 will not
+be attempted on this stack"**, both resting on `MemFree` against a 4 GiB floor, on a boot that
+predates the fast-load page-cache fix. Both are `[retracted]` (§6). The ladder was climbed rung by
+rung on 6 September against swap **traffic** instead: 0.85, 0.87 and 0.88 all pass, 0.90 is rejected,
+0.87 shipped as production 11 and **0.88 shipped as production 12** hours later — the same
+measurement, a different decision about what the cluster is for
+([`results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md), [docs/11](../docs/11-open-issues.md) §2.4).
+**0.89 was never measured**, and the workspace bound does not change that: it gives memory back on
+the GPU side, not the host side.
+
+</details>
 
 **Read the pool from a boot whose baseline had settled.** vLLM sizes the pool from a difference
 between two `/proc/meminfo` readings minutes apart, and it runs backwards: a node that starts with
@@ -142,10 +194,15 @@ python3 ../scripts/correctness-probe.py $API
 python3 ../scripts/code-exam.py $API
 ```
 
-| | Expected |
+| | Expected (production 12) |
 |---|---|
 | correctness probe | **10/10**, `requests with EMPTY content: 0` |
 | code exam | **12/12** |
+
+Production 12 read both full **cold and warm on the load boot, on the systemd-started engine, and on
+the clean boot after a whole-cluster reboot** — three independent boots, six readings. Two gates the
+script does not run read full on the same boots and are worth borrowing if you have them: tool-call
+**8/8** and needle-lite **6/6** at 64K and 128K.
 
 **Run both twice: once cold after the boot, and again after the full benchmark.** The warm run is the
 one that carries weight. The class of defect this stack has actually produced — a kernel writing rows
@@ -172,15 +229,29 @@ is missing, nothing measured afterwards means anything:
 | Pad audit | `assert 5` passes |
 | `CUDA_EXL3_DEBUG_NAMES` tally | **203 EXL3 / 113 bf16**, nothing heavy in the "→ unquantized" list |
 
+Production 11 and 12 add two more, one for each configuration's guard patch. Both must appear on
+**every** rank, on a fast-load boot and on a cold boot alike — the prelude applies them either way:
+
+| Gate | Expected | Came with |
+|---|---|---|
+| sm_12x correctness set | `SM12 items=pdl,kpool` | production 11 |
+| Indexer workspace bound | the `HAREM-IDXWS bound` line, `headroom 2.03x`, `saved 4.42 GiB` | production 12 |
+| Workspace resize, upstream's own line | **exactly one** per rank, `0.00 MB -> 513.00 MB` | production 12 |
+
 ### c1 — cold/warm single stream `[measured-here]`
 
-| | Expected (production 9) |
-|---|---|
-| C1 aggregate | **69.9** tok/s |
-| C1 per stream | **75.9** tok/s |
-| TTFT at C1 | **0.280** s |
-| Draft acceptance | **~62 %** — the gate is ≥ 60 % |
-| Accepted tokens per step | **~5.34** |
+| | Expected (production 12) | Band | Pass range | Production 9 `[history]` |
+|---|---|---|---|---|
+| C1 aggregate | **69.72** tok/s | ±4 % | **66.93 – 72.51** | 69.9 |
+| C1 per stream | **75.55** tok/s | ±4 % | 72.53 – 78.57 | 75.9 |
+| TTFT at C1 | **0.25** s | — | — | 0.280 |
+| Draft acceptance | **~62.5 %** — the gate is ≥ 60 % | — | — | ~61.9 |
+| Accepted tokens per step | **~5.35** | — | — | ~5.34 |
+
+Production 12's C1 is production 11's to within **+0.08 %** pooled over six rounds and two boots, so
+a reading anywhere in that pass range grades the same against 9, 10, 11 or 12. The single-boot
+readings behind the pool were 69.63 on the load boot and 72.77 on the clean boot — a 4.5 % spread at
+the *least* noisy level, which is why the headline is a pool and not a boot.
 
 **A note on acceptance, because we got this wrong on our own front page.** The C1 median reads
 61.9 % on production 9 against 64.4 % on production 8, and we published that 2.4-point gap as the
@@ -206,36 +277,67 @@ working speed.
 
 ### concurrency — `[measured-here]`
 
+| Level | **Production 12** | Band | Pass range | Production 9 `[history]` |
+|---|---|---|---|---|
+| C1 total | **69.72** | ±4 % | **66.93 – 72.51** | 69.9 |
+| C2 total | 101.20 | ±6 % | 95.13 – 107.27 | 99.17 |
+| C4 total | 146.14 | ±9 % | 132.99 – 159.29 | 140.72 |
+| C6 total | 176.00 | ±6 % | 165.44 – 186.56 | 172.40 |
+| C8 total | **196.06** | ±3 % | **190.18 – 201.94** | 197.2 |
+| C1 / C8 per stream | 75.55 / 28.44 | — | — | 75.9 / 28.6 |
+| TTFT C1 / C8 | 0.25 / 0.80 s | — | — | 0.280 / 0.826 |
+
+<details>
+<summary>Production 9 against production 8, the comparison this table used to hold</summary>
+
 | | Production 9 | Production 8 |
 |---|---|---|
-| C1 total / per stream | **69.9 / 75.9** | 56.9 / 62.4 |
-| C8 total / per stream | **197.2 / 28.6** | 175.4 / 26.7 |
-| TTFT C8 | **0.826** s | 0.906 s |
+| C1 total / per stream | 69.9 / 75.9 | 56.9 / 62.4 |
+| C8 total / per stream | 197.2 / 28.6 | 175.4 / 26.7 |
+| TTFT C8 | 0.826 s | 0.906 s |
 
-Median of **three** sweep rounds — and three is only enough **because the MLA tuner cache is
-persisted and warm**. On an image without one the rule is still five rounds with the first two
-discarded: this stack's tuner warm-up has made a winning arm look 25–45 % worse on the first pass
-([docs/12](../docs/12-tuner-cache.md), [docs/09](../docs/09-measurement-protocol.md)).
+That step — **+22.9 % at C1, +12.5 % at C8** — is the full-scope checkpoint, and it is the largest
+single move this stack has made. Everything between production 9 and production 12 is memory: three
+memory fractions, two guard patches and one buffer bound, and none of them moved C1 or C8 outside a
+tenth of a percent.
 
-Boot-to-boot spread on this stack is up to **16 % at C8**. A single pair of rounds is not evidence
-for anything; we published a kernel conclusion drawn from one pair and had to withdraw it (§6).
+</details>
+
+**Pool six rounds over two boots, and read the verdict off C1 and C8.** Three rounds of one boot is
+enough only **because the MLA tuner cache is persisted and warm**; on an image without one the rule is
+still five rounds with the first two discarded, because this stack's tuner warm-up has made a winning
+arm look 25–45 % worse on the first pass ([docs/12](../docs/12-tuner-cache.md),
+[docs/09](../docs/09-measurement-protocol.md)).
+
+**C4 and C6 will disagree with this table on a single boot, and that is not a finding.** Production
+12's own two boots read C6 at 167.8 and 177.4 (5.7 % apart) and C4 at 140.8 and 151.6 (7.7 %), while
+C1 and C8 pooled to within a tenth of a percent of the reference. Production 11 made the same point
+from the other side and we published a 6.4 % C4 "cost" that a repeat deleted (§6). Boot-to-boot spread
+on this stack has reached **16 % at C8** on older images. A single pair of rounds is not evidence for
+anything; we published a kernel conclusion drawn from one pair and had to withdraw it (§6).
 
 ### prefill — measure it on a prompt the engine has never seen `[measured-here]`
 
-| | Expected |
-|---|---|
-| Fresh, unseen ~8.5K prompts | **1,738** tok/s |
-| Warm, repeated 7K prompt | 1,575 tok/s |
+| | Expected (production 12) | Pass range (±3 %) | Production 9 `[history]` |
+|---|---|---|---|
+| Fresh, unseen ~8.5K prompts | **1,744** tok/s — 1,737 on the load boot, 1,750 on the clean boot | **1,692 – 1,796** | 1,738 |
+| Warm, repeated 7K prompt | 1,622 / 1,632 tok/s | — | 1,575 |
 
 **A prefill number measured on a repeated prompt is not a prefill measurement.** The second run reads
 whole blocks out of the prefix cache and overstates by up to 55 %. `scripts/prefill-7k.py` reports
 the warm number and says so; `bench/prefill-fresh.py` draws a new seed per request and is the one to
 quote.
 
-Both production 8 and production 9 sit inside the ±3 % equality band on prefill: the full-scope
-checkpoint bought its gain in **decode step time**, not in prefill.
+Prefill has not moved since production 9: production 8, 9, 10, 11 and 12 all sit inside the ±3 %
+equality band. The full-scope checkpoint bought its gain in **decode step time**, not in prefill, and
+the three memory configurations after it bought pool, not speed.
 
-### category speed — `[measured-here]` on production 9
+### category speed — `[measured-here]` on production 9, `[not tested]` on 10, 11 and 12
+
+**This is the one section in §2 that is not production 12's.** It was measured on production 9 and
+not re-run, on the reasoning that a memory fraction, two guard patches and a buffer bound cannot
+touch what the drafter accepts — but that reasoning is an argument, not a measurement, so the table
+is tagged rather than carried forward silently.
 
 | Category | C1 mean decode | C1 acceptance | C4 total |
 |---|---|---|---|
@@ -259,47 +361,96 @@ quick-arm harness the production 8 and 9 comparisons ran does not include a cate
 
 ### memory — `[measured-here]`
 
-At `gpu-memory-utilization 0.80`, engine idle:
+**Host memory is the pass/fail section on this stack, and the rule is swap traffic, not free RAM.**
+At `gpu-memory-utilization 0.88` (**production 12**), sampled with `vmstat -n -t 1` on all three
+nodes for the whole window between "engine up" and "battery done" — 1,765 s on the arm that also ran
+both long-context stress cases:
 
 | | head | worker-1 | worker-2 |
 |---|---|---|---|
-| Free | **12.1 GiB** | **13.5 GiB** | **13.4 GiB** |
+| **Swap in**, summed over the window | **0** | **0** | **0** |
+| Swap out, stress arm | 1,340 KiB | 5 KiB | 10 KiB |
+| — in how many samples | 8 of 353, longest unbroken run **10 s** | 1 | 1 |
+| Swap out, clean boot after reboot | 5 KiB | 10 KiB | 10 KiB |
+| Swap **used**, clean boot | **0.000 GiB** | 0.000 | 0.000 |
+| `MemAvailable` min, stress arm | **1.52 GiB** | 3.37 | 3.36 |
+| `MemAvailable` min, clean boot | 3.15 GiB | 4.49 | 4.45 |
+| OOM killer | **0** | 0 | 0 |
+| Consumed per node (weights + non-torch) | **54.62** | **54.48** | **54.28 GiB** |
+
+**The thresholds, as the ladder actually applied them.** A rung passes on **three conditions
+together** ([`results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md) §1):
+
+1. **Swap traffic ≈ 0 under load** — `si` and `so` per second from `vmstat -n -t 1`, summed over the
+   benchmark window on every node. Not swap *used*: that is a stock, it sits at ~0.04 GiB from boot
+   at **every** rung including the one that failed, and it discriminates nothing.
+2. **C1 inside ±4 % and C8 inside ±3 %** of a same-session reference.
+3. **Both gates full, cold and warm.**
+
+**What "≈ 0" means in practice, with both ends of the scale.** Production 12's stress arm paged out
+1,340 KiB on the head node — 134× its own 0.87 reference's 10 KiB — and passed, on two facts: swap-in
+was **exactly zero in every sample on every node**, so no page was ever asked for again, and the
+traffic occupied 8 of 353 samples with a longest unbroken run of **10 s**. The rejected 0.90 rung, for
+scale, paged **1,519 MiB out and 143 MiB back in**, in 250 of 598 samples, with an unbroken run of
+**85 s**. Between those two there is no ambiguity. **If your swap grows through the rounds, or reads
+back at all, step `gpu-memory-utilization` down and re-audit.**
+
+**`MemFree` is not the ruler, and `MemAvailable` is a budget rather than a gate.** This page used a
+4 GiB `MemFree` floor until 6 September; it is `[retracted]` (§6), because on a unified-memory part
+most of what the kernel holds at that moment is reclaimable page cache. `MemAvailable` is the honest
+number, but it does not decide a rung — it tells you what is left for **anything running beside the
+engine**. At 0.88 that budget is about **2 GiB**, which is why a profiling run on this cluster now
+has to stop the engine first. Every 1 % of `gpu-memory-utilization` costs about **1.2 GiB** of host
+headroom on this hardware, so the same arithmetic sizes any rung you are considering.
+
+**0.90 is rejected, 0.89 is unmeasured, and throughput will not warn you.** At 0.90 every concurrency
+level is still inside its band while the head node pages 1.5 GB out and reads 143 MB back; what
+surfaces at the client is the arm's **first prefill going 5.0 → 9.8 s**, not a lower median. A ladder
+judged on tok/s would have taken that rung. 0.89 was never measured, and the indexer workspace bound
+does not change it: that patch gives memory back on the **GPU** side, not the host side.
+
+<details>
+<summary>The same measurements at 0.80 and 0.83, kept for older commits</summary>
+
+At `gpu-memory-utilization 0.80` (**production 9**), engine idle:
+
+| | head | worker-1 | worker-2 |
+|---|---|---|---|
+| Free | 12.1 GiB | 13.5 GiB | 13.4 GiB |
 | Swap used | ~0.1 GiB | ~0.1 GiB | ~0.1 GiB |
 
 At `gpu-memory-utilization 0.83` (**production 10**), after a full benchmark:
 
 | | head | worker-1 | worker-2 |
 |---|---|---|---|
-| `MemAvailable` | **8.8 GB** | **10.0 GB** | **10.1 GB** |
+| `MemAvailable` | 8.8 GB | 10.0 GB | 10.1 GB |
 | `MemFree` | 0.9–1.2 GiB, reclaimable page cache | | |
-| Swap used | ~0.11 GiB | ~0.09 GiB | ~0.08 GiB, **flat through the rounds** |
+| Swap used | ~0.11 GiB | ~0.09 GiB | ~0.08 GiB, flat through the rounds |
 
-**The rule, and how to apply it at 0.83.** On a GB10 the GPU shares host memory, so free host RAM
-*is* your safety margin, and this repository has used **4 GiB free** as the audit floor and 2 GiB as
-the hard one. At 0.83 `MemFree` is below both — and we took the rung anyway, because the number that
-actually decides it is **swap growth**, and it did not move. 0.85 was rejected on 1.6 GB of swap
-appearing under load on the head node; 0.83 stays at ~0.1 GB and flat, with `MemAvailable` at
-8–10 GB. **So: watch swap, not `MemFree`.** If your swap grows during the rounds, step
-`gpu-memory-utilization` down and re-audit; if `MemFree` is low but swap is flat and `MemAvailable` is
-in the gigabytes, you are where we are. **And read swap *traffic*, not swap used** — the stock sits
-at ~0.04 GiB at every rung including the one that failed, so it discriminates nothing. That is the
-ruler the 6 September ladder was climbed with, and on it 0.85, 0.87 and 0.88 all pass while 0.90 is
-rejected; **"0.85 will not be attempted on this stack" is `[retracted]`** (§6,
-[docs/11](../docs/11-open-issues.md) §2.4,
-[`results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md)).
+At **0.87** (production 11), `MemAvailable` min under load was 3.40 / 4.66 / 4.68 GiB with swap
+traffic exactly zero on the clean boot. Consumed memory per node was **58.3–59.1 GiB** on production
+9, 10 and 11 alike; production 12's 54.3–54.6 is the 4.42 GiB the workspace bound releases, measured
+on the far side.
 
-Consumed memory per node (weights plus non-torch) should be **58.3–59.1 GiB**.
+</details>
 
 `vm.swappiness` should read **60**. Do not set it to 0 — see
 [docs/00](../docs/00-hardware-and-os.md) §9.1 for the incident that cost three power cycles.
 
 ### boot time — `[measured-here]`
 
-| | Expected |
-|---|---|
-| Container start → API ready, fast-load boot | **251 s** (weights 58 s) |
-| The one-off dump boot that produces the sidecar | **620 s** |
-| Without a fast-load sidecar at all | ~618 s |
+| | Expected (production 12) | Production 9 `[history]` |
+|---|---|---|
+| Container start → API ready, fast-load boot | **272 s** (weights 80 s) | 251 s (weights 58 s) |
+| `systemctl start` → `/health` 200 | **205 s** | — |
+| **Power-on to `/health` 200**, all three rebooted together, autostart enabled | **311 s** by the wall clock | — |
+| The one-off dump boot that produces the sidecar | **590 s** | 620 s |
+| Without a fast-load sidecar at all | ~618 s | ~618 s |
+
+The power-on figure is the planning number and it has not moved: 311 s at production 12 against
+312 s at production 11, by the same wall clock. Note that production 10's equivalent is published
+twice — 242 s by the harness counter and 315 s by the wall clock in the same log — and the larger is
+the one to plan on (§5).
 
 ---
 
@@ -312,8 +463,10 @@ In this order, because each step rules out the ones after it:
 2. **Correctness.** If the probe or the code exam fails, compare your image and patch tree against
    `patches/` — every failure we have seen here traced to a missing patch, not to a setting.
 3. **The KV pool**, from the start-up log. It tells you whether the engine built the shape you asked
-   for, before any timing is involved. Check the settle gate before you believe a small pool.
-4. **Memory.** A machine that is swapping produces speed numbers that mean nothing.
+   for, before any timing is involved. Check the settle gate before you believe a small pool, and
+   check the workspace resize line — one per rank at 513.00 MB — before you believe a large one.
+4. **Memory.** A machine that is swapping produces speed numbers that mean nothing. Read swap
+   *traffic* under load, on every node, not `MemFree` and not swap used.
 5. **Speed**, and only against the matching row, with the matching concurrency, the matching prompt
    category, and the matching number of sweep rounds.
 
@@ -327,9 +480,14 @@ by symptom with the exact log line.
 Named so you do not mistake silence for a pass:
 
 - **Quality beyond the two gates.** The MMLU sample (1,995 questions) takes hours and is not in the
-  script. Ours reads **86.47 ±0.74** at TP=3 on the production checkpoint.
-- **Long context.** `max_model_len` is 1,000,000 and the pool supports about 5.2 such requests, but
-  the audit sends nothing near that.
+  script. Ours reads **86.47 ±0.74** at TP=3, measured on production 9 and carried forward through
+  10, 11 and 12 `[not tested]` on each.
+- **Long context.** `max_model_len` is 1,000,000 and the pool supports about **7.0** such requests at
+  production 12, but the audit sends nothing near that. Production 12 was promoted on two cases the
+  script does not run — one 969,468-token request, correct in 569.6 s, and eight concurrent ~128K
+  lanes, 8/8 with 640,904 prompt tokens in 227.5 s — because a bounded indexer workspace is only safe
+  if the bound holds under exactly those. **If you change `max_num_seqs` or the K-pool size, that
+  bound is recomputed at boot and these are the two cases to re-run.**
 - **Anything at max reasoning effort.** See §1.
 - **Numerical equivalence against BF16.** We never ran it.
 
@@ -362,7 +520,10 @@ Named so you do not mistake silence for a pass:
 | Why 0.90 was rejected, and what a rung costs | Head node **1,519.4 MiB paged out and 142.6 MiB read back**, 250 of 598 load seconds non-zero, longest unbroken run 85 s, swap in use at the end 2.65 / 0.57 / 0.52 GiB against 0.03 at the reference. What surfaces at the client is the arm's **first prefill going 5.0 → 9.8 s**, not a lower median. `MemAvailable` min on the head node across the five rungs: 8.35 / 5.99 / **3.49** / 1.86 / 1.04 GiB — every 1 % of the fraction costs about **1.2 GiB** of host headroom | one line per rung, same tree | 6 Sep 2026 | `results/memory/ladder-6sep.md` §3–§4 |
 | The per-node memory ledger, read with the engine left running | Engine CUDA allocation **99.06 GiB** = weights 51.62 + KV pool 40.12 + non-torch 7.28 + CUDA graph **0.00**; host anonymous 5.60; page cache 5.80; slab 2.36; free 5.08; residual **3.49**, which reads **3.12** with the engine down and is therefore the driver's fixed reserve. Genuinely unavailable at idle: **4.84 GiB** of 121.63 | prod 10 @ 0.83, read-only, engine up | 6 Sep 2026 | `docs/17-memory-ledger.md` §2 |
 | What a KV block is, and the KDA speculation slots inside the divisor | Block = 3,328 tokens, **20,934,400 B**: MLA latent fp8 **89.53 %**, indexer k fp8 5.77 %, DFlash2 draft 4.70 %. A 1M-token request costs **363 blocks = 7.078 GiB on every node** and the pool holds **5.67** of them. Under `mamba_cache_mode=align` every KDA layer holds **2 + 7 = 9** state slots per request — **36 blocks, 9.9 % of the divisor at TP=3 and 12.9 % at TP=2**, 5.61 GiB (14 % of the pool) at 8-way concurrency. Taking the slots to two projects **+8.0 %** (TP=3) and **+9.6 %** (TP=2) `[estimate]`, against an arithmetic worst case of C8 197 → about 168 tok/s; **not run** `[not tested]` | prod 10 @ 0.83 | 6 Sep 2026 | `docs/17-memory-ledger.md` §3–§5 |
-| **Production 12 candidate** — the sparse indexer's K-gather workspace, bounded | Locked workspace **5,036.40 → 513.00 MB** (−4.42 GiB); KV pool **6,289,256 → 6,933,884, +10.25 %** at an unchanged memory fraction. C1 69.69 → 70.69, C8 199.76 → 196.81, prefill fresh 1,794 → 1,778, TTFT equal — every level inside its band. Gates 10/10 · 12/12 cold and warm on both arms, tool-call 8/8, needle-lite 6/6, one **969,468-token** request correct in 572.4 s, **eight** concurrent long-context lanes (640,904 prompt tokens) with every needle correct, swap 0.000 GiB, no safety layer fired. **Not in production** — `results/configs/production-configurations.csv` carries no row 12 as of this commit, and the promotion waits on disk rather than on doubt; both arms are eager boots, so the production pool with fast-load restored is an `[estimate]` until a promoted boot prints it | prod 11's 0.87, fast-load off, one line between the arms | 6 Sep 2026 | `results/memory/indexer-workspace-ab.md`, `docs/17` §2.5 |
+| **Production 12 candidate** — the sparse indexer's K-gather workspace, bounded | Locked workspace **5,036.40 → 513.00 MB** (−4.42 GiB); KV pool **6,289,256 → 6,933,884, +10.25 %** at an unchanged memory fraction. C1 69.69 → 70.69, C8 199.76 → 196.81, prefill fresh 1,794 → 1,778, TTFT equal — every level inside its band. Gates 10/10 · 12/12 cold and warm on both arms, tool-call 8/8, needle-lite 6/6, one **969,468-token** request correct in 572.4 s, **eight** concurrent long-context lanes (640,904 prompt tokens) with every needle correct, swap 0.000 GiB, no safety layer fired. Both arms are eager boots, so the production pool with fast-load restored was an `[estimate]` of ≈7.03 M here — **settled by the promotion the same day at 7.04–7.17 M**, the row below | prod 11's 0.87, fast-load off, one line between the arms | 6 Sep 2026 | `results/memory/indexer-workspace-ab.md`, `docs/17` §2.5 |
+| **Production 12 — shipped, and what §2 grades against** — configuration 11 at 0.88 **plus** the indexer workspace bound (`HAREM_INDEXER_WS_MODE=bound`) | KV **7,041,322** on the reboot boot, three boots reading 7,170,798 / 7,088,154 / 7,041,322; C1 **69.72 / 75.55**; C8 **196.06 / 28.44**; C2 101.20, C4 146.14, C6 176.00; prefill fresh 1,744 (1,737 load, 1,750 clean); TTFT 0.25 / 0.80 s; acceptance 62.5 / 62.4 % · 5.35 per step; consumed per node **54.62 / 54.48 / 54.28 GiB**, available KV 50.75 / 50.89 / 51.09 GiB, locked workspace 513.00 MB at exactly one resize per rank. Against a same-session 0.87 reference: KV **+10.3 %** (+12.3 % on the best boot), **C1 +0.08 %, C8 −0.08 %** — every level inside its band. Boot 272 s fast-load, 205 s from `systemctl start`, **311 s** from power-on with all three rebooted together, 590 s for the dump boot the patch forces | prod 12 @ 0.88, pool of six rounds over two boots | 6 Sep 2026 | `results/configs/production-configurations.csv` row 12, `results/memory/indexer-workspace-ab.md` §7.1 |
+| Production 12, host memory and swap **traffic** under load | Swap **in exactly 0** in every sample on every node, in both windows; swap out **1,340 / 5 / 10 KiB** over the 1,765 s stress window (8 of 353 samples, longest unbroken run 10 s) against the reference's own 10 / 5 / 5, and 5 / 10 / 10 KiB with swap used **0.000 GiB** on the clean boot. `MemAvailable` min **1.52 / 3.37 / 3.36 GiB** on the arm that also ran both long-context stress cases, **3.15 / 4.49 / 4.45** on the clean boot. OOM killer 0 on all three | prod 12 | 6 Sep 2026 | `results/configs/production-configurations.csv` row 12, `results/memory/ladder-6sep.md` |
+| Production 12, quality and the whole-cluster reboot | Gates **10/10 · 12/12 cold and warm** on the load boot, on the systemd-started engine and on the clean boot after a whole-cluster reboot; tool-call **8/8**; needle-lite **6/6** at 64K and 128K. Long-context stress the 0.87 reference never ran: one **969,468-token** request correct in **569.6 s**, and **eight** concurrent ~128K lanes 8/8, 640,904 prompt tokens in 227.5 s (2,817 tok/s aggregate prefill), each lane carrying its own needle. After both, every rank still logs exactly one workspace resize and zero assertions — none of the patch's four safety layers fired. MMLU is production 9's 86.47 ±0.74, carried forward and `[not tested]` here | prod 12 | 6 Sep 2026 | `results/configs/production-configurations.csv` row 12, `results/boot/boot-ledger.md` |
 | **TP=2 production candidate B** (full scope), against candidate A (routed experts only) | KV pool at 1M **2,128,571** against 1,500,000 (**+41.9 %**); C1 **58.50 / 62.55** against 48.76 / 54.72; C8 **155.75** against 137.41; TTFT 0.407 / 1.077 s; consumed per node **84.8 GiB** against 89.3 (**−4.5**); prefill fresh 1,400 against 1,444 (equal); boot 272 s on both; gates 10/10 · 12/12 cold and warm, tool-call 8/8, needle-lite 6/6 on both; MMLU **86.02 ±0.75** against 86.37 ±0.74, inside one error bar | **two** nodes, TP=2, EP off, `exl3-zeus:754421f`, 0.85, median of rounds 2–4 of four | 6 Sep 2026 | `results/speed/tp2-production-candidate.md`, `docs/15` §5 |
 | The draft KV page at two ranks (`HAREM_SW_BLOCK_SIZE=256`) | KV pool **601,562 → 1,303,571, +116.7 %** (+109.6 % normalised); C8 127.54 → 135.59 (+6.3 %); TTFT −23 % at C1 and −27 % at C8; C1 aggregate equal; gates full on both arms. **The headline is the cliff, not the pool**: without it a 6,253-token prompt is never scheduled at all (`Running: 0, Waiting: 1`), with it 8,268 tokens serve in 6.3 s at 1,478 tok/s fresh prefill. The drafter takes **60.2 %** of the blocks-per-request divisor at TP=2 against 53 % at TP=3. Cost: +9.1 % memory per block, acceptance −1.9 points | **two** nodes, TP=2, EP off, `exl3-zeus:62f53e6`, experts-only `b20c49ba`, 0.85, three rounds, one boot each | 6 Sep 2026 | `results/speed/tp2-draft-page.md`, `docs/15` §4 |
 | KDA/MLA quantization gate bench, **cold, on the target GPU** — **this is the live row** | KDA arms EXL3/bf16 **1.023** at M=8 (neutral, +0.050 ms/step); `kv_b_proj` **0.291×**; three families together **+1.368 ms/step** against a 1.5 ms gate; prefill not re-measured | model-free, **GB10**, both arms rotated over ≥ 4× L2 | 5 Sep 2026 | `results/kernels/kda-gate-bench-gb10.md`, `results/kernels/gb10-coldbench/`, `bench/kda_gate_bench_gb10.py` |
@@ -435,7 +596,7 @@ page — this is the index, so a reviewer can see the shape of our error rate in
 | **new** | **Production 9 cost 2.4 points of draft acceptance — "this is the cost"** | **A harness artefact.** Pooled by draft token over five levels and three boots it is **+0.18 points**. `bench-sweep.py` cycles `prompts[i % 12]`, so C1/C2 see 8 of 12 prompts and C4–C8 see all twelve; a two-group model explains all five levels at R² = 0.97, and the sign reverses at C6. Net effect on tok/s: **+0.24 %** |
 | **new** | Full scope is "equal both ways" on prefill | True of the **wall** and it hides the class underneath: the dense stage in prefill is **+17.3 ms, +10.4 %** at M=1,792. The plugin author reproduced it on his own card and withdrew a "cuBLAS parity" claim from his README |
 | 1.11 | **"EXL3 is 1.58–1.76× slower than BF16 on the KDA shapes at M=8" — the sentence that closed the quantization item** | **A warm number, on the wrong card.** The ~300 MB weight bank was sized for the large shapes and left the 0.72 MB KDA arm resident in a 101 MB L2. Cold on the **target** GPU the same shape reads **1.023**; GB10's own warm arm reproduces the withdrawn 1.596 at **1.605**. Seven of nine shapes reverse sign and the family goes from **−0.584 to +0.050 ms/step**. Two companions go with it: "GB10's ratios will be worse" (every family came out **better**) and "not bandwidth-bound, so bytes are not the cost" (right, but the cost is **two dependent launches**, so the remedy is a fusion). **The closure survives, re-scoped:** the arms stay BF16 for want of a gain, `kv_b_proj` still holds 96 % of it and still needs a kernel, and prefill was never re-measured |
-| 2.4 | **"0.85 will not be attempted on this stack"**, and "0.88 was never attempted" | **The wrong ruler, on a machine that no longer exists.** Both rested on `MemFree` against a 4 GiB floor, and the 0.85 boot they came from predates the fast-load page-cache fix. Climbed rung by rung on 6 September against **swap traffic under load** instead: 0.85, 0.87 and 0.88 all pass, **0.90 is rejected**, and **0.87 is production configuration 11** |
+| 2.4 | **"0.85 will not be attempted on this stack"**, and "0.88 was never attempted" | **The wrong ruler, on a machine that no longer exists.** Both rested on `MemFree` against a 4 GiB floor, and the 0.85 boot they came from predates the fast-load page-cache fix. Climbed rung by rung on 6 September against **swap traffic under load** instead: 0.85, 0.87 and 0.88 all pass, **0.90 is rejected**, 0.87 shipped as production configuration 11 — and **0.88, the rung that ladder passed and then declined on diagnostic headroom, shipped hours later as production configuration 12**. The measurement did not change; the decision about what the cluster is for did |
 | 2.27 | The MLA-prefill "21–26 % overlap gap, worth about 2 % of a prefill chunk" | **It does not exist, and the item closes at zero.** Production was never between the kernel author's two arms — its selection turns over about **152 keys per row**, 76× his low-turnover arm — and on our own 48-SM part production runs within **1.3 %** of a fully cache-resident arm at 262K context. The only lever left on that kernel is less work, not less traffic |
 | docs/17 §2.4 | "The driver takes 14.2 GiB" | **Stale by about 10 GiB.** It came from an NVFP4-era ceiling scan whose best observed free was 107.43 of 121.63; the three ranks start at **112.01 / 112.97 / 113.15** and an idle node offers **116.79**. The driver's fixed reserve is **3.12–3.49 GiB** and the total genuinely unavailable at idle is **4.84**. What limits the memory fraction now is the host's share at run time — a ruler correction, not a lever |
 | docs/17 §4.1 | **Eight** of the nine KDA state slots exist so a rejected speculative step can be rolled back | **Seven.** The nine can be read as `1 + 8` off the non-align branch of that `if` and our first pass did read it that way; **align is the branch we run**, so it is `2 + 7`. No total moves — nine either way — but it is why the compact-rollback alternative goes to **two** slots and not to one |

@@ -130,13 +130,16 @@ driven from the workstation — stop all three, drop caches, staggered start, wa
 measured 307 s wall on the production 7 arm, including the driver's own stop and stagger. Production 8
 re-dumped its sidecar for the new image, which is a dump boot's cost and not this figure.
 
-**Content types and mixed load have not been re-measured for four configurations.** Everything after
-the fast-boot arm was measured with the quick arm of the tiered protocol
-([09](09-measurement-protocol.md) §9), which runs neither probe. The last figures, on the fast-boot
-arm: code **47.9**, math **59.0**, JSON **57.7**, prose **22.4** tok/s at a single stream, with draft
-acceptance 46 / 56 / 55 / **13 %**; mixed load 7.0 tok/s with a 4.9 s TTFT for the long prompt
-`[measured-here]`. Prose is where a k=7 draft is wasted ([04](04-dflash2-port.md) §6). Whether the
-mesh work, the draft cache or the new image moved any of it is `[not tested]`.
+~~**Content types and mixed load have not been re-measured for four configurations.**~~ **Content
+types were re-measured on production 12 on 7 September** `[measured-here]`: code **61.5**, math
+**76.2**, JSON **73.1**, prose **29.0** tok/s at a single stream, acceptance 46 / 57 / 53 / **13 %**,
+median of three rounds. Every category is inside its own round-to-round spread against production 9,
+which means the three memory rungs and the indexer workspace bound bought **+37.8 % of KV pool
+without costing any category tokens per second**. Full tables, C1 and C4:
+[`../results/speed/category-speeds-production-12.md`](../results/speed/category-speeds-production-12.md);
+why the prose row is what it is, §1.2 below. **Mixed load is still unrun on this configuration**
+`[not tested]` — the last figure is the fast-boot arm's 7.0 tok/s with a 4.9 s TTFT for the long
+prompt.
 
 ### 1.1 The spread these numbers sit inside, and which reading the headline uses
 
@@ -178,6 +181,63 @@ aggregate** ([13](13-full-scope-checkpoint.md) §4.1), not a TP=3 boot, and the 
 beside it was a production **8** restore. No production 9 or 10 boot has read below **67.7** even at
 the level of a single round. Mixing a two-node arm into a three-node series would have doubled the
 apparent noise floor and buried every real few-percent effect on this page underneath it.
+
+### 1.2 Why prose is slow, and why it is the draft
+
+The category row above has one number in it that looks like a different machine. On production 12,
+single stream, median of three rounds `[measured-here]`:
+
+| | prose | code | math | JSON |
+|---|---|---|---|---|
+| decode tok/s | **29.04** | 61.46 | 76.20 | 73.13 |
+| draft acceptance | **13.02 %** | 45.94 % | 57.11 % | 52.90 % |
+| accepted tokens per step | **1.91** | 4.22 | 5.00 | 4.70 |
+| **step rate (decode ÷ tokens per step)** | **15.19 /s** | **14.58 /s** | **15.25 /s** | **15.55 /s** |
+
+**Read the last row first.** With a k-deep draft the engine emits `L = 1 + k × acceptance` tokens per
+target forward. Divide each category's decode rate by its own `L` and the step rate is the same in
+all four columns — a 6.4 % spread, which is this probe's ordinary round-to-round noise — while the
+row above it spans a factor of 2.6. **The engine steps at the same rate whatever the content. The
+only thing that changes is how many tokens come out of each step, and that is the drafter's hit
+rate.**
+
+Three further measurements close the attribution:
+
+- **Acceptance per category has not moved across ten boots** `[measured-here]`. Prose has read
+  **12.1 – 13.1 %** across four image builds, both draft page sizes, four memory fractions, the mesh
+  patches, the indexer workspace bound and the full-scope checkpoint promotion; code 44.6 – 46.9 %,
+  math 55.0 – 58.0 %, JSON 52.8 – 55.2 %. Production 12 sits inside every one of those bands.
+- **The checkpoint is not the variable.** The full-scope promotion (production 9, §2.3) raised the
+  step rate from about 11.7 /s to about 15.3 /s — that is what a 4-bit dense stage bought — and left
+  acceptance untouched in all four categories. It moved every category by the same 30 %; it did not
+  change the ratio between them.
+- **Speculation is barely paying on prose.** The one arm measured with *and* without the drafter is
+  the two-node one ([04](04-dflash2-port.md) §1): 14.73 tok/s per stream unspeculated against 50.79
+  at k=7, where the speculative arm advances 5.46 tokens per step. A speculative step therefore costs
+  **1.58×** a plain step, break-even is **8.3 % acceptance**, and at 13.02 % prose gets about
+  **×1.21** out of speculation where math gets ×3.16 `[estimate]` — the overhead factor is measured
+  at two nodes, an unspeculated three-node arm is `[not tested]`. Prose runs close to what this
+  engine does with no drafter at all, and pays the verify overhead to stay there.
+
+**No configuration lever exists for it, and three were looked for.** `k=5` raises prose by 3.6 % at
+C1 and costs every other category and every concurrency level 3.5 – 6.4 % ([04](04-dflash2-port.md)
+§6). Per-request `k` is not available: `num_speculative_tokens` lives in `--speculative-config` and is
+fixed at engine start, so one value serves every request. And a **newer published revision of the
+same drafter was booted on production 12 on 7 September** and came back equal — acceptance 62.08 →
+61.32 % at C1 and 60.53 → 61.61 % at C8, opposite signs, both inside the 60–65 % band, all gates full
+first time; the ~5 % speed reading on that arm belongs to the boot rather than the draft, because
+prefill fell by the same 5 % and prefill does not use the drafter ([04](04-dflash2-port.md) §8.1).
+Its per-category split was not run `[not tested]`.
+
+**So the plain statement.** Prose is slow because the DFlash2 draft agrees with the target model
+about one token in eight on free-running prose. It is not the checkpoint, not the kernels, not the
+mesh, not the KV geometry and not the memory fraction — ten arms of those moved prose acceptance by
+one point in total. **A better draft checkpoint is the only thing that fixes this row**, and a
+different drafter demonstrably can: an MTP head at k=3, measured in the same session as DFlash2 on
+the two-node arm, *wins* prose at 21.3 against 18.5 tok/s while losing every other category by
+20–40 % ([04](04-dflash2-port.md) §7). Until such a checkpoint exists, budget the prose row as
+measured. Full evidence, every arm and both concurrency levels:
+[`../results/speed/category-speeds-production-12.md`](../results/speed/category-speeds-production-12.md).
 
 ---
 
@@ -1135,9 +1195,13 @@ argued about (§5.2, [11](11-open-issues.md) §2.5) `[measured-here]`.
   `[measured-here]`.
 - **Long-context behaviour at scale.** The KV pool supports about 4.4 concurrent million-token
   requests and we never drove it past 13 % usage `[measured-here]`.
-- **Content types and mixed load on the production configuration** `[not tested]` — the last two arms
-  were measured at tier B ([09](09-measurement-protocol.md) §9), which runs neither probe. §1 carries
-  the fast-boot arm's figures and says so.
+- ~~**Content types and mixed load on the production configuration.**~~ **Content types: done on
+  production 12 on 7 September** `[measured-here]` — §1.2 and
+  [`../results/speed/category-speeds-production-12.md`](../results/speed/category-speeds-production-12.md).
+  **Mixed load is still unrun** `[not tested]`: `scripts/mixed-load-probe.py` has not gone since the
+  fast-boot arm, and §1 carries that arm's figure. Also still absent on the category side is an
+  **unspeculated three-node arm** — one boot without `--speculative-config`, about 25 minutes, which
+  would turn §1.2's per-category return-on-speculation column from an estimate into a measurement.
 - ~~**A torch-profiler run on the production configuration.**~~ **Done** `[measured-here]`. It cost one
   launcher flag and no boot of its own, it settled both rows it was supposed to settle — the NCCL band
   came in at the bottom of 14–17 %, and the C8 split is in §5.3 — and it deleted two targets that had

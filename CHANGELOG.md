@@ -11,6 +11,47 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-07 — Content types on production 12: the pool grew 38 % and no category noticed, and the prose row is decomposed down to the drafter
+
+**The category probe had not run for four configurations, and it has now run on the production one.**
+Single stream, six prompts per category, one warm-up round plus three measured rounds on a warm
+production-12 engine with no boot inside the window: **code 61.5, math 76.2, JSON 73.1, prose 29.0
+tok/s**, acceptance **46 / 57 / 53 / 13 %**, accepted tokens per step 4.22 / 5.00 / 4.70 / **1.91**
+`[measured-here]`. Against production 9 — measured with the same prompt set at
+`gpu-memory-utilization 0.80` — every category is inside its own round-to-round spread (prose −0.2 %,
+code −0.4 %, JSON +0.5 %, math −4.3 % against an 8.4 % round spread). Between those two arms the KV
+pool went **5,165,289 → 7,118,457 tokens, +37.8 %**, through three memory rungs and the indexer
+workspace bound: **the pool was bought with memory, not with tokens per second.** C4 is on the page
+too. New file:
+[`results/speed/category-speeds-production-12.md`](results/speed/category-speeds-production-12.md).
+
+**The prose row is 2.6× below math, and it decomposes exactly.** With a k-deep draft the engine emits
+`L = 1 + k × acceptance` tokens per target forward. Divide each category's decode rate by its own `L`
+and the **step rate is the same in all four columns — 14.58 to 15.55 /s, a 6.4 % spread** — while the
+decode row above it spans a factor of 2.6 `[measured-here]`. The engine steps at one rate whatever
+the content; only the tokens per step change, and that is the drafter's hit rate. Three
+measurements finish the attribution: acceptance per category has not moved across **ten boots**
+(prose 12.1 – 13.1 % through four image builds, four memory fractions, the mesh patches and the
+full-scope promotion); the full-scope checkpoint raised the step rate ~30 % and left acceptance
+untouched, so it is not the weights; and on the one arm measured with *and* without the drafter a
+speculative step costs **1.58×** a plain one, putting break-even at **8.3 % acceptance** — prose, at
+13 %, gets about **×1.21** out of speculation where math gets ×3.16 `[estimate]`.
+
+**No configuration lever exists for it, and this is said plainly rather than left implied.** `k=5`
+buys prose 3.6 % at C1 and costs every other category and every concurrency level 3.5 – 6.4 %;
+per-request `k` does not exist, because `num_speculative_tokens` is fixed at engine start; and the
+newer drafter revision in the entry below came back with acceptance equal. **A better draft
+checkpoint is the only thing that moves this row**, and a different drafter demonstrably can — an MTP
+head at k=3, in the same session, wins prose 21.3 against 18.5 tok/s while losing every other
+category by 20–40 %. Written up as [docs/10 §1.2](docs/10-results-and-roofline.md); the two stale
+`[not tested]` claims about content types in that page are corrected, and **mixed load is still
+unrun** `[not tested]`, as is an unspeculated three-node arm, which would turn the
+return-on-speculation column from an estimate into a measurement. Cost of the work: one 28-minute
+engine window of request traffic, no boot, no configuration change, gates **10/10 · 12/12** cold and
+again after the benchmark, swap use zero throughout.
+
+---
+
 ## 2026-09-07 — The newer DFlash2 drafter revision, measured: acceptance does not move, and the pin does not either
 
 **The one instrument a drafter swap actually moves is acceptance, and it did not move.**

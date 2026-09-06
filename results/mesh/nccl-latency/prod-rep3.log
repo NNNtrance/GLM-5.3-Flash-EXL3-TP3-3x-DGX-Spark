@@ -1,0 +1,30 @@
+## nccl-latency-bench tag=prod-rep3 world=3 warmup=10 iters=50 algo=Ring proto=- nch=-/8
+     bytes    time_us  algbw_GBps  busbw_GBps  correctness
+/usr/local/lib/python3.12/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+         8     77.562       0.000       0.000  OK
+        16     75.690       0.000       0.000  OK
+        32     74.817       0.000       0.001  OK
+        64     73.146       0.001       0.001  OK
+       128     72.957       0.002       0.002  OK
+       256     74.319       0.003       0.005  OK
+       512     76.168       0.007       0.009  OK
+      1024     79.002       0.013       0.017  OK
+      2048     73.764       0.028       0.037  OK
+      4096     72.317       0.057       0.076  OK
+      8192     74.683       0.110       0.146  OK
+     16384     76.155       0.215       0.287  OK
+     32768    107.899       0.304       0.405  OK
+     65536     74.796       0.876       1.168  OK
+    131072    172.478       0.760       1.013  OK
+    262144     91.856       2.854       3.805  OK
+    524288    130.687       4.012       5.349  OK
+   1048576    261.514       4.010       5.346  OK
+   2097152    483.851       4.334       5.779  OK
+   4194304    297.206      14.112      18.817  OK
+   8388608    539.706      15.543      20.724  OK
+  16777216   1080.639      15.525      20.700  OK
+  33554432   2053.385      16.341      21.788  OK
+  67108864   3954.980      16.968      22.624  OK
+wrote /cache/lat-prod-rep3-r0.json
+NCCL version 2.30.7+cuda13.3

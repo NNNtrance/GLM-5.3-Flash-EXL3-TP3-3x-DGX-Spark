@@ -1,0 +1,24 @@
+## nccl-latency-bench tag=protoSimple world=3 warmup=10 iters=50 algo=Ring proto=Simple nch=-/8
+     bytes    time_us  algbw_GBps  busbw_GBps  correctness
+/usr/local/lib/python3.12/dist-packages/torch/distributed/c10d_logger.py:83: UserWarning: barrier(): using the device under current context. You can specify `device_id` in `init_process_group` to mute this warning.
+  return func(*args, **kwargs)
+         8     76.477       0.000       0.000  OK
+        16     74.291       0.000       0.000  OK
+        32     79.801       0.000       0.001  OK
+        64     74.916       0.001       0.001  OK
+       128     75.576       0.002       0.002  OK
+       256     72.714       0.004       0.005  OK
+       512     98.351       0.005       0.007  OK
+      1024     75.211       0.014       0.018  OK
+      2048     76.857       0.027       0.036  OK
+      4096    110.882       0.037       0.049  OK
+      8192     69.405       0.118       0.157  OK
+     16384     72.675       0.225       0.301  OK
+     32768     75.824       0.432       0.576  OK
+     65536     96.159       0.682       0.909  OK
+    131072    621.294       0.211       0.281  OK
+    262144    618.847       0.424       0.565  OK
+    524288    683.160       0.767       1.023  OK
+   1048576    629.773       1.665       2.220  OK
+wrote /cache/lat-protoSimple-r0.json
+NCCL version 2.30.7+cuda13.3

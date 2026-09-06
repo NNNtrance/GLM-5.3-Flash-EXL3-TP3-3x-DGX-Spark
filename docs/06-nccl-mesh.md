@@ -670,6 +670,22 @@ forced `Ring` (3.90 against 3.96 ms per decode step), so the launcher's `Ring` s
 carrying `NCCL_MAX_NCHANNELS=8` *alongside* `NCCL_PROTO=LL` is not evidence that 8 channels was tried and rejected —
 the `LL` in it costs 11× at 16 MB and buries the channel gain. That combination was never tried cleanly.
 
+**The 64 KB row disagrees with our own newer harness by about 40 %, and both readings stand.** A
+byte-precise sweep taken on 6 September with [`bench/nccl-latency-bench.py`](../bench/nccl-latency-bench.py)
+on the *production* configuration reads **86.4 µs** at 64 KB and **74.68 µs** at 8 KB, against the
+**61.3 / 61.5 µs** and **38.6 / 38.7 µs** in the table above `[measured-here]`. The two harnesses
+differ in more than one variable at once — iteration count and warmup, the timing loop, and for the
+rows above a plugin build and cabling state from before the dual-cable and `NCCL_PTR_CUDA` work of
+§6-§7 — so **no single cause can be assigned from the data that exists, and neither number is
+corrected against the other**. `bench/mesh_sweep.py` gives a third reading at the same size
+([`../results/mesh/all-reduce-sweep.md`](../results/mesh/all-reduce-sweep.md) §4: 143 µs at 8
+channels, labelled at the time as latency-bound within ±100 µs of noise). Quote the harness with the
+number. Running both **in one session on one configuration** is [HELP-WANTED](../HELP-WANTED.md) §5,
+and this repository's own rule is that the ruler gets measured too
+([11](11-open-issues.md) §4). What does **not** depend on which harness is right: the curve is flat
+across a 4,096× range of message sizes in every one of them, which is the whole of the latency-bound
+verdict — [`../results/mesh/nccl-latency-sweep.md`](../results/mesh/nccl-latency-sweep.md).
+
 ### 12.2 `NCCL_ALGO`: `Tree` is dead here, and the model-free sweep could not settle `Ring,Tree`
 
 The launcher **forces** `NCCL_ALGO=Ring`, which for a long time was an inherited default and not a measured choice —

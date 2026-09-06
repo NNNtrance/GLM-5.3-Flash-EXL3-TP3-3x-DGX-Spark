@@ -28,6 +28,8 @@ header.
 | `boot/boot-ledger.md` | Boot time per phase across the four arms, the bit-identity evidence, the block-layer forensics, memory and swap. |
 | `boot/tuner-cache.md` | The persisted MLA tuner cache: tune events per boot, round-1 against round-3, and why the sweep protocol got shorter. |
 | `mesh/all-reduce-sweep.md` | The mesh all-reduce cliff: bandwidth by message size against point-to-point, the hardware counters, the channel-count dose–response, the protocol sweep, and the engine A/B. |
+| `mesh/nccl-latency-sweep.md` | **The byte-precise all-reduce sweep, 8 B to 64 MiB.** Where the latency floor is (flat 72-85 µs across a 4,096x size range), what the prefill collective gets against our own measured wire (98.1 %), the channel and protocol arms, and the 40 % disagreement between two of our own harnesses at small sizes. |
+| `mesh/nccl-latency/` | Its raw: the 132-row CSV of every arm x size, one log and one JSON per repetition, each JSON carrying the NCCL configuration the container actually saw. |
 | `mesh/multilink-sweep.md` | The nine-arm plugin sweep: the idle second cable, `NCCL_PTR_CUDA`, what the flush and DMA-BUF cost, and why 16 channels is harmful. |
 | `mesh/multilink-sweep.csv` | The same sweep, every arm × operation × size, with the per-collective RNR counters. Machine-readable. |
 | `mesh/algo-sweep.md` | The `NCCL_ALGO` sweep: Ring against Ring,Tree against Tree, both repetitions printed, with the decode-step proxy, the RNR counters and the port deltas that show how a tree redistributes the traffic. |

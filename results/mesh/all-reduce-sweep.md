@@ -99,6 +99,13 @@ Microseconds per all-reduce, world = 3, each protocol measured twice:
 auto's 1,787 µs, which also retracts an earlier reading of ours that the tuner was choosing `LL`
 there. `NCCL_ALGO` unset measures the same as the forced `Ring`.
 
+**The small-size rows of this table are contradicted by a later harness of ours and are kept anyway.**
+[`nccl-latency-sweep.md`](nccl-latency-sweep.md), 6 September, production configuration, reads
+**86.4 µs at 64 KB** and **74.68 µs at 8 KB** where the rows above read 61.3 and 38.6. §4 of this same
+page reads 143 µs at 64 KB with a third tool. Three harnesses, three answers, one operation. They are
+all recorded, none is corrected against the others, and a same-session comparison is
+[HELP-WANTED](../../HELP-WANTED.md) §5 — see [docs/06](../../docs/06-nccl-mesh.md) §12.1.
+
 ## 6. Engine A/B
 
 Five sweep rounds per arm, rounds 1–2 discarded, one boot per arm, plus a third confirmation boot

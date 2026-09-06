@@ -178,14 +178,29 @@ The decode collective has no bandwidth term in it. On our production plugin buil
 6 September 2026 reads **74.7 µs at 8 KB** (0.146 GB/s of bus bandwidth), 86.4 µs at 64 KB, 275 µs at
 1 MiB, **1,097 µs at 16 MiB — 20.40 GB/s, or 98.1 % of the 20.8 GB/s we measure on our own wire** —
 and 3,955 µs at 64 MiB. **From 8 B to 32 KiB the curve is flat at 72-85 µs**: pure latency, no bytes
-in it `[measured-here]`. Raw not yet in `results/`.
+in it `[measured-here]`. Full tables, arms, isolation and raw:
+[`results/mesh/nccl-latency-sweep.md`](results/mesh/nccl-latency-sweep.md); the tool is
+[`bench/nccl-latency-bench.py`](bench/nccl-latency-bench.py) and
+[`bench/README-nccl-latency.md`](bench/README-nccl-latency.md) says why it is not `nccl-tests`
+(no MPI on these nodes, and `nccl-tests` requires it for multi-node).
 
-**Start by settling our own instrument, because two of our harnesses disagree.**
-`docs/06-nccl-mesh.md` §5, taken earlier with `bench/mesh_sweep.py` on the pre-multilink
-configuration, reads **38.6 µs** at 8 KB for the same operation. 38.6 against 74.7 is a factor of two
-between two of our own benches and we have not reconciled them. Whoever runs this should run **both**
-harnesses in one session before drawing any conclusion — this repository's standing rule is that the
-ruler gets measured too, and three of ours turned out to be brochures (`docs/11` §4).
+**Start by settling our own instrument, because three of our harnesses disagree.** On the same
+operation, at the same two sizes:
+
+| harness | 8 KB | 64 KB |
+|---|---:|---:|
+| `bench/ar_bench.py`, pre-multilink configuration (`docs/06` §12.1) | **38.6 / 38.7 µs** | **61.3 / 61.5 µs** |
+| `bench/nccl-latency-bench.py`, production configuration, 6 September | **74.68 µs** | **86.40 µs** |
+| `bench/mesh_sweep.py` at `NCCL_MAX_NCHANNELS=8` (`results/mesh/all-reduce-sweep.md` §4) | — | **143 µs**, called latency-bound with ±100 µs of noise at the time |
+
+A factor of two at 8 KB and about 40 % at 64 KB, between benches of our own. They differ in more than
+one variable at once — iteration count, warmup, the timing loop, and for the first row a plugin build
+and cabling state from before the dual-cable and `NCCL_PTR_CUDA` work — so **we cannot assign a cause
+from the data that exists, and we have corrected none of them against the others.** Whoever runs this
+should run **at least two** of the harnesses in one session, on one configuration, before drawing any
+conclusion: this repository's standing rule is that the ruler gets measured too, and three of ours
+turned out to be brochures (`docs/11` §4). **This is the cheapest useful item on this page and it
+needs no new code** — all three tools are in `bench/`.
 
 **Why it is worth the hour.** The C1 decode all-reduce is 64 KB and there are about 90 of them per
 step; the profile says the NCCL class is **100 % exposed**, with measured comm/compute overlap of
@@ -208,6 +223,12 @@ bytes in it is the shape of a software floor rather than a wire.
 itself. With one node there is no peer, `mesh_isend`/`mesh_irecv` never post, RNR flow control — which
 is the whole subject of `docs/06` — cannot occur, and NCCL will not build a ring. This item needs two
 nodes and a cable.
+
+**One finding on this item does not transfer to a single host, and it should be said before someone
+wastes a day on it.** `NCCL_MAX_NCHANNELS=8` is worth up to **11×** in the 128 KiB - 16 MiB band here
+and **nothing at all** at decode sizes; the `cuda-exl3` author's channel sweep on his single-host
+no-P2P box is **flat** `[reported]`. The channel effect is a property of a multi-NIC mesh fabric, not
+of NCCL, and a one-host reader should not expect it.
 
 **Report:** microseconds per all-reduce at 8 B / 8 KB / 64 KB / 512 KB / 16 MiB, the per-collective
 `rnr_nak_retry_err` and `out_of_buffer` deltas beside each, the channel count, the plugin commit and

@@ -1,0 +1,144 @@
+{
+ "tag": "protoSimple",
+ "world": 3,
+ "warmup": 10,
+ "iters": 50,
+ "config": {
+  "NCCL_ALGO": "Ring",
+  "NCCL_PROTO": "Simple",
+  "NCCL_MAX_NCHANNELS": "8",
+  "NCCL_MIN_NCHANNELS": "-",
+  "NCCL_MESH_LINKS_PER_PEER": "0",
+  "NCCL_MESH_MIN_RNR_TIMER": "1",
+  "NCCL_MESH_PTR_CUDA": "1",
+  "NCCL_MESH_FLUSH": "1"
+ },
+ "rows": [
+  {
+   "bytes": 8,
+   "time_us": 76.47679805755615,
+   "algbw_gbps": 0.00010460688997438452,
+   "busbw_gbps": 0.00013947585329917935,
+   "correct": true
+  },
+  {
+   "bytes": 16,
+   "time_us": 74.29120063781738,
+   "algbw_gbps": 0.0002153687093846121,
+   "busbw_gbps": 0.0002871582791794828,
+   "correct": true
+  },
+  {
+   "bytes": 32,
+   "time_us": 79.80095863342285,
+   "algbw_gbps": 0.0004009976891004103,
+   "busbw_gbps": 0.0005346635854672137,
+   "correct": true
+  },
+  {
+   "bytes": 64,
+   "time_us": 74.91648197174072,
+   "algbw_gbps": 0.0008542846422519077,
+   "busbw_gbps": 0.0011390461896692101,
+   "correct": true
+  },
+  {
+   "bytes": 128,
+   "time_us": 75.57568073272705,
+   "algbw_gbps": 0.0016936665175755579,
+   "busbw_gbps": 0.002258222023434077,
+   "correct": true
+  },
+  {
+   "bytes": 256,
+   "time_us": 72.71423816680908,
+   "algbw_gbps": 0.0035206309858150037,
+   "busbw_gbps": 0.004694174647753338,
+   "correct": true
+  },
+  {
+   "bytes": 512,
+   "time_us": 98.35136413574219,
+   "algbw_gbps": 0.005205825099622918,
+   "busbw_gbps": 0.006941100132830558,
+   "correct": true
+  },
+  {
+   "bytes": 1024,
+   "time_us": 75.21088123321533,
+   "algbw_gbps": 0.013615051216123388,
+   "busbw_gbps": 0.01815340162149785,
+   "correct": true
+  },
+  {
+   "bytes": 2048,
+   "time_us": 76.85696125030518,
+   "algbw_gbps": 0.026646903113045836,
+   "busbw_gbps": 0.03552920415072778,
+   "correct": true
+  },
+  {
+   "bytes": 4096,
+   "time_us": 110.88191986083984,
+   "algbw_gbps": 0.03694019733010218,
+   "busbw_gbps": 0.049253596440136244,
+   "correct": true
+  },
+  {
+   "bytes": 8192,
+   "time_us": 69.4048023223877,
+   "algbw_gbps": 0.11803217826264929,
+   "busbw_gbps": 0.15737623768353237,
+   "correct": true
+  },
+  {
+   "bytes": 16384,
+   "time_us": 72.67519950866699,
+   "algbw_gbps": 0.22544141757802955,
+   "busbw_gbps": 0.30058855677070606,
+   "correct": true
+  },
+  {
+   "bytes": 32768,
+   "time_us": 75.82399845123291,
+   "algbw_gbps": 0.432158692093706,
+   "busbw_gbps": 0.5762115894582747,
+   "correct": true
+  },
+  {
+   "bytes": 65536,
+   "time_us": 96.15872383117676,
+   "algbw_gbps": 0.6815398269538162,
+   "busbw_gbps": 0.9087197692717549,
+   "correct": true
+  },
+  {
+   "bytes": 131072,
+   "time_us": 621.2940979003906,
+   "algbw_gbps": 0.21096611160953635,
+   "busbw_gbps": 0.28128814881271513,
+   "correct": true
+  },
+  {
+   "bytes": 262144,
+   "time_us": 618.8467025756836,
+   "algbw_gbps": 0.42360086740211783,
+   "busbw_gbps": 0.564801156536157,
+   "correct": true
+  },
+  {
+   "bytes": 524288,
+   "time_us": 683.1597137451172,
+   "algbw_gbps": 0.7674457223565274,
+   "busbw_gbps": 1.0232609631420364,
+   "correct": true
+  },
+  {
+   "bytes": 1048576,
+   "time_us": 629.7727966308594,
+   "algbw_gbps": 1.6650068177121053,
+   "busbw_gbps": 2.220009090282807,
+   "correct": true
+  }
+ ]
+}

@@ -11,6 +11,61 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — the all-reduce latency floor, measured byte by byte, and three of our own rulers disagreeing
+
+**The decode collective has no bandwidth term in it, and now there is a curve that says so.** A
+byte-precise sweep — 8 B to 64 MiB doubling, 10 warmup and 50 timed iterations per size, `busBW =
+algBW × 2(n−1)/n`, a correctness check at every size (**132/132 passed**) — on the production plugin
+build and the production NCCL environment `[measured-here]`. Full page:
+[`results/mesh/nccl-latency-sweep.md`](results/mesh/nccl-latency-sweep.md), raw beside it.
+
+**Decode is latency-bound; prefill is at the wire.** 8 KiB **74.68 µs**, 64 KiB **86.40 µs**, 1 MiB
+**275 µs** (5.08 GB/s), 16 MiB **1,096.79 µs** — **20.40 GB/s, or 98.1 % of the 20.8 GB/s we measure
+on our own cable** — and 64 MiB 3,955 µs (22.62 GB/s). **From 8 B to 32 KiB, a 4,096× range of sizes,
+the time never leaves 72–85 µs.** There is no software headroom left at the prefill end; the levers
+that remain are fewer, larger, or overlapped collectives, none of which is a transport change.
+
+**`NCCL_MAX_NCHANNELS=8` does nothing at decode and is worth up to 11× in the cliff.** At 8 and 64 KB
+the difference against the default is inside noise, because a fixed base latency cannot be reduced by
+adding channels. At 1 MiB it is 275 µs against 1,388, at 4 MiB 306 against 3,554, and at 64 MB the
+difference disappears again because bandwidth is already saturated. **This is a property of a
+multi-NIC mesh, not of NCCL** — the `cuda-exl3` author's channel sweep on a single-host no-P2P box is
+flat `[reported]`, and a one-host reader should not expect the effect at all. `NCCL_PROTO` auto is at
+least as good as every forced protocol at every size and clearly better between 128 KiB and 1 MiB,
+where `Simple` is 4–7× slower — the same verdict he reaches on very different hardware.
+
+**Three of our own harnesses disagree at small sizes, and all three readings stay.** At 64 KB:
+`ar_bench.py` 61.3 µs, this new sweep 86.4 µs, `mesh_sweep.py` 143 µs. At 8 KB: 38.6 against 74.68 —
+a factor of two. They differ in more than one variable at once (iteration count, warmup, the timing
+loop, and for the oldest rows a plugin build and cabling state from before the dual-cable work), so
+**no cause can be assigned from the data that exists and none of them is corrected against the
+others**. Recorded in [docs/06](docs/06-nccl-mesh.md) §12.1 and in
+[`results/mesh/all-reduce-sweep.md`](results/mesh/all-reduce-sweep.md) §5; a same-session comparison
+is now the cheapest item on [HELP-WANTED](HELP-WANTED.md) §5 and it needs no new code, because all
+three tools are in `bench/`. **The conclusions on the new page do not rest on the absolute value:**
+the decode verdict comes from the flatness, which every harness shows, and the prefill verdict comes
+from a 16 MiB point where they agree within a few percent.
+
+**The tool is published with a warning label.** [`bench/nccl-latency-bench.py`](bench/nccl-latency-bench.py)
+and its two runners reproduce `nccl-tests`' contract exactly — the same `-b/-e/-f` sweep convention,
+the same `-w 10 -n 50`, the same busBW formula, the same `-c 1` check — but **the numbers do not come
+from the `nccl-tests` binary**, because neither `nccl-tests` nor MPI exists on these nodes and
+`nccl-tests` requires MPI for multi-node. [`bench/README-nccl-latency.md`](bench/README-nccl-latency.md)
+says that first and says how to run it beside a live engine without touching it: a cpuset outside the
+engine's cores, a memory cap, the rendezvous address set in the runner rather than sourced from the
+engine's environment file, the measurement lock, and an idle check before the first byte moves.
+
+**What this measurement cost.** Nothing. No engine restart, no configuration change, no code change:
+the engine stayed up and idle throughout, the lock cleared after 720 s of waiting for another arm,
+and the sweep held the fabric for 94 s.
+
+**And one stale figure is buried properly.** The "13.9 GB/s against 50 GB/s = 28 %" that was quoted
+upstream was already stale when it was quoted and is doubly wrong now: the 50 GB/s denominator was
+retracted here in favour of the PCIe Gen5 x4 ceiling ([docs/11](docs/11-open-issues.md) §1.7), and
+the numerator moved with two rounds of transport fixes. It is 20.40 against 20.8, or 98.1 %.
+
+---
+
 ## 2026-09-06 — four sm_12x patches, measured: no race, no cost, and no reason to ship them
 
 **A five-arm A/B on four reported sm_12x defects, and the answer is "nothing moved" in every

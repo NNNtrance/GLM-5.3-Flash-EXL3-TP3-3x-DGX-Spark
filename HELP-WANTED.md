@@ -115,8 +115,9 @@ preflight ran at all — a unit that finishes in well under a minute did not.
 
 Every TP=2 arm in this repository ran `gpu-memory-utilization` **0.85**, and arm A recorded **3.5 GB
 of swap growth on the head node during weight load** at that rung `[measured-here]`. Three-node
-production runs **0.83**, and **0.85 will not be attempted there** — it was measured once and
-rejected on swap. The two-node memory budget is a different problem: about **82 GiB of weights per
+production runs **0.88**: the three-node ladder was climbed rung by rung on 6 September against swap
+*traffic* under load, 0.85 and 0.87 and 0.88 all passed and 0.90 was rejected
+(`docs/11-open-issues.md` §2.4). The two-node memory budget is a different problem: about **82 GiB of weights per
 node** against roughly 55 at three, on a part where the GPU and the host share one 121.6 GiB pool.
 **The three-node ladder was derived at three ranks and should be re-derived at two, not copied**
 (`docs/11-open-issues.md` §2.4, `docs/15` §3.3).
@@ -127,7 +128,7 @@ node** against roughly 55 at three, on a part where the GPU and the host share o
   agreeing within about 1 GiB.
 - `MemFree`, `MemAvailable` **and swap, sampled through every benchmark round**, not only at rest.
   The rung is decided on **swap growth under load**, not on free memory at idle: that is the number
-  0.85 was actually rejected on at three nodes, and at 0.83 our `MemFree` is already 0.9-1.2 GiB.
+  the three-node ladder was decided on, and at 0.83 our `MemFree` is already 0.9-1.2 GiB.
 - C1-C8 and TTFT, so the pool gain can be priced.
 - Gates cold and warm.
 

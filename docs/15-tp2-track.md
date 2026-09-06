@@ -102,7 +102,7 @@ it applies unchanged at two nodes:
 - **A node.** Two Sparks instead of three.
 - **A shorter recipe.** No `pad-tp3full.py` sidecar config, no `check-padload-tp3.py` image gate, no
   `svh = 0` pad audit, no 128-block arithmetic to get wrong. The five asserts that exist to catch a
-  silently half-padded stack have nothing to catch, and the patch tree is 13 files rather than 22.
+  silently half-padded stack have nothing to catch, and the patch tree is 14 files rather than 22.
 - **The loader work is visible on its own.** Our full-scope dress rehearsal ran at TP=2 first
   precisely because it answers "what is the dense stage worth" with no padding machinery on top
   ([13](13-full-scope-checkpoint.md) §4).
@@ -820,7 +820,7 @@ This list is much shorter than it was, and every row now carries a reason rather
 
 | Not run at TP=2 | Why not, and what it would take |
 |---|---|
-| **The `gpu-memory-utilization` ladder.** Every TP=2 arm ran **0.85** | This is the one deliberate refusal. KV maximisation is the last step in this project's order of work and it needs the cluster's owner, not an agent. It also has a two-node-specific warning attached: arm A recorded **3.5 GB of swap on the head during weight load** at this rung (§3.1), and at three ranks 0.85 was *rejected* for swap growth while 0.83 was taken ([11](11-open-issues.md) §2.4). The three-node ladder must be **re-derived** at two ranks, not copied — the memory left after a fixed cost is not linear in the node count `[not tested]` |
+| **The `gpu-memory-utilization` ladder.** Every TP=2 arm ran **0.85** | This is the one deliberate refusal. KV maximisation is the last step in this project's order of work and it needs the cluster's owner, not an agent. It also has a two-node-specific warning attached: arm A recorded **3.5 GB of swap on the head during weight load** at this rung (§3.1), and the three-node ladder was climbed rung by rung on 6 September against swap *traffic* under load, which took it to 0.88 ([11](11-open-issues.md) §2.4). The three-node ladder must be **re-derived** at two ranks, not copied — the memory left after a fixed cost is not linear in the node count `[not tested]` |
 | **A two-node reboot test** | The unit is installed and start/stop-tested (§5.7), but a power-on trial takes the cluster down and the three-node unit is the enabled production autostart. Reboot **both** nodes or neither: the preflight passes on a single node whose peer is gone `[not tested]` |
 | **Expert parallelism at two ranks** | Legal (§1.1), never measured. It changes which kernel path the MoE stage takes ([05](05-expert-parallel-and-cuda-exl3-fixes.md)) and `tracks/tp2/patches/` already carries `patch-epfilter-tp3.py` so that trying it needs no tree change — and therefore no new dump boot `[not tested]` |
 | **A second boot of each candidate**, and a boot-to-boot spread | Every number in §5 is a median of three rounds on **one** boot per candidate. At three ranks the boot-median spread is C1 1.1 %, C8 2.5 %, **C4 7.4 %**. The pool, memory, boot-time and gate rows are far too large a difference to be boot noise; the speed rows carry that uncertainty and the B-over-A margins (+13 to +21 %) clear it comfortably `[not tested]` |
@@ -877,7 +877,7 @@ bandwidth term wins, and it is not close.
 single-stream throughput was 85–91 % before, but measured against a three-node arm on a *different*
 checkpoint; on the same checkpoint and with both stacks carrying the settings this repository ships,
 it is 81–83 % of speed and **38 % of pool** rather than 14 %. Two nodes went from a configuration
-that silently refused 8K prompts to one that serves **2.1 concurrent million-token requests**.
+that silently refused 8K prompts to one that serves **2.7 concurrent million-token requests**.
 
 **What TP=2 wins, plainly.** One node, and a recipe with the whole of
 [03](03-tp3-padding-and-sidecars.md) and [13](13-full-scope-checkpoint.md) §7 taken out of it. That

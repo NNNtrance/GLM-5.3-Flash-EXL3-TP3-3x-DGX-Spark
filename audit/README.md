@@ -62,9 +62,9 @@ buffer size.
 column or a collapsed block, so a number quoted from an older commit can still be located. Grade
 against the production 12 column.
 
-**Two things below were not re-derived on production 12, and both say so**: §2's category speed,
-which is production 9's and which a memory fraction and a buffer bound cannot touch, and §4's MMLU
-sample, which is production 9's 86.47 ±0.74 carried forward `[not tested]` on 10, 11 and 12.
+**One thing below was not re-derived on production 12, and it says so**: §4's MMLU sample, which is
+production 9's 86.47 ±0.74 carried forward `[not tested]` on 10, 11 and 12. §2's category speed was
+re-measured on production 12 on 7 September.
 
 **Everything here is at reasoning effort `low`.** Max effort would cost 5–12× the tokens and days of
 cluster time. Nothing on this page is a max-effort number and none of it should be quoted as one.
@@ -332,22 +332,25 @@ Prefill has not moved since production 9: production 8, 9, 10, 11 and 12 all sit
 equality band. The full-scope checkpoint bought its gain in **decode step time**, not in prefill, and
 the three memory configurations after it bought pool, not speed.
 
-### category speed — `[measured-here]` on production 9, `[not tested]` on 10, 11 and 12
+### category speed — `[measured-here]` on production 12
 
-**This is the one section in §2 that is not production 12's.** It was measured on production 9 and
-not re-run, on the reasoning that a memory fraction, two guard patches and a buffer bound cannot
-touch what the drafter accepts — but that reasoning is an argument, not a measurement, so the table
-is tagged rather than carried forward silently.
+**Re-measured on production 12 on 7 September**, with the same prompt set and the same script as the
+production-9 row, one warm-up round plus three measured rounds on a warm engine with no boot inside
+the window
+([`../results/speed/category-speeds-production-12.md`](../results/speed/category-speeds-production-12.md)):
 
-| Category | C1 mean decode | C1 acceptance | C4 total |
-|---|---|---|---|
-| code | **61.7** tok/s | 46 % | 116.1 tok/s |
-| math | **79.6** tok/s | 58 % | 129.4 tok/s |
-| JSON | **72.8** tok/s | 54 % | 110.1 tok/s |
-| **prose** | **29.1** tok/s | **13 %** | 50.7 tok/s |
+| Category | C1 mean decode | C1 acceptance | C4 total | Production 9 `[history]` |
+|---|---|---|---|---|
+| code | **61.5** tok/s | 46 % | 115.2 tok/s | 61.7 · 46 % · 116.1 |
+| math | **76.2** tok/s | 57 % | 120.6 tok/s | 79.6 · 58 % · 129.4 |
+| JSON | **73.1** tok/s | 53 % | 108.8 tok/s | 72.8 · 54 % · 110.1 |
+| **prose** | **29.0** tok/s | **13 %** | 52.2 tok/s | 29.1 · 13 % · 50.7 |
 
-The production-7 lineage read code 47.9 · math 59.0 · JSON 57.7 · prose 22.4, so every category
-gained 30–35 %.
+Every category is inside its own round-to-round spread against production 9 — math's −4.3 % against
+an 8.4 % round spread is the largest — so the three memory rungs and the workspace bound between the
+two arms bought **+37.8 % of KV pool at no cost in tokens per second**. The production-7 lineage read
+code 47.9 · math 59.0 · JSON 57.7 · prose 22.4, so every category gained 30–35 % at production 9 and
+has held it since.
 
 **The prose row is the honest headline of this whole stack**, and it is not a setting: the DFlash2
 drafter barely fires on free prose, so prose falls back to roughly the unspeculated rate while code,
@@ -524,6 +527,8 @@ Named so you do not mistake silence for a pass:
 | **Production 12 — shipped, and what §2 grades against** — configuration 11 at 0.88 **plus** the indexer workspace bound (`HAREM_INDEXER_WS_MODE=bound`) | KV **7,041,322** on the reboot boot, three boots reading 7,170,798 / 7,088,154 / 7,041,322; C1 **69.72 / 75.55**; C8 **196.06 / 28.44**; C2 101.20, C4 146.14, C6 176.00; prefill fresh 1,744 (1,737 load, 1,750 clean); TTFT 0.25 / 0.80 s; acceptance 62.5 / 62.4 % · 5.35 per step; consumed per node **54.62 / 54.48 / 54.28 GiB**, available KV 50.75 / 50.89 / 51.09 GiB, locked workspace 513.00 MB at exactly one resize per rank. Against a same-session 0.87 reference: KV **+10.3 %** (+12.3 % on the best boot), **C1 +0.08 %, C8 −0.08 %** — every level inside its band. Boot 272 s fast-load, 205 s from `systemctl start`, **311 s** from power-on with all three rebooted together, 590 s for the dump boot the patch forces | prod 12 @ 0.88, pool of six rounds over two boots | 6 Sep 2026 | `results/configs/production-configurations.csv` row 12, `results/memory/indexer-workspace-ab.md` §7.1 |
 | Production 12, host memory and swap **traffic** under load | Swap **in exactly 0** in every sample on every node, in both windows; swap out **1,340 / 5 / 10 KiB** over the 1,765 s stress window (8 of 353 samples, longest unbroken run 10 s) against the reference's own 10 / 5 / 5, and 5 / 10 / 10 KiB with swap used **0.000 GiB** on the clean boot. `MemAvailable` min **1.52 / 3.37 / 3.36 GiB** on the arm that also ran both long-context stress cases, **3.15 / 4.49 / 4.45** on the clean boot. OOM killer 0 on all three | prod 12 | 6 Sep 2026 | `results/configs/production-configurations.csv` row 12, `results/memory/ladder-6sep.md` |
 | Production 12, quality and the whole-cluster reboot | Gates **10/10 · 12/12 cold and warm** on the load boot, on the systemd-started engine and on the clean boot after a whole-cluster reboot; tool-call **8/8**; needle-lite **6/6** at 64K and 128K. Long-context stress the 0.87 reference never ran: one **969,468-token** request correct in **569.6 s**, and **eight** concurrent ~128K lanes 8/8, 640,904 prompt tokens in 227.5 s (2,817 tok/s aggregate prefill), each lane carrying its own needle. After both, every rank still logs exactly one workspace resize and zero assertions — none of the patch's four safety layers fired. MMLU is production 9's 86.47 ±0.74, carried forward and `[not tested]` here | prod 12 | 6 Sep 2026 | `results/configs/production-configurations.csv` row 12, `results/boot/boot-ledger.md` |
+| Quality battery on production 12 — three benchmarks against the NVFP4 sibling recipe | **GSM8K 97.5 %** against 94.0, **IFEval 80.0 % prompt / 86.0 % instruction** against 78.9 / 85.1, **tool-eval-bench 85.5 ±1.3** against 87.8 ±0.9. The tool-eval difference is real (Welch t = 4.02, permutation p = 0.0048) and is **four scenarios out of 88** — remove TC-51, TC-21, TC-74 and TC-87 and this stack is +0.22 ahead on the other 84; nine of fourteen categories are identical digit for digit; `max_points` 176 in both files. The chat-template explanation was tested as its own engine arm and **refuted**. The **1M needle and the full 14,042-question MMLU were deferred on time and did not run** `[not tested]` | prod 12, harness `2.6.1.dev39`, same seed, temperature 0, effort low, one engine, no restart between tests | 6–7 Sep 2026 | `results/gates/quality-battery-production-12.md`, `results/gates/quality-gates.md` |
+| Category speed on production 12 | C1 code **61.5** · math **76.2** · JSON **73.1** · prose **29.0** tok/s, acceptance 46 / 57 / 53 / **13 %**; C4 total 115.2 / 120.6 / 108.8 / 52.2. Every category inside its own round-to-round spread against production 9, so **+37.8 % of KV pool cost no category any tokens per second**. The step rate is the same in all four columns (14.58–15.55 /s, 6.4 % spread) — the whole 2.6× spread is accepted tokens per step, which is the drafter's hit rate | prod 12, single stream and four in parallel, one warm-up plus three measured rounds, warm engine, no boot in the window | 7 Sep 2026 | `results/speed/category-speeds-production-12.md` |
 | **TP=2 production candidate B** (full scope), against candidate A (routed experts only) | KV pool at 1M **2,128,571** against 1,500,000 (**+41.9 %**); C1 **58.50 / 62.55** against 48.76 / 54.72; C8 **155.75** against 137.41; TTFT 0.407 / 1.077 s; consumed per node **84.8 GiB** against 89.3 (**−4.5**); prefill fresh 1,400 against 1,444 (equal); boot 272 s on both; gates 10/10 · 12/12 cold and warm, tool-call 8/8, needle-lite 6/6 on both; MMLU **86.02 ±0.75** against 86.37 ±0.74, inside one error bar | **two** nodes, TP=2, EP off, `exl3-zeus:754421f`, 0.85, median of rounds 2–4 of four | 6 Sep 2026 | `results/speed/tp2-production-candidate.md`, `docs/15` §5 |
 | **TP=2 candidate C** (candidate B **plus** the indexer workspace bound), against a same-session control | Locked workspace 5,036.40 → **513.00 MB** on both ranks — the three-node numbers to the decimal, because no term of the bound knows the rank count. KV pool **1,800,000 → 2,378,571, +32.14 %** eager, and **2,128,571 → 2,692,857, +26.5 %** once the sidecar is back; predicted 2,689,285 from candidate B's own eager→fast-load difference, measured **+0.13 %** off. Consumed per node 84.7/85.0 → 79.5/80.4 GiB. Gates 10/10 · 12/12 cold **and** warm on both arms, tool-call 8/8, needle-lite 6/6; one **969,468**-token request correct, eight concurrent ~128K lanes **8/8** (640,904 prompt tokens, 2,225 tok/s prefill), one resize per rank after the stress, none of the four safety layers fired, swap 0.000 GiB. Speed: every level inside its band, **but all five the same sign** (−1.16 … −2.63 %, mean −2.0 %) where three ranks read mixed signs — **recorded as unexplained**, no clock/temperature/power telemetry was sampled and the arm order was fixed. The 1M gate first read FAIL on an **empty** answer (never a wrong one) because the probe scored `content` alone; re-run identical, it passed, and the harness now scores both fields | **two** nodes, TP=2, EP off, `exl3-zeus:754421f`, 0.85, one environment line between the arms, both eager; production row fast-load | 6 Sep 2026 | `results/speed/tp2-production-candidate.md`, `docs/15` §5.9 |
 | The draft KV page at two ranks (`HAREM_SW_BLOCK_SIZE=256`) | KV pool **601,562 → 1,303,571, +116.7 %** (+109.6 % normalised); C8 127.54 → 135.59 (+6.3 %); TTFT −23 % at C1 and −27 % at C8; C1 aggregate equal; gates full on both arms. **The headline is the cliff, not the pool**: without it a 6,253-token prompt is never scheduled at all (`Running: 0, Waiting: 1`), with it 8,268 tokens serve in 6.3 s at 1,478 tok/s fresh prefill. The drafter takes **60.2 %** of the blocks-per-request divisor at TP=2 against 53 % at TP=3. Cost: +9.1 % memory per block, acceptance −1.9 points | **two** nodes, TP=2, EP off, `exl3-zeus:62f53e6`, experts-only `b20c49ba`, 0.85, three rounds, one boot each | 6 Sep 2026 | `results/speed/tp2-draft-page.md`, `docs/15` §4 |

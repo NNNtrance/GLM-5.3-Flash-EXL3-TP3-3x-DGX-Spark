@@ -18,7 +18,7 @@ Three nodes instead of two: [tracks/tp3](../tp3/) and the [README quick start](.
 
 | File | What it is |
 |---|---|
-| [`env.tp2-full.example`](env.tp2-full.example) | **The production-candidate template.** `NNODES=2`, `TP_SIZE=2`, `ENABLE_EP=0`, no padding sidecar, `gpu-memory-utilization` **0.85** rather than the three-node 0.83, and four settings that are not optional at two ranks |
+| [`env.tp2-full.example`](env.tp2-full.example) | **The production-candidate template.** `NNODES=2`, `TP_SIZE=2`, `ENABLE_EP=0`, no padding sidecar, `gpu-memory-utilization` **0.85** rather than the three-node 0.88, and four settings that are not optional at two ranks |
 | [`patches/`](patches/) | The in-container patch tree — fourteen files against the three-node tree's twenty-two, because nothing here has to pad anything. [`patches/README.md`](patches/README.md) is the inventory |
 | [`harem-exl3-tp2.service`](harem-exl3-tp2.service) | The autostart unit. It is a unit **of its own** — you do not edit the three-node one. Installed, started, health-checked and stopped on both nodes on 6 September 2026, and left `disabled`, because exactly one of the two units may be enabled |
 | [`motor-onkosul-exl3-tp2.sh`](motor-onkosul-exl3-tp2.sh) | Its preflight — `FABRIC_PEERS` is **one** address per node rather than two; the ConnectX-7 check stays `4/4`, because it counts ports on the node, not peers |

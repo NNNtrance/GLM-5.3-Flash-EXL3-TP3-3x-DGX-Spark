@@ -33,14 +33,14 @@ tracks/
     patches-optional/sm12/       measured, free, NOT in production -- the one sm_12x fix
                                  that did not ride with production 11
     patches/indexer-workspace/
-                                 measured, +10.25 % KV pool, NOT in production -- the
-                                 sparse-indexer K-gather workspace bound
+                                 +10.25 % KV pool -- the sparse-indexer K-gather
+                                 workspace bound, IN production since configuration 12
   tp2/
     README.md                    what this track is, its settings and its numbers
     env.tp2-full.example         the two-node production candidate
     harem-exl3-tp2.service       the autostart unit
     motor-onkosul-exl3-tp2.sh    its preflight
-    patches/                     the in-container patch tree, 13 files
+    patches/                     the in-container patch tree, 14 files
 ```
 
 Nothing was rewritten in the move. `tracks/tp3/patches/` is the tree this repository used to publish
@@ -88,7 +88,7 @@ says which lines.
 
 | Shared | Why it is shared |
 |---|---|
-| [`docs/`](../docs/) | Eighteen pages, each carrying an **Applies to** badge on its first line. [docs/00-start-here.md](../docs/00-start-here.md) §5 is the index |
+| [`docs/`](../docs/) | Nineteen pages, each carrying an **Applies to** badge on its first line. [docs/00-start-here.md](../docs/00-start-here.md) §5 is the index |
 | [`scripts/`](../scripts/) | **Both launchers and both preludes** — `start-tp3.sh` + `tp3-prelude.sh` and `start-tp2full.sh` + `tp2-prelude.sh`. They are per track but they live together, because the benchmark harness, the probes and the prompt sets beside them are identical at either rank count and a launcher is read next to them |
 | [`patches/tp3/`](../patches/tp3/) | **Both tracks draw from it.** It is the routed-experts-only tree — production configurations 1 to 8 and the rollback at three ranks — and it is also where TP=2 gets `patch-swblock-tp3.py`, `patch-kvdiag-tp3.py`, `patch-draftkv-tp3.py`, `patch-epfilter-tp3.py` and `patch-fastload-tp3.py`, all of which are `tp`-agnostic and gated on their own environment knobs |
 | [`patches/kernel/`](../patches/kernel/) | The NCCL mesh plugin patches. `0005` is a no-op with one cable per pair, and that is a cabling property rather than a rank-count one |

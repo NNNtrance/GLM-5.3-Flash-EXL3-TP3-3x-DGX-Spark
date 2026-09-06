@@ -188,15 +188,15 @@ fi
 
 # --------------------------------------------------------------- category ---
 if want category; then
-  hdr "category speed    expect (PRODUCTION 9, not re-run on 10/11/12, C1 mean decode / acceptance):"
-  echo "  (the one section here that is not production 12's: a memory fraction, two guard"
-  echo "   patches and a buffer bound cannot touch what the drafter accepts -- but that is an"
-  echo "   argument, not a measurement, so it is tagged rather than carried forward silently)"
-  echo "    code   61.7 tok/s   46 %"
-  echo "    math   79.6 tok/s   58 %"
-  echo "    json   72.8 tok/s   54 %"
-  echo "    prose  29.1 tok/s   13 %   <-- the drafter barely fires on free prose"
-  echo "  C4 totals: code 116.1 . prose 50.7 . math 129.4 . json 110.1"
+  hdr "category speed    expect (PRODUCTION 12, re-measured 7 Sep, C1 mean decode / acceptance):"
+  echo "  (every category is inside its own round-to-round spread against production 9, so the"
+  echo "   three memory rungs and the workspace bound between them bought +37.8 % of KV pool at"
+  echo "   no cost in tokens per second. results/speed/category-speeds-production-12.md)"
+  echo "    code   61.5 tok/s   46 %   (production 9: 61.7 / 46 %)"
+  echo "    math   76.2 tok/s   57 %   (production 9: 79.6 / 58 %)"
+  echo "    json   73.1 tok/s   53 %   (production 9: 72.8 / 54 %)"
+  echo "    prose  29.0 tok/s   13 %   <-- the drafter barely fires on free prose (prod 9: 29.1)"
+  echo "  C4 totals: code 115.2 . prose 52.2 . math 120.6 . json 108.8"
   echo "  (~14 min. The prose row is the honest headline of this stack, and it is a"
   echo "   drafter-training property, not something a setting fixes. docs/14 section 9.10)"
   python3 "$SC/category-speed.py" "$API" | sed 's/^/  /' || FAILED=1

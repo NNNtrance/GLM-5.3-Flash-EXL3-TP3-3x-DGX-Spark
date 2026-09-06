@@ -425,7 +425,7 @@ Sub-items left open by the closure, both small `[not tested]`:
   is most of the 6.7 % a dump boot reads low. Worth ~2.3 GiB of pool on dump boots only, so it changes
   no production number and is low priority.
 
-### 2.4 The memory ladder above 0.80 — climbed to the top and stopped at 0.87 (production 11)
+### 2.4 The memory ladder above 0.80 — climbed to the top, shipped at 0.87 and then at 0.88 (production 11, then 12)
 
 **The full per-node accounting this rung is spent against is [17](17-memory-ledger.md)**: what fills
 the 121.6 GiB, what the fraction is a fraction *of* (the total, not the free), and the six give-back
@@ -457,19 +457,21 @@ clear.
 
 **Superseded on 6 September 2026, including the sentence this item ended with.** "0.85 will not be
 attempted on this stack" was written the day 0.83 shipped, and the whole ladder was climbed the next
-morning: **0.85, 0.87 and 0.88 all pass; 0.90 is rejected on swap traffic**, and **0.87 is production
-configuration 11**. The rung that decided it was not the highest that passed — 0.88 leaves 1.86 GiB
-of `MemAvailable` on the head node, 0.87 leaves 3.49 — and the criterion that decided it was not the
-one this item used. Full tables in
+morning: **0.85, 0.87 and 0.88 all pass; 0.90 is rejected on swap traffic**, and **0.87 shipped as
+production configuration 11**. The rung that decided it on the day was not the highest that passed —
+0.88 leaves 1.86 GiB of `MemAvailable` on the head node, 0.87 leaves 3.49 — and the criterion that
+decided it was not the one this item used. **0.88 was then taken hours later as production
+configuration 12**, together with the indexer workspace bound (§2.28): a decision about what the
+cluster is for rather than a new measurement. Full tables in
 [`../results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md); the ruler correction is in
 [07](07-kv-and-draft-page.md) §6 and [00](00-hardware-and-os.md) §11.2.
 
-| | 0.83 (prod 10) | 0.85 | **0.87 (prod 11)** | 0.88 | 0.90 |
+| | 0.83 (prod 10) | 0.85 | **0.87 (prod 11)** | **0.88 (prod 12)** | 0.90 |
 |---|---:|---:|---:|---:|---:|
-| KV pool | 5,674,931 | 6,016,528 | **6,363,636** | 6,542,699 | 6,870,523 |
+| KV pool | 5,674,931 | 6,016,528 | **6,363,636** | **6,542,699** | 6,870,523 |
 | Swap traffic under load | ~0 | 0 | **0** | 4 KiB | **si 143 MiB + so 1,519 MiB** |
-| `MemAvailable` min, head node | 8.35 GiB | 5.99 | **3.49** | 1.86 | 1.04 |
-| Verdict | reference | pass | **shipped** | pass, thin | **rejected** |
+| `MemAvailable` min, head node | 8.35 GiB | 5.99 | **3.49** | **1.86** | 1.04 |
+| Verdict | reference | pass | **shipped (prod 11)** | **pass, thin — shipped as prod 12** | **rejected** |
 
 **What the campaign is worth beyond the rung.** Speed was inside its band at every rung *including
 the rejected one*, so a ladder judged on tok/s would have taken 0.90 and shipped a stack that pages
@@ -1540,7 +1542,7 @@ measured here `[not tested]`.
 | **The prefill half of the quantization gate, re-measured cold** (M = 1,792) | The decode half was re-taken on the target GPU and moved by 2.5×; the prefill half was not, so half of an **and** is carried on a workstation warm bench. Those shapes are compute-bound and so less exposed to the cache artefact, which is an argument, not a measurement. One throwaway container beside an idle engine, about two minutes. §2.25. |
 | **Whether the full-scope arm's TP=2 memory reading has a mechanism at all** | It said ~10 GiB heavier; TP=3 says 3.4 GiB lighter. The confound is named (different checkpoints *and* different `max_model_len`) and the `ops.reserve` hypothesis is still untested. Recorded as not reproduced, not explained. §1.9 row 32. |
 | **`mtp.safetensors`, the MIT-licensed MTP drafter that ships with that checkpoint** | 3.79 GB, not in the index, never read by vLLM. It is a candidate replacement for DFlash2 whose licence would transfer to a reader, unlike ours ([01](01-model-and-license.md) §4). Not evaluated. |
-| **`gpu-memory-utilization 0.85` on this stack** | The rung above production 10. It will not be attempted: 0.85 was measured once and rejected on swap growth, and at 0.83 `MemFree` already sits at 0.9–1.2 GiB. The next thing this stack needs at that end is a soak, not another rung. §2.4. |
+| ~~**`gpu-memory-utilization` above 0.83**~~ — **climbed on 6 September** | No longer an absence, and the sentence this row used to carry is retracted (§2.4): the ladder was climbed rung by rung against swap *traffic* rather than `MemFree`. 0.85, 0.87 and 0.88 all pass, 0.90 is rejected, 0.87 shipped as production 11 and 0.88 as production 12. **0.89 has never been measured**, and what this stack still needs at that end is a soak rather than another rung. [`../results/memory/ladder-6sep.md`](../results/memory/ladder-6sep.md). |
 | **Whether a second-stream all-reduce overlaps a GEMM at all on this part** | The probe is written and has not been run. It gates every overlap variant in §2.17, and it costs one engine-down bench. |
 | **A long unattended run** | The longest continuous uptime on record is about an hour between arms. Leaks, KV fragmentation, fabric drift and acceptance drift over 6–12 hours of mixed load are all unmeasured. |
 | **`--max-num-seqs` above 8** | Chosen to match the TP=2 arrangement and never A/B'd, and C8 sits exactly on the cap. It does not enter the KV divisor, so the cost would be TTFT, not pool. |

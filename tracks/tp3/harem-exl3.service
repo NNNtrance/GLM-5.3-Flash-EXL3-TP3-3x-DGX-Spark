@@ -1,5 +1,5 @@
 [Unit]
-Description=GLM-5.3-Flash EXL3 engine (production 10: full scope, TP=3 + EP, tp3full tree)
+Description=GLM-5.3-Flash EXL3 engine (production 12: full scope, TP=3 + EP, tp3full tree)
 After=docker.service network-online.target
 Wants=network-online.target
 Requires=docker.service

@@ -10,7 +10,7 @@
 > is withdrawn in public. Assembling a working cluster from other people's parts is where this work
 > starts, not where it ends.
 
-> **Status: release.** Numbers, flags and patches are current as of **6 September 2026** and describe
+> **Status: release.** Numbers, flags and patches are current as of **7 September 2026** and describe
 > **production configuration 12** — configuration 11 at `gpu-memory-utilization` 0.88 with the
 > sparse-indexer K-gather workspace bound to its real ceiling — which is what our three nodes serve,
 > start at boot and were rebooted into as a whole cluster with the gates read afterwards. Every
@@ -31,7 +31,7 @@ units — so they cannot be mixed by accident.
 | You have | What this repository gives you |
 |---|---|
 | **3 DGX Spark** | The **TP=3 track**: the production recipe, the quick start below, [`tracks/tp3`](tracks/tp3/README.md) |
-| **2 DGX Spark** | The **TP=2 track**: [docs/15](docs/15-tp2-track.md) and [`tracks/tp2`](tracks/tp2/README.md). At two ranks nothing needs padding, so it is a *shorter* recipe — thirteen patch files against twenty-two — rather than a cut-down one |
+| **2 DGX Spark** | The **TP=2 track**: [docs/15](docs/15-tp2-track.md) and [`tracks/tp2`](tracks/tp2/README.md). At two ranks nothing needs padding, so it is a *shorter* recipe — fourteen patch files against twenty-two — rather than a cut-down one |
 | **1 DGX Spark** | No serving recipe: 153.8 GiB of weights against 121.6 GiB of unified memory. Still yours — the image build, the GB10 kernel fixes, the measurement protocol, the model-free benches and the failure index. [docs/00 §1](docs/00-start-here.md) |
 | **4 DGX Spark** | Nothing measured `[not tested]`. The padding and expert-parallel arithmetic, the cabling problem and what we would want reported are in [HELP-WANTED.md](HELP-WANTED.md) §1 |
 
@@ -48,7 +48,7 @@ this configuration:
 | Prefill, fresh unseen ~8K prompts | **1,744** tok/s |
 | KV pool at `max_model_len` 1,000,000 | **7,041,322** tokens at `gpu-memory-utilization 0.88` — about 7.0 concurrent 1M-token requests |
 | Quality gates | correctness probe **10/10**, code exam **12/12** cold and warm; tool-call gate **8/8**; needle-lite **6/6** at 64K and 128K; MMLU sample (1,995 q) **86.47 ±0.74**, carried from production 9 `[not tested]` on this configuration |
-| Quality benchmarks, against the NVFP4 sibling recipe | GSM8K **97.5 %** (sibling 94.0), IFEval **80.0 % prompt / 86.0 % instruction** (78.9 / 85.1), tool-eval-bench **85.5 ±1.3** (**87.8 ±0.9** — behind, and it is four scenarios out of 88; the largest is a grader ordering rule, the template explanation was tested and refuted, and the build/checkpoint confound is still open). The 1M needle and the full MMLU were **deferred on time** and are not run `[not tested]`. [`results/gates/quality-battery-production-12.md`](results/gates/quality-battery-production-12.md) |
+| Quality benchmarks, against the NVFP4 sibling recipe | GSM8K **97.5 %** (sibling 94.0), IFEval **80.0 % prompt / 86.0 % instruction** (78.9 / 85.1), tool-eval-bench **85.5 ±1.3** (**87.8 ±0.9** — behind, and it is four scenarios out of 88; the largest is a grader ordering rule, the template explanation was tested and refuted, and the build/checkpoint confound is still open), 6–7 September 2026 `[measured-here]`. The 1M needle and the full MMLU were **deferred on time** and are not run `[not tested]`. [`results/gates/quality-battery-production-12.md`](results/gates/quality-battery-production-12.md) |
 | Long-context stress | one **969,468-token** request correct in 569.6 s; **eight concurrent ~128K lanes** 8/8, 640,904 prompt tokens in 227.5 s |
 | Cold boot, `docker run` → API ready | **272 s** (the one-off dump boot that writes the sidecar is 590 s) |
 | **Boot from power-on**, all three nodes rebooted together, autostart unit enabled | `/health` 200 at **311 s** by the wall clock, timed from the reboot command ([systemd](systemd/README.md), [`results/boot/boot-ledger.md`](results/boot/boot-ledger.md)) |
@@ -72,7 +72,7 @@ candidate B's and are inside the bands:
 | Cold boot, fast-load | **272 s** (the one-off dump boot that writes the sidecar is 956 s) |
 | Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes. **No reboot test yet** `[not tested]` |
 
-**Two ranks are 77–84 % of the speed on a third of the pool, at quality that is inside one error bar.**
+**Two ranks are 80–86 % of the speed on 38 % of the pool, at quality that is inside one error bar.**
 The side-by-side comparison, and why the third node wins on latency as well as on memory, is further
 down this page and in [docs/15](docs/15-tp2-track.md) §7. A second candidate, on the
 routed-experts-only checkpoint, is kept for anyone who already has those 164 GB: it is slower on every
@@ -94,12 +94,12 @@ which serves the same model on the same three nodes through a different quantiza
 share a cluster, a fabric and a set of memory rules, but **this repository is self-contained, at
 both node counts**: [docs/00](docs/00-hardware-and-os.md) is a complete environment record down to
 firmware, the hotplug fix, the PCIe ceiling and every OS-level setting we did and did not change, and
-[docs/14](docs/14-troubleshooting.md) indexes all 83 failures we hit by symptom with the exact log
+[docs/14](docs/14-troubleshooting.md) indexes all 86 failures we hit by symptom with the exact log
 line, each tagged with the node counts it can happen on. You do not need the sibling to follow
 either track. **Each track is complete on its own** — its own environment template, launcher, patch
 tree, fast-load sidecar and autostart unit, in [`tracks/`](tracks/README.md) — so the two-node recipe
 is not a cut-down of the three-node one and no page asks you to mentally subtract a rank. At two
-ranks nothing needs padding, so it is genuinely *shorter*: the patch tree is thirteen files rather
+ranks nothing needs padding, so it is genuinely *shorter*: the patch tree is fourteen files rather
 than twenty-two.
 
 > **About the name "HAREM".** HAREM is simply the name we gave our three-node setup. It is hardcoded
@@ -371,16 +371,21 @@ a draft model that sometimes misses. Synthetic prompts ("count from 1 to 200") m
 speculative-decoding *ceiling* and run far faster; they are labelled as such wherever they appear and
 they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol.md).
 
-### If you have two Sparks — the TP=2 production candidate
+### If you have two Sparks — the two-node track beside the three
 
 The two-node track is a complete measured recipe of its own, not a cut-down of the above. Same
 harness, same protocol, same day; two nodes, TP=2, **expert parallelism off**, the same full-scope
 checkpoint, `gpu-memory-utilization` **0.85** (the three-node rung is not transferable and the
-two-node ladder has never been derived — the three-node column is now **0.87**, so the memory row
+two-node ladder has never been derived — the three-node column is now **0.88**, so the memory row
 below understates the two-node share by a rung rather than overstating it), 6 September 2026
-`[measured-here]`:
+`[measured-here]`.
 
-| | **TP=2 candidate** (2 nodes) | TP=3 production 11 (3 nodes) | two-node share |
+**This table pairs candidate B with production 11 `[history]`**, and it is kept in that pairing
+because those two arms are same-day and directly comparable. The published configurations are now
+two-node **candidate C** and three-node **production 12**; their headline tables are at the top of
+this page.
+
+| | **TP=2 candidate B** (2 nodes) | TP=3 production 11 (3 nodes) | two-node share |
 |---|---|---|---|
 | Single-stream decode (C1) | **58.5** tok/s aggregate (**62.6** per stream) | 69.6 (74.7) | 84 % / 84 % |
 | Aggregate at 8 concurrent streams (C8) | **155.8** tok/s | 201.1 | 77 % |
@@ -419,7 +424,7 @@ sits at `Running: 0, Waiting: 1, GPU KV cache usage: 0.0 %` indefinitely, becaus
 12. [11 — Open issues](docs/11-open-issues.md) — what is unresolved, what we retracted, and what we never ran.
 13. [12 — The MLA tuner cache](docs/12-tuner-cache.md) — the measurement tax a process-local cache was charging, and the shorter protocol that removes it.
 14. [13 — The full-scope checkpoint](docs/13-full-scope-checkpoint.md) — the three independent reasons a fully quantized checkpoint would not load, none of them about quantization; the loader patch; the TP=3 padded-load port; and what the dense stage is worth, measured twice. **This is the production recipe.**
-15. [14 — Troubleshooting](docs/14-troubleshooting.md) — **all 83 failures we hit, indexed by symptom, with the exact log line.** A triage order at the top, and a ranked index of the twenty that produced no error message at all. If something is wrong right now, start here.
+15. [14 — Troubleshooting](docs/14-troubleshooting.md) — **all 86 failures we hit, indexed by symptom, with the exact log line.** A triage order at the top, and a ranked index of the twenty that produced no error message at all. If something is wrong right now, start here.
 16. [15 — Running this recipe at TP=2](docs/15-tp2-track.md) — **the two-node track, and it is now a complete recipe rather than a set of arms.** Why two ranks need no padding at all; the env file, launcher, patch tree, fast-load sidecar and autostart unit that make up a named **TP=2 production candidate**, measured end to end on 6 September 2026; the draft KV page, without which two ranks silently refuse an 8K prompt; and the two findings this page had to retract — including "full-scope at two ranks is a rig, not a serving configuration", which was an unsettled boot rather than a property of the stack.
 17. [16 — Comparison with other published recipes](docs/16-comparison-with-published-recipes.md) — a dozen other public GLM-5.3-Flash EXL3 DGX Spark recipes, quoted exactly as they publish them with their own stated conditions, beside our numbers at the matching node count. Read the conditions column before you read the numbers. It also contains the two most useful outside findings we know of: **two other people quantized this model's dense path independently, one at two nodes and one at three, and both measured a gain in the same band as ours** — and a four-node recipe's soak hang that we have never looked for on three.
 18. [17 — The memory ledger](docs/17-memory-ledger.md) — **where the 121.6 GiB on each node actually goes**, read from the logs rather than estimated: the per-node ledger down to the driver's fixed reserve, the KV block's anatomy, the KDA state slots that speculation costs, a ranked give-back list with six items already closed at zero, the two-node column beside it, and one pair of our own boots that does not reconcile.
@@ -434,7 +439,7 @@ sits at `Running: 0, Waiting: 1, GPU KV cache usage: 0.0 %` indefinitely, becaus
 
 | | |
 |---|---|
-| [Decode throughput by production configuration](charts/speed-by-configuration.svg) | C1 and C8 across all nine configurations, with the `cuda-exl3` commit under each |
+| [Decode throughput by production configuration](charts/speed-by-configuration.svg) | C1 and C8 across the first ten configurations, with the `cuda-exl3` commit under each |
 | [KV pool by configuration](charts/kv-pool-progression.svg) | every rung, including the one we measured and rejected |
 | [Where a step actually goes](charts/step-breakdown-prod9.svg) | production 9, profiled on the live server, prefill and both decode regimes |
 | [The one number production 9 was built to move](charts/dense-stage-prod7-vs-prod9.svg) | the dense stage, 45.3 % → 25.9 % of a single-stream step |

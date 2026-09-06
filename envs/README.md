@@ -10,7 +10,7 @@ that have a real cost carrying the measurement that decided them.
 [`env.tp3-full.example`](../tracks/tp3/env.tp3-full.example) is production configuration 9/10;
 [`env.tp2-full.example`](../tracks/tp2/env.tp2-full.example) is the **two-node production candidate**
 ([docs/15](../docs/15-tp2-track.md) §5) — `NNODES=2`, `TP_SIZE=2`, `ENABLE_EP=0`, no padding
-sidecar, `gpu-memory-utilization` **0.85** rather than 0.83, and four settings that are not
+sidecar, `gpu-memory-utilization` **0.85** rather than the three-node 0.88, and four settings that are not
 optional at two ranks. The rule below applies to all three.
 
 ## The rule

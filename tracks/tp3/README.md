@@ -15,7 +15,7 @@ Two nodes instead of three: [tracks/tp2](../tp2/) and [docs/15](../../docs/15-tp
 
 | File | What it is |
 |---|---|
-| [`env.tp3-full.example`](env.tp3-full.example) | **The production template — configuration 11.** Full-scope checkpoint, `gpu-memory-utilization` **0.87**, the sm_12x correctness set (`HAREM_SM12_ITEMS=pdl,kpool`), fp8 KV and fp8 draft cache, `HAREM_SW_BLOCK_SIZE=256`, `NCCL_MAX_NCHANNELS=8`. Every variable carries a one-line reason and the ones with a real cost carry the measurement that decided them |
+| [`env.tp3-full.example`](env.tp3-full.example) | **The production template — configuration 12.** Full-scope checkpoint, `gpu-memory-utilization` **0.88**, the sparse-indexer workspace bound (`HAREM_INDEXER_WS_MODE=bound`), the sm_12x correctness set (`HAREM_SM12_ITEMS=pdl,kpool`), fp8 KV and fp8 draft cache, `HAREM_SW_BLOCK_SIZE=256`, `NCCL_MAX_NCHANNELS=8`. Every variable carries a one-line reason and the ones with a real cost carry the measurement that decided them |
 | [`env.tp3.example`](env.tp3.example) | The routed-experts-only template — production configurations 1 to 8, and the rollback |
 | [`patches/`](patches/) | The in-container patch tree for the full-scope checkpoint: the ten-anchor loader patch, the image gate, the sidecar generator, the sm_12x correctness set, the prelude. [`patches/README.md`](patches/README.md) is the inventory |
 | [`patches-optional/sm12/`](patches-optional/sm12/) | **Not part of the recipe** — one file. The sm_12x correctness set moved out of here into `patches/` with production 11; what is left is item 4, whose effect could not be measured from the client in either direction. The sidecar warning that copying anything into the production tree costs a dump boot lives here too |

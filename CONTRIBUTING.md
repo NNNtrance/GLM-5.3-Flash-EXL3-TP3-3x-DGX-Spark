@@ -4,13 +4,47 @@ If you own comparable hardware, the items below are the ones a second cluster co
 Every one of them is something we could not run, not something we could not be bothered to run — the
 reason is given with each.
 
-**Before you open anything, three things will save you time:**
+**Before you open anything, four things will save you time:**
 
+- [docs/00 — Start here](docs/00-start-here.md) asks how many nodes you have and says which pages are
+  yours. Every `docs/NN` page carries an **Applies to** badge on its first line.
 - [docs/14 — Troubleshooting](docs/14-troubleshooting.md) indexes every failure we hit by symptom,
   with the exact log line. If your stack is misbehaving, look there before you open an issue.
 - [audit/](audit/README.md) is a post-install self-check with our own numbers next to each step. Run
   it before reporting that something is slow: it tells you *which* thing differs from ours.
 - [STYLE-GUIDE.md](STYLE-GUIDE.md) governs anything written here, including evidence tiers.
+
+## How to contribute a measurement
+
+**[HELP-WANTED.md](HELP-WANTED.md) is the ranked list**, and it is the one to read first: it carries
+the **expected effort** for every item, what to measure, and — for the items where it matters — what
+a contributor with fewer nodes than the item needs can and cannot check. The list further down this
+page is the older, unranked form of the same thing, kept because several of its entries carry detail
+that would not fit there.
+
+Three ways to send a result, in increasing order of how much we can do with it:
+
+| | When to use it | What it becomes |
+|---|---|---|
+| **An issue**, using the *Measurement contribution* template | You have numbers and would rather not open a pull request | We ask for anything missing and add it ourselves, with credit |
+| **A pull request** adding `results/community/<your-handle>/<item>/` | You have the raw output | It sits beside our own raw files and anyone can re-median it |
+| **A pull request that also edits the page** | Your measurement changes what a page says | The best outcome. Say which claim of ours it corrects |
+
+The issue and pull request templates in [`.github/`](.github/) are the measurement protocol from
+[docs/09](docs/09-measurement-protocol.md) turned into checklists: rounds and which were discarded,
+the per-metric noise band your difference has to clear, the prompt set named and labelled, the KV
+pool read from a load boot on a settled host, the gates cold **and** warm, the full settings block,
+an evidence tier, and what the gain cost. There are three issue templates — *did not reproduce*,
+*measurement contribution* and *question* — and the first of them asks for the env **diff** against
+your track's example rather than the whole file.
+
+**Two things worth saying plainly.** A report that a step of ours did **not** reproduce is as
+welcome as a measurement, and a silent failure — no log line at all — is worth more to us than a
+loud one; §11 of [docs/14](docs/14-troubleshooting.md) is the index of the twenty we hit that
+produced no error message. And **a pull request that withdraws one of our numbers is worth more than
+one that adds a number**: thirty-two claims of ours did not survive their own raw data, they are kept
+in place with what replaced them ([docs/11](docs/11-open-issues.md) §1), and we do not ask for a
+replacement figure as the price of a correction.
 
 If you run one of the items below, please open a pull request adding your raw output under
 `results/community/<your-handle>/<item>/` plus a short Markdown summary. Every number needs its

@@ -3,6 +3,14 @@
 [`env.tp3.example`](env.tp3.example) is the template. Every variable in it carries a one-line reason,
 and the ones with a real cost carry the measurement that decided them.
 
+**Three templates, and the third is a different node count.**
+[`env.tp3.example`](env.tp3.example) is the routed-experts-only three-node file;
+[`env.tp3-full.example`](env.tp3-full.example) is production configuration 9/10;
+[`env.tp2-full.example`](env.tp2-full.example) is the **two-node production candidate**
+([docs/15](../docs/15-tp2-track.md) §5) — `NNODES=2`, `TP_SIZE=2`, `ENABLE_EP=0`, no padding
+sidecar, `gpu-memory-utilization` **0.85** rather than 0.83, and four settings that are not
+optional at two ranks. The rule below applies to all three.
+
 ## The rule
 
 **Never copy a finished `.env.tp3` from one node to another.** Two lines differ per node

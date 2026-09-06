@@ -37,9 +37,10 @@ share a cluster, a fabric and a set of memory rules, but **this repository is se
 fix, the PCIe ceiling and every OS-level setting we did and did not change, and
 [docs/14](docs/14-troubleshooting.md) indexes all 83 failures we hit by symptom with the exact log
 line. You do not need the sibling to follow this. And if you own **two** Sparks rather than three,
-[docs/15](docs/15-tp2-track.md) is the TP=2 track: at two ranks nothing needs padding, so this becomes
-a *shorter* recipe rather than a cut-down one — it lists the exact files and flags that change, our
-own two-node measurements with their dates, and the production features we never ran there.
+[docs/15](docs/15-tp2-track.md) is the TP=2 track — a complete, measured two-node recipe with its own
+env template, launcher, patch tree, fast-load sidecar and autostart unit, not a cut-down of this one.
+At two ranks nothing needs padding, so it is *shorter*: the patch tree is thirteen files rather than
+twenty-two.
 
 > **About the name "HAREM".** HAREM is simply the name we gave our three-node setup. It is hardcoded
 > in several places in the stack — patch markers (`HAREM-TP3`, `HAREM-GB10-TOPK`), environment
@@ -245,6 +246,35 @@ a draft model that sometimes misses. Synthetic prompts ("count from 1 to 200") m
 speculative-decoding *ceiling* and run far faster; they are labelled as such wherever they appear and
 they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol.md).
 
+### If you have two Sparks — the TP=2 production candidate
+
+The two-node track is a complete measured recipe of its own, not a cut-down of the above. Same
+harness, same protocol, same day; two nodes, TP=2, **expert parallelism off**, the same full-scope
+checkpoint, `gpu-memory-utilization` **0.85** (the three-node 0.83 rung is not transferable and the
+two-node ladder has never been derived), 6 September 2026 `[measured-here]`:
+
+| | **TP=2 candidate** (2 nodes) | TP=3 production 10 (3 nodes) | two-node share |
+|---|---|---|---|
+| Single-stream decode (C1) | **58.5** tok/s aggregate (**62.6** per stream) | 70.5 (76.9) | 83 % / 81 % |
+| Aggregate at 8 concurrent streams (C8) | **155.8** tok/s | 194.0 | 80 % |
+| Prefill, fresh unseen ~8.4K prompts | **1,400** tok/s | 1,769 | 79 % |
+| KV pool at `max_model_len` 1,000,000 | **2,128,571** tokens — 2.1 concurrent 1M-token requests | 5,619,834 | 38 % |
+| TTFT, C1 / C8 | 0.407 / 1.077 s | 0.280 / 0.826 s | +45 % / +30 % worse |
+| Quality | correctness **10/10**, code exam **12/12** cold and warm, tool-call **8/8**, needle-lite **6/6**; MMLU sample **86.02 ±0.75** | 10/10 · 12/12; MMLU 86.47 ±0.74 | **equal** |
+| Cold boot, `docker run` → API ready | **272 s** (fast-load; the one-off dump boot that writes the sidecar is 998 s) | 251 s | — |
+| Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes, no reboot test yet | 315 s from power-on, reboot-tested | — |
+| Consumed memory per node | 84.8 GiB | 58.3–59.1 GiB | the whole story |
+
+**Two ranks are 80–83 % of the speed on 38 % of the pool, at identical quality.** What the third node
+buys is memory first and bandwidth second — a decode step here is weight-bandwidth bound, so a third
+rank cuts each rank's weight traffic by a third and the collective it costs in exchange does not
+repay it. See [docs/15](docs/15-tp2-track.md) §7.
+
+**The one setting a two-node reader must not miss** is `HAREM_SW_BLOCK_SIZE=256`. Without it the
+two-node pool is 601,562 tokens and a **6,253-token prompt is never scheduled at all** — the engine
+sits at `Running: 0, Waiting: 1, GPU KV cache usage: 0.0 %` indefinitely, because one request wants
+640 of the pool's 385 blocks ([docs/15](docs/15-tp2-track.md) §4).
+
 ## Read in this order
 
 1. [00 — Hardware, firmware and OS](docs/00-hardware-and-os.md) — **the complete environment record.** Three Sparks and their firmware, the ring cabling and what the fabric ceiling really is, every version we ran, the hotplug fix that stops a single-node reboot killing the fabric, the six OS-level changes we made and the three we deliberately did not, and the memory rules. Read it even if you think you know this layer.
@@ -262,7 +292,7 @@ they will disappoint you in real use. See [docs/09](docs/09-measurement-protocol
 13. [12 — The MLA tuner cache](docs/12-tuner-cache.md) — the measurement tax a process-local cache was charging, and the shorter protocol that removes it.
 14. [13 — The full-scope checkpoint](docs/13-full-scope-checkpoint.md) — the three independent reasons a fully quantized checkpoint would not load, none of them about quantization; the loader patch; the TP=3 padded-load port; and what the dense stage is worth, measured twice. **This is the production recipe.**
 15. [14 — Troubleshooting](docs/14-troubleshooting.md) — **all 83 failures we hit, indexed by symptom, with the exact log line.** A triage order at the top, and a ranked index of the twenty that produced no error message at all. If something is wrong right now, start here.
-16. [15 — Running this recipe at TP=2](docs/15-tp2-track.md) — **the two-node track.** Why two ranks need no padding at all, the exact nine changes to the env file, the launcher, the patch tree and the autostart unit, all four of our two-node arms with their dates and settings, the list of production features we never ran there, and a trade-off that is not the one people expect.
+16. [15 — Running this recipe at TP=2](docs/15-tp2-track.md) — **the two-node track, and it is now a complete recipe rather than a set of arms.** Why two ranks need no padding at all; the env file, launcher, patch tree, fast-load sidecar and autostart unit that make up a named **TP=2 production candidate**, measured end to end on 6 September 2026; the draft KV page, without which two ranks silently refuse an 8K prompt; and the two findings this page had to retract — including "full-scope at two ranks is a rig, not a serving configuration", which was an unsettled boot rather than a property of the stack.
 17. [16 — Comparison with other published recipes](docs/16-comparison-with-published-recipes.md) — a dozen other public GLM-5.3-Flash EXL3 DGX Spark recipes, quoted exactly as they publish them with their own stated conditions, beside our numbers at the matching node count. Read the conditions column before you read the numbers. It also contains the two most useful outside findings we know of: **two other people quantized this model's dense path independently, one at two nodes and one at three, and both measured a gain in the same band as ours** — and a four-node recipe's soak hang that we have never looked for on three.
 18. [audit/](audit/README.md) — a post-install self-check with our own numbers beside each step, the provenance table for every headline figure, and the retraction index. Run `audit/run-audit.sh` before you conclude anything about your install.
 19. [charts/](charts/) — four figures generated from the CSVs in [`results/`](results/README.md) by [`charts/make-charts.py`](charts/make-charts.py), standard library only, so you can regenerate them and check the bars against the rows.

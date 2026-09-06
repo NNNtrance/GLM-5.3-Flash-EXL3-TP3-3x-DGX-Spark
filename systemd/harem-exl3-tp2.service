@@ -1,0 +1,23 @@
+[Unit]
+Description=GLM-5.3-Flash EXL3 engine (TP=2 production candidate: two nodes, tp2full tree)
+After=docker.service network-online.target
+Wants=network-online.target
+Requires=docker.service
+# Two engines can never run on one node's unified memory. This unit and the
+# three-node one are alternatives, not siblings: enable exactly one of them.
+Conflicts=harem-exl3.service harem-motor.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+User=@USER@
+Environment=ENV_FILE=@HOME@/exl3-zeus/.env.tp2prod-fs
+Environment=HOME=@HOME@
+WorkingDirectory=@HOME@/exl3-zeus/tp2full
+ExecStartPre=/bin/bash @HOME@/exl3-zeus/motor-onkosul-exl3-tp2.sh
+ExecStart=/bin/bash @HOME@/exl3-zeus/tp2full/start-tp2full.sh
+ExecStop=/usr/bin/docker stop -t 60 exl3-tp2
+TimeoutStartSec=1200
+
+[Install]
+WantedBy=multi-user.target

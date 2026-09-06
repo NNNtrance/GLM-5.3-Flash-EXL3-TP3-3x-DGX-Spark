@@ -11,6 +11,76 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — a TP=2 production candidate, and the two-node page's second retraction
+
+**The two-node track is now a complete recipe with a named production candidate, not a set of
+bring-up arms.** A patch tree (`patches/tp2full/`, thirteen files), an environment template
+(`envs/env.tp2-full.example`), a launcher (`scripts/start-tp2full.sh`), a per-rank fast-load sidecar
+and an autostart unit (`systemd/harem-exl3-tp2.service`), all measured end to end on two nodes with
+the protocol in [docs/09](docs/09-measurement-protocol.md) `[measured-here]`. Rewritten:
+[docs/15](docs/15-tp2-track.md). Raw record:
+[`results/speed/tp2-production-candidate.md`](results/speed/tp2-production-candidate.md).
+
+**Two candidates were measured, identical except the checkpoint. The full-scope one wins every axis
+and is the recommendation.** Both at `gpu-memory-utilization` 0.85, `max_model_len` 1,000,000, image
+`exl3-zeus:754421f`, EP off, DFlash2 k=7, fp8 KV **and** fp8 draft cache, `HAREM_SW_BLOCK_SIZE=256`,
+mesh plugin with both cables, warm tuner cache, fast-load sidecar, median of sweep rounds 2–4 of
+four:
+
+| | A — experts-only | **B — full-scope** | B vs A |
+|---|---|---|---|
+| KV pool at 1M | 1,500,000 | **2,128,571** | **+41.9 %** |
+| C1 aggregate · per stream | 48.76 · 54.72 | **58.50 · 62.55** | +20.0 % · +14.3 % |
+| C8 aggregate | 137.41 | **155.75** | +13.3 % |
+| TTFT, C1 / C8 | 0.468 / 1.249 s | **0.407 / 1.077 s** | −13.0 % / −13.8 % |
+| Consumed memory per node | 89.3 GiB | **84.8 GiB** | −4.5 GiB |
+| Boot, fast-load | 272 s | 272 s | equal |
+| Gates cold+warm · tool-call · needle-lite | 10/10 · 12/12 · 8/8 · 6/6 | 10/10 · 12/12 · 8/8 · 6/6 | equal |
+| MMLU sample, 1,995 q | 86.37 ±0.74 | **86.02 ±0.75** | inside one error bar |
+
+**`[retracted]`: "the full-scope checkpoint at two ranks is a rig and not a serving configuration".**
+On 5 September it failed its KV budget gate at `max_model_len` 1,000,000 with
+`6.6 GiB KV needed, available 0.73 GiB`, and at 65,536 produced a 31,343-token pool in which a
+~2,800-token prompt was never scheduled ([docs/15](docs/15-tp2-track.md) §3.2). Neither reading
+survives two changes made since. The draft page fix cuts blocks-per-request 640 → 280, so the 6.6 GiB
+requirement becomes ~2.9 GiB; and the launcher's **settle gate** — a `MemAvailable ≥ 112 GiB` wait
+before vLLM snapshots memory — turns 0.73 GiB of available KV memory into **16.07 GiB**. The settle
+gate is the larger half, and it is a measurement bug fix rather than a tuning knob
+([docs/07](docs/07-kv-and-draft-page.md) §1.1 already said a rank that snapshots a dirty host awards
+itself memory it does not have; what is new is that the error was the difference between "cannot
+serve" and "recommended").
+
+**`[retracted]`: "the full-scope checkpoint is ~10 GiB heavier per node at two ranks".** Measured on
+one boot each with the same settle gate, image and launcher: consumed memory (weights + non-torch) is
+**89.3 / 89.2 GiB** experts-only against **84.8 / 84.5 GiB** full-scope. It is **4.5–4.7 GiB
+lighter**, which agrees in sign and size with the three-node reading. The old figure came from a boot
+with no settle gate.
+
+**Four more rows left the two-node "not tested" list.** The **fast-load sidecar** at two ranks: boot
+**997 s → 272 s**, sidecar 75–83 GB per rank (half the checkpoint, because EP is off, against a third
+at three ranks with EP). The **fp8 draft cache**: **+15.1 % of pool**, isolated by arithmetic —
+`SlidingWindowSpec` bytes/block halves, blocks-per-request is unchanged at 280, `num_blocks` goes
+365 → 420 — and CUDA graphs still capture at two ranks, unlike at three. The **dual-cable mesh
+patch** on a *single* peer pair: both devices per node moved ~90 GB across a sweep, split 50.5 / 49.5
+— `patches/kernel/0005` is not a three-node effect. The **tuner-cache protocol**: round 1 is inside
+±3 % of the median of rounds 2–4 at two ranks as well, so three rounds is enough here too.
+
+**The autostart unit, installed and tested but left disabled.**
+[`systemd/harem-exl3-tp2.service`](systemd/harem-exl3-tp2.service) with
+[`motor-onkosul-exl3-tp2.sh`](systemd/motor-onkosul-exl3-tp2.sh) (one fabric peer per node instead of
+two; the ConnectX-7 check stays 4/4 because it counts ports, not peers; `Conflicts=` **both** sibling
+units). `systemctl start` on both nodes → `/health` 200 at **+261 s** → gates 10/10 · 12/12 →
+`systemctl stop` clean. Its first attempt **failed correctly**: the preflight refused in one second
+because the sidecar the environment file named was not there, before docker was touched. **No
+two-node reboot test** `[not tested]`, and the three-node unit remains the enabled autostart.
+
+**What is deliberately still open at two ranks:** the `gpu-memory-utilization` ladder (0.85 is where
+every arm ran; it is where our first two-node arm found 3.5 GB of swap during weight load, and at
+three ranks 0.85 was *rejected* — the ladder must be re-derived, not copied), a two-node reboot test,
+expert parallelism on, and a second boot of each candidate. [docs/15](docs/15-tp2-track.md) §6.
+
+---
+
 ## 2026-09-06 — the draft KV page at two ranks: the pool more than doubles, and the long-prompt path only exists with it
 
 **A two-node owner read [docs/15](docs/15-tp2-track.md) and said the KV cache bug was the thing

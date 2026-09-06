@@ -36,12 +36,23 @@ disable it in the same change. On our nodes `harem-motor.service` is now `disabl
 
 ## Install
 
-> **At TP=2, four edits.** `WorkingDirectory` and `ExecStart` point at your two-node tree instead of
-> `tp3full`; `FABRIC_PEERS` in the preflight becomes **one** address per node rather than two (the
-> ConnectX-7 check stays `4/4` — it counts ports, not peers); and the reboot rule becomes "reboot
-> **both** together, never one". `Conflicts=harem-motor.service` stays: that hazard is about two
-> engines on one node's memory, not about rank count. We have not run a two-node reboot test
-> `[not tested]`. [docs/15](../docs/15-tp2-track.md) §2.6.
+> **At TP=2 there is a unit of its own — you do not edit this one.**
+> [`harem-exl3-tp2.service`](harem-exl3-tp2.service) with
+> [`motor-onkosul-exl3-tp2.sh`](motor-onkosul-exl3-tp2.sh). Four differences and no more:
+> `WorkingDirectory`/`ExecStart` point at the two-node tree and `start-tp2full.sh`; `ExecStop` names
+> `exl3-tp2`; `Conflicts=` lists **both** sibling units, because the three-node engine is the second
+> engine on those nodes; and `FABRIC_PEERS` becomes **one** address per node rather than two (the
+> ConnectX-7 check stays `4/4` — it counts ports, not peers).
+>
+> **Installed, started, health-checked and stopped on both nodes on 6 September 2026**: `systemctl
+> start` returned in 3 s / 6 s, `/health` 200 at **+261 s**, KV pool 2,153,571, correctness 10/10 and
+> code exam 12/12, `systemctl stop` clean `[measured-here]`. Its first attempt **failed correctly** —
+> the preflight refused in one second because the fast-load sidecar the environment file named was
+> not on disk, before docker was touched, which is check 7 doing its job.
+>
+> It is left **`disabled`**: exactly one of the two units may be enabled. And the reboot rule becomes
+> "reboot **both** together, never one" — we have **not** run a two-node reboot test `[not tested]`.
+> [docs/15](../docs/15-tp2-track.md) §2.6 and §5.7.
 
 On **every** node, with `scripts/`, `patches/tp3full/` and the env file already in place per
 [docs/03](../docs/03-tp3-padding-and-sidecars.md) and the README quick start:

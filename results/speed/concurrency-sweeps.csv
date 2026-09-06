@@ -69,3 +69,13 @@ fast boot S4 (production),8,3,161.8,161.3,163.4,25.2,1.142,3.95,39.65,61.6,5.31,
 "NCCL_ALGO=Ring,Tree on production 10 (rejected)",4,3,143.4,133.8,146.9,41.7,0.588,1.467,24.00,64.7,5.53,5702479
 "NCCL_ALGO=Ring,Tree on production 10 (rejected)",6,3,175.2,171.9,175.5,32.7,0.705,1.638,30.60,62.6,5.38,5702479
 "NCCL_ALGO=Ring,Tree on production 10 (rejected)",8,3,195.6,194.6,195.7,29.7,0.806,2.069,33.65,62.0,5.34,5702479
+"TP=2 production candidate A (experts-only, 0.85)",1,3,48.8,48.1,49.2,54.7,0.468,,18.27,65.5,5.58,1500000
+"TP=2 production candidate A (experts-only, 0.85)",2,3,68.2,67.3,69.5,40.1,0.670,,24.94,62.7,5.39,1500000
+"TP=2 production candidate A (experts-only, 0.85)",4,3,96.5,90.9,97.5,29.0,0.986,,34.48,63.6,5.45,1500000
+"TP=2 production candidate A (experts-only, 0.85)",6,3,115.7,113.1,118.0,23.2,1.076,,43.08,60.9,5.26,1500000
+"TP=2 production candidate A (experts-only, 0.85)",8,3,137.4,135.8,137.6,20.9,1.249,,47.85,62.1,5.35,1500000
+"TP=2 production candidate B (full-scope, 0.85)",1,3,58.5,58.4,59.5,62.5,0.407,,15.99,60.0,5.20,2128571
+"TP=2 production candidate B (full-scope, 0.85)",2,3,82.5,81.8,83.7,47.7,0.570,,20.98,62.8,5.39,2128571
+"TP=2 production candidate B (full-scope, 0.85)",4,3,112.6,111.3,114.8,33.5,0.766,,29.86,63.7,5.46,2128571
+"TP=2 production candidate B (full-scope, 0.85)",6,3,137.4,137.3,140.2,26.0,1.010,,38.45,62.5,5.37,2128571
+"TP=2 production candidate B (full-scope, 0.85)",8,3,155.8,151.1,155.8,22.2,1.077,,45.11,62.8,5.40,2128571

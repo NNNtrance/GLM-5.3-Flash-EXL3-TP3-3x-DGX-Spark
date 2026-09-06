@@ -1,25 +1,30 @@
 # 15 — Running this recipe at TP=2
 
+**Applies to: TP=2 only.** This is the two-node track's own page. Everything else in the repository is
+shared unless its first line says otherwise.
+
 This repository is a three-node recipe and every default in it is a TP=3 default. It also runs on
 **two** DGX Spark nodes, and at two ranks it is a *simpler* recipe rather than a cut-down one: nothing
 needs padding, so the shape surgery in [03](03-tp3-padding-and-sidecars.md) and the padded-load path
-in [13](13-full-scope-checkpoint.md) §7 are not needed at all. This page is the two-node track: why it
-works, exactly which files and flags change, what we measured at two ranks and when, and — at least
-as important — the long list of things we never ran there.
+in [13](13-full-scope-checkpoint.md) §7 are not needed at all.
 
-**Read the trade-off first, because it is not the one people expect** (§4). At two ranks this stack is
-slower on *every* speed axis we measured, single-stream included, and its KV pool is a fraction of the
-three-node one. What TP=2 buys is a node and a shorter recipe, not latency.
+**As of 6 September 2026 this page describes a complete, measured two-node configuration rather than
+a set of bring-up arms.** There is a named TP=2 production candidate — a patch tree, an environment
+file, a launcher, a fast-load sidecar and an autostart unit — and every row of it was measured on
+the head node (rank 0) and worker-1 on 6 September 2026 with the protocol in
+[09](09-measurement-protocol.md). §5 is that configuration. §3 is how we got there, arm by arm, with
+dates. §6 is the shorter and more honest list of what is still untested.
 
-**And read §3.5 before you run two ranks at all.** The one production setting this page used to list
-as untested at TP=2 — the draft KV page, `HAREM_SW_BLOCK_SIZE=256` — is now measured there, and it is
-not a tuning knob at two ranks. Without it the pool is 601,562 tokens and **a 6,253-token prompt is
-never scheduled at all**; with it the pool is 1,303,571 and an 8,268-token prompt serves in 6.3 s,
-with the quality gates unchanged `[measured-here]`. Set it.
+**Two things on this page reversed on 6 September, and both had been published here as findings.**
+The draft KV page (`HAREM_SW_BLOCK_SIZE=256`) was listed as untested at two ranks and is now the
+single setting without which two ranks cannot serve an 8K prompt at all (§4). And the **full-scope
+checkpoint**, which this page called "a rig and not a serving configuration" at two ranks because it
+could not boot at `max_model_len` 1,000,000, boots there comfortably once the page fix and the
+launcher's settle gate are both in place — and is the faster, larger-pool, recommended candidate
+(§5). Both retractions are marked where they sit.
 
-Every number below carries its date, its image and its settings. Our TP=2 arms were run on four
-different days' worth of stack, and three of the four are **older than production 10**; the table in
-§3 says which is which. Evidence tiers are the ones in [STYLE-GUIDE.md](../STYLE-GUIDE.md).
+Every number below carries its date, its image and its settings. Evidence tiers are the ones in
+[STYLE-GUIDE.md](../STYLE-GUIDE.md).
 
 ---
 
@@ -45,22 +50,24 @@ Two consequences follow, and they are the whole reason a two-node track is worth
 **First: expert parallelism is optional at TP=2.** At three ranks it is mandatory, because 2,048/3 is
 not an integer and a trellis cannot be zero-extended ([03](03-tp3-padding-and-sidecars.md) §1.1). At
 two ranks the routed experts tensor-slice cleanly to 1,024 = 8 × 128 per rank, so both arrangements
-are legal. `patches/tp3full/preflight-tp3.py` already encodes exactly this rule and will let
-`--ep 0` through at `tp=2` while refusing it at `tp=3`: it requires `moe_intermediate_size` to be a
-multiple of `128 × tp`, and 2,048 is a multiple of 256 but not of 384. **Every TP=2 arm we ran had EP
-off** (§3). We have never measured EP on at two ranks `[not tested]`.
+are legal. `patches/tp2full/preflight-tp3.py` encodes exactly this rule and prints
+`preflight, tp=2, ep=OFF (experts tensor-sliced)` while refusing `--ep 0` at `tp=3`: it requires
+`moe_intermediate_size` to be a multiple of `128 × tp`, and 2,048 is a multiple of 256 but not of
+384 `[measured-here]`. **Every TP=2 arm we have run had EP off.** We have never measured EP on at two
+ranks `[not tested]`.
 
 **Second: the padded-load path is not needed.** The full-scope checkpoint's TP=3 port exists because
 `lm_head` had to be loaded narrow into a vocabulary vLLM had padded, and that needed three
 capabilities the kernel author added in `f3e3090` and `754421f`
 ([13](13-full-scope-checkpoint.md) §7.2). At TP=2 there is no pad, so there is nothing to load
-narrow into. Our TP=2 full-scope arm ran on **`exl3-zeus:62f53e6`**, an image that raises
-`EXL3 weights cannot be zero-extended` at TP=3 `[measured-here]`.
+narrow into: our first full-scope TP=2 arm ran on **`exl3-zeus:62f53e6`**, an image that raises
+`EXL3 weights cannot be zero-extended` at TP=3 `[measured-here]`. The production candidate runs
+`754421f` only so that both tracks share one image.
 
 The two launcher constants that production 9 moved from `lcm(64, tp)` to `lcm(128, tp)` are computed
-at run time from `tp`, so `patches/tp3full/patch-vllm-tp3.py` is a **provable no-op at TP≤2** — 
-`lcm(128, 2) = 128`, 154,880 is already a multiple of 128, and 2,048/2 = 1,024 = 8 × 128. Leave the
-patch in place rather than editing it out; the file itself says so in its header.
+at run time from `tp`, so `patch-vllm-tp3.py` is a **no-op at TP≤2** by arithmetic — `lcm(128, 2) =
+128`, 154,880 is already a multiple of 128, and 2,048/2 = 1,024 = 8 × 128. We do not ship it in the
+two-node tree anyway; see §2.3.
 
 ### 1.2 What TP=2 does not get out of
 
@@ -75,167 +82,195 @@ it applies unchanged at two nodes:
 - **`--block-size 256`.** Required at two ranks for the same reason as at three: with `index_kpool`
   4 and fp8 KV, DeepGEMM's arch-12 path needs `block_kv` exactly 64. Without it, built-in MTP dies in
   `attention.hpp:320` `[measured-here]`.
-- **fp8 KV.** Same kernel constraint.
+- **fp8 KV**, and **the fp8 draft cache**. Same kernel constraint for the first; the second is a
+  pool decision, measured at two ranks in §5.3.
 - **The fabric work in [06](06-nccl-mesh.md).** Two nodes are one peer pair rather than three, but
   `NCCL_MAX_NCHANNELS=8` addresses the plugin's per-channel RNR behaviour, not the number of peers,
   and the second-cable patch (`patches/kernel/0005`) exists because a *pair* had two cables and only
-  one was carrying packets. If your two nodes are joined by one cable, set
-  `NCCL_MESH_LINKS_PER_PEER=1`, which makes 0005 a no-op; `0006` (`NCCL_PTR_CUDA`) is worth measuring
-  on its own either way. See [CONTRIBUTING](../CONTRIBUTING.md) item 4.
+  one was carrying packets. **Both cables of a single pair are now measured as carrying traffic at
+  two ranks** (§5.4) `[measured-here]`. If your two nodes are joined by one cable, set
+  `NCCL_MESH_LINKS_PER_PEER=1`, which makes 0005 a no-op.
 - **The per-rank fast-load sidecar** ([08](08-fast-boot.md) §2.4). It is per rank, so two ranks means
-  two sidecars, each about 1.5× the size of a three-rank one. We never built one at TP=2
-  `[not tested]`; every TP=2 boot in §3 is a cold boot without it, which is most of why they take
-  355–471 s against production 10's 251 s.
+  two sidecars — and because EP is off, each rank owns *half* of every tensor rather than a third,
+  so a two-node sidecar is **78–83 GB per rank** against a three-node one's 53 GB (§5.2)
+  `[measured-here]`.
 - **The quality gates.** `scripts/correctness-probe.py` and `scripts/code-exam.py`, cold **and** warm.
-  Both passed on every TP=2 arm we ran.
+  Both passed on every TP=2 arm we have ever run.
 
 ### 1.3 What it buys
 
-- **A node.** That is the honest headline. Two Sparks instead of three.
+- **A node.** Two Sparks instead of three.
 - **A shorter recipe.** No `pad-tp3full.py` sidecar config, no `check-padload-tp3.py` image gate, no
-  `svh = 0` pad audit, no 128-block arithmetic to get wrong, and an image requirement that drops from
-  `754421f` to any image with the loader patch. The five asserts that exist to catch a silently
-  half-padded stack have nothing to catch.
-- **The loader work is visible on its own.** This is why our own full-scope dress rehearsal ran at
-  TP=2 first: it answers "what is the dense stage worth" with no padding machinery on top
+  `svh = 0` pad audit, no 128-block arithmetic to get wrong. The five asserts that exist to catch a
+  silently half-padded stack have nothing to catch, and the patch tree is 13 files rather than 22.
+- **The loader work is visible on its own.** Our full-scope dress rehearsal ran at TP=2 first
+  precisely because it answers "what is the dense stage worth" with no padding machinery on top
   ([13](13-full-scope-checkpoint.md) §4).
 
-It does **not** buy lower single-stream latency on this stack. See §4.
+It does **not** buy lower single-stream latency on this stack. See §7.
 
 ---
 
 ## 2. To run this recipe at TP=2, change exactly these
 
-Nine changes. Everything not listed here is unchanged, including the image build
-([02](02-image-build.md)), the checkpoints ([01](01-model-and-license.md)), the DFlash2 port
-([04](04-dflash2-port.md)), the measurement protocol ([09](09-measurement-protocol.md)) and the
-troubleshooting index ([14](14-troubleshooting.md)).
+Everything not listed here is unchanged, including the image build ([02](02-image-build.md)), the
+checkpoints ([01](01-model-and-license.md)), the DFlash2 port ([04](04-dflash2-port.md)), the
+measurement protocol ([09](09-measurement-protocol.md)) and the troubleshooting index
+([14](14-troubleshooting.md)).
 
 ### 2.1 The env file
 
-Start from [`envs/env.tp3-full.example`](../envs/env.tp3-full.example) and change:
+Start from [`envs/env.tp2-full.example`](../envs/env.tp2-full.example) — that template *is* the
+production candidate of §5, and it already carries everything below. If you are converting a
+three-node file instead, the changes are:
 
 ```
 NNODES=2
-```
-
-```
 TP_SIZE=2
-```
-
-```
 ENABLE_EP=0
 ```
 
-`ENABLE_EP=0` is the arrangement all our TP=2 measurements used. `ENABLE_EP=1` is also legal at two
-ranks and we never measured it `[not tested]`; if you try it, the preflight will accept either.
+`ENABLE_EP=0` is the arrangement every one of our TP=2 measurements used. `ENABLE_EP=1` is also legal
+at two ranks and we have never measured it `[not tested]`; the preflight will accept either.
 
-Two more lines in the same file:
-
-- `MODEL_HOST_PATH` — point it at the checkpoint itself, not at a padding sidecar. There is no
-  padded `config.json` to build at TP=2, so `MODEL_LINK_TARGET` and the identity-mount machinery in
-  `scripts/start-tp3.sh` have nothing to protect; setting both to the same real directory is correct
-  and the launcher's `check_relative_sidecar` will pass it through unchanged.
+- `MODEL_HOST_PATH` — point it at the checkpoint itself, not at a padding sidecar. There is no padded
+  `config.json` to build at TP=2, so set `MODEL_PATH` to a plain container path and leave
+  `MODEL_LINK_TARGET` unset; the identity-mount machinery has nothing to protect.
 - `DRAFT_HOST_PATH` — likewise. The DFlash2 drafter's GQA is 32/8, which divides by two, so the
-  32/8 → 36/9 pad that TP=3 needs is not needed and `patch-dflash-tp3.py` becomes pad-aware over a
-  pad that is not there.
-
-**Keep `--hf-overrides` if you serve the full-scope checkpoint.** It is not about padding: that
-checkpoint's inlined quantization config carries no `tensor_storage`, so `cuda-exl3` has to be pointed
-at the standalone file. At TP=2 that file is the checkpoint's own, unrewritten:
+  32/8 → 36/9 pad that TP=3 needs is not needed and `patch-dflash-tp3.py` is not in the tree.
+- **Keep `--hf-overrides` if you serve the full-scope checkpoint.** It is not about padding: that
+  checkpoint's inlined quantization config carries no `tensor_storage`, so `cuda-exl3` has to be
+  pointed at the standalone file. At TP=2 that file is the checkpoint's own, unrewritten:
 
 ```
-EXTRA_ARGS='--block-size 256 --hf-overrides {"quantization_config_file":"/var/tmp/<your-checkpoint-dir>/quantization_config.json"}'
+EXTRA_ARGS='--block-size 256 --safetensors-load-strategy eager --no-enable-flashinfer-autotune --hf-overrides {"quantization_config_file":"/models/<your-checkpoint-dir>/quantization_config.json"}'
 ```
 
 Single quotes and no spaces inside the JSON, for the reasons in
-[`envs/env.tp3-full.example`](../envs/env.tp3-full.example) and [14](14-troubleshooting.md).
+[14](14-troubleshooting.md). Note also what is **absent**: `--enable-ep-weight-filter`. That flag
+needs expert parallelism, and EP is off here.
 
 ### 2.2 The launcher
 
-[`scripts/start-tp3.sh`](../scripts/start-tp3.sh) hard-codes expert parallelism in three places,
-because at TP=3 it is not optional. Three edits, and they are the only ones:
+Use [`scripts/start-tp2full.sh`](../scripts/start-tp2full.sh) rather than editing `start-tp3.sh`.
+It is the three-node launcher with the EP requirement removed and four pieces kept that a bring-up
+launcher does not have — every one of which we needed:
 
-| Line | Today | At TP=2 |
-|---|---|---|
-| the `ENABLE_EP` guard | `[ "${ENABLE_EP:-1}" = "1" ] \|\| { echo "TP=3 requires ENABLE_EP=1 …"; exit 2; }` | delete, or widen it to fire only when `TP_SIZE` is 3 |
-| `EP_ARG=(--enable-expert-parallel)` | unconditional | `EP_ARG=(); [ "${ENABLE_EP:-0}" = "1" ] && EP_ARG=(--enable-expert-parallel)` |
-| the container environment | `-e ENABLE_EP=1` | `-e ENABLE_EP="$ENABLE_EP"` |
+| Piece | Why it is in the two-node launcher |
+|---|---|
+| the F1 **settle gate** (`MemAvailable ≥ 112 GiB`, 60 polls) | the KV pool is computed from a `MemAvailable` snapshot, so a rank that starts on a dirty host awards itself memory it does not have ([07](07-kv-and-draft-page.md) §1.1). This is the single change that turns the full-scope arm from "cannot boot at 1M" into the production candidate (§5.5) |
+| the **fastload block** (`FASTLOAD_MODE=dump\|load`, identity mount) | boot 997 s → **272 s** (§5.2) |
+| `PROF_ARG` | this vLLM takes the torch profiler as `--profiler-config`; without the flag `/start_profile` answers 404 |
+| `-e NODE_RANK -e TP_SIZE -e ENABLE_EP -e TP3_DIR` | the bring-up launcher passed none of them, which is why its prelude printed `rank=? tp=?` — and **the fastload sidecar cannot work without `NODE_RANK`** |
 
-`NNODES`, `TP_SIZE` and `--tensor-parallel-size` already come from the env file. **Boot order becomes
-worker-1, then head** — the same rule as at three ranks, highest rank first.
+`TP3_DIR` is deliberately set to the *same* directory as `TP2_DIR`. `preflight-fastload.py` and
+`harem_fastload.py` both read `TP3_DIR` to find the patch set they must hash; pointing it at the
+two-node tree is what makes the sidecar identity cover the two-node patch set instead of a
+three-node one that is not even mounted.
+
+**Boot order is worker-1, then head** — the same rule as at three ranks, highest rank first.
 
 ### 2.3 The patch tree
 
-Use [`patches/tp2/patch-fullscope-tp2.py`](../patches/tp2/patch-fullscope-tp2.py) in place of
-`patches/tp3full/patch-fullscope-tp3.py`. The relationship is exact and is stated in
-[`patches/tp3full/README.md`](../patches/tp3full/README.md):
+Use [`patches/tp2full/`](../patches/tp2full/). It is the two-node tree, complete, and every file in
+it is documented here:
 
-| | `patches/tp2/patch-fullscope-tp2.py` | `patches/tp3full/patch-fullscope-tp3.py` |
-|---|---|---|
-| A1–A8 (S1 packed mapping, S2 quant gates, S3 KDA split) | identical text | identical text |
-| **A9** — `linear.py`, split a fused checkpoint tensor by the *checkpoint's* widths rather than the module's padded ones | absent | present; **a no-op at TP≤2** |
-| **A10** — post-load audit: every padded EXL3 site is whole 128-blocks and exactly zero | absent | present; there is nothing to audit at TP=2 |
+| File | What it does at two ranks |
+|---|---|
+| `tp2full-prelude.sh` | the in-container prelude; applies the patches below, then `exec vllm serve`. **Install it under two names** — `tp2-prelude.sh`, which the launcher mounts at `/start.sh`, and `tp3-prelude.sh`, which is the name `harem_fastload_id.file_identity()` hashes. A **hard link**, not a copy, so the two cannot drift; without the second name the prelude's text silently falls out of the sidecar manifest, and `start-tp2full.sh` refuses to launch if either is missing. [`patches/tp2full/README.md`](../patches/tp2full/README.md) has the two-line install |
+| `patch-kvdiag-tp3.py` | logging only: the per-group decomposition of the pool arithmetic. Every arm |
+| `patch-swblock-tp3.py` | the draft KV page, 16 → 256 tokens. **Mandatory in practice** (§4) |
+| `patch-draftkv-tp3.py` | the drafter's own cache at fp8. Gated on `HAREM_DRAFT_KV_DTYPE`; measured at two ranks in §5.3 |
+| `patch-tilelang-failloud-tp3.py` | turns a silent `contextlib.suppress` around `import flashinfer.comm` into a named error. Gated |
+| `patch-epfilter-tp3.py` | EP weight filter for `.trellis`. **Inert here** — it needs `--enable-ep-weight-filter`, which needs EP. Kept so an EP-on TP=2 arm needs no tree change, because a tree change means a new manifest and a new dump boot |
+| `patch-fastload-tp3.py` | installs the sidecar hook into vLLM's loader. Inert unless `HAREM_FASTLOAD_MODE` is set |
+| `harem_fastload.py`, `harem_fastload_id.py` | the dump/restore engine and the identity |
+| `preflight-fastload.py` | refuses a stale sidecar in the prelude, before vLLM starts |
+| `preflight-tp3.py` | the shape preflight. `tp`-parameterised; run it as `--tp 2 --ep 0` |
+| `flashinfer-warmup.py` | imports `flashinfer.comm` once, CPU-side, ~2 s |
+| `patch-fullscope-tp2.py` | S1 packed mapping, S2 stop hard-wiring MLA+KDA to bf16, S3 KDA refactorisation. Gated on `HAREM_EXL3_FULLSCOPE`. **This is the patch the recommended candidate runs** |
 
-Everything else in the tree can be used as it stands. `patch-vllm-tp3.py` computes `lcm(128, tp)` and
-is a no-op at two ranks (§1.1); `patch-swblock-tp3.py`, `patch-epfilter-tp3.py`,
-`patch-draftkv-tp3.py`, `patch-fastload-tp3.py` and `patch-kvdiag-tp3.py` are all `tp`-agnostic and
-all gated on their own env knobs. `check-padload-tp3.py` can be dropped: it gates on a capability
-only the padded-load path needs.
+And what is deliberately **not** in it, because all of it exists only to serve a pad that does not
+exist at two ranks:
+
+| Not shipped | Why |
+|---|---|
+| `patch-vllm-tp3.py` | the zero-extend helper for a shard that runs past the stored dim. No pad at tp=2, so the branch can never fire. It is harmless to keep if you prefer one tree for both rank counts — but no two-node arm of ours has ever run it, and we do not ship unmeasured text |
+| `patch-exl3-ep.py` + `overlay/cuda_exl3/` | the cuda-exl3 EP kernel fixes. EP is off |
+| `patch-dflash-tp3.py` | makes the DFlash2 head check pad-aware over the 32/8 → 36/9 drafter pad |
+| `patch-fullscope-tp3.py` | its A9 (split a fused tensor by checkpoint widths) and A10 (post-load pad audit) are the padded-load half. A9 is a no-op at TP≤2 and A10 has nothing to audit; `patch-fullscope-tp2.py` is the same S1–S3 without them |
+| `check-padload-tp3.py` | gates a `cuda-exl3` capability only the padded-load path needs |
+| `pad-tp3.py`, `pad-tp3full.py` | build padded sidecars. Nothing to pad |
+| `patch-zerokv-tp3.py` | an optional arm, never in a production env |
 
 **Keep the file list in its own directory.** The directory's file list and the full text of the
 prelude are hashed into the fast-load manifest ([08](08-fast-boot.md) §4), and adding one file to a
 tree — even a file that is never called — refuses the next boot on every node. That has happened to
 us twice, and once it was **the TP=2 patch dropped into the TP=3 tree** that did it
-([13](13-full-scope-checkpoint.md) §6.4). A `patches/tp2/` tree of its own is the answer, exactly as
-`patches/tp3full/` is.
+([13](13-full-scope-checkpoint.md) §6.4). Finish the tree *before* the dump boot and add nothing
+between dump and load.
 
 ### 2.4 The image
 
-`exl3-zeus:62f53e6` is enough at TP=2 `[measured-here]` — that is the image our full-scope TP=2 arm
-ran on. `754421f` also works and adds nothing you need at two ranks. Build it exactly as
-[02](02-image-build.md) says.
+`exl3-zeus:62f53e6` is enough at TP=2 `[measured-here]`; the production candidate runs **`754421f`**
+so that both tracks share one image and one sidecar-invalidation event. `754421f` adds only the
+padded-load capability, which two ranks do not use.
 
-### 2.5 Flags that stay, and one expectation that changes
+### 2.5 Flags that stay, and the two that are not optional
 
 | Flag / knob | At TP=2 |
 |---|---|
 | `HAREM_DISABLE_PERSISTENT_TOPK=1` | **mandatory**, same reason (§1.2) |
 | `--block-size 256` | **mandatory**, same reason |
 | `--kv-cache-dtype fp8` | **mandatory**, same reason |
+| `HAREM_SW_BLOCK_SIZE=256` | **mandatory in practice** — without it the pool is 601,562 and a 6,253-token prompt is never scheduled at all (§4) `[measured-here]` |
+| `HAREM_DRAFT_KV_DTYPE=fp8` | keep: **+15.1 % of pool at two ranks, speed and acceptance unchanged** (§5.3) `[measured-here]` |
 | `NCCL_MAX_NCHANNELS=8` | keep; it is a plugin property, not a peer-count property |
-| `NCCL_MESH_LINKS_PER_PEER` | `0` (auto) with two cables between the pair; `1` with one cable, which makes `patches/kernel/0005` a no-op |
+| `NCCL_MESH_LINKS_PER_PEER` | `0` (auto) with two cables between the pair — **both cables measured carrying ~90 GB each across a sweep** (§5.4); `1` with one cable, which makes `patches/kernel/0005` a no-op |
 | `NCCL_MESH_MIN_RNR_TIMER=1`, `NCCL_MESH_PTR_CUDA=1`, `NCCL_MESH_FLUSH=1` | keep |
-| `HAREM_SW_BLOCK_SIZE=256` | **mandatory in practice** — measured at TP=2 in §3.5: the pool more than doubles and the long-prompt path only exists with it `[measured-here]` |
-| `HAREM_DRAFT_KV_DTYPE=fp8` | keep — never run at TP=2 `[not tested]` |
-| `CUDA_EXL3_TUNE_CACHE` | keep, and warm it before you measure anything ([12](12-tuner-cache.md)) |
-| `GPU_MEMORY_UTILIZATION` | our TP=2 arms all ran **0.85**, not production 10's 0.83; read §3.4 before copying either |
-| `MAX_MODEL_LEN` | 1,000,000 is reachable with the experts-only checkpoint at TP=2 and **was not** with the full-scope one (§3.2) |
+| `CUDA_EXL3_TUNE_CACHE` | keep, and warm it before you measure anything ([12](12-tuner-cache.md)). Warm at two ranks it does what it does at three: round 1 is inside the round-to-round band (§5.6) |
+| `GPU_MEMORY_UTILIZATION` | **0.85**, which is where every TP=2 arm of ours has run. It is *not* production 10's 0.83, and the ladder has never been derived at two ranks — read §6 before moving it |
+| `MAX_MODEL_LEN` | **1,000,000 is reachable with either checkpoint** once the page fix and the settle gate are in place. That is a reversal; see §5.5 |
 
 ### 2.6 The autostart unit
 
-[`systemd/harem-exl3.service`](../systemd/README.md) needs three edits and the preflight one:
+[`systemd/harem-exl3-tp2.service`](../systemd/harem-exl3-tp2.service) and its preflight
+[`systemd/motor-onkosul-exl3-tp2.sh`](../systemd/motor-onkosul-exl3-tp2.sh) are the two-node pair.
+They differ from the three-node ones in four places and no more:
 
-- `WorkingDirectory` and `ExecStart` — point both at your TP=2 tree instead of `tp3full`.
-- `ExecStop` — the container name if you changed it.
-- `Conflicts=harem-motor.service` — keep it, and disable the sibling recipe's unit in the same
-  change. That hazard is about two engines on one node's unified memory and has nothing to do with
-  rank count.
-- `motor-onkosul-exl3.sh` — `FABRIC_PEERS` becomes **one** address per node instead of two, and the
-  ConnectX-7 check stays at `4/4` because that counts ports on the node, not peers.
+- `WorkingDirectory` and `ExecStart` point at `tp2full/` and `start-tp2full.sh`.
+- `ExecStop` names `exl3-tp2`.
+- `Conflicts=harem-exl3.service harem-motor.service` — **both**. Two engines can never run on one
+  node's unified memory, and the three-node unit is the second engine here. Enable exactly one.
+- the preflight's `FABRIC_PEERS` becomes **one** address per node. The ConnectX-7 check stays at
+  `4/4` because that counts ports on the node, not peers, and a node whose other two ports are down
+  has a hardware problem worth failing on even when this cluster does not use them.
+
+**Installed, started, health-checked and stopped on both nodes on 6 September 2026**
+`[measured-here]` — §5.7. It is installed **disabled**: the three-node unit remains the enabled
+autostart on our cluster, and a two-node reboot test has still not been run `[not tested]` (§6).
 
 And the reboot rule becomes "reboot **both** together, never one". The preflight checks only its own
 node's fabric, so a single-node reboot passes it and starts a rank into a cluster whose peer is gone
-([00](00-hardware-and-os.md) §3.4). We have not run a two-node reboot test `[not tested]`; the
-three-node one is in [systemd/README](../systemd/README.md).
+([00](00-hardware-and-os.md) §3.4).
 
 ---
 
-## 3. What we measured at two ranks
+## 3. The arms, in order
 
-Four arms, all on two DGX Spark nodes, all at temperature 0 and reasoning effort **low**, all with the
-GB10 top-k overlay and `--block-size 256`. **Arms A and B are bring-up figures on an older stack;
-arms C and D are the current one.** Do not compare a number in arm A against a number in arm D.
+Seven arms now, all on two DGX Spark nodes, all at temperature 0 and reasoning effort **low**, all
+with the GB10 top-k overlay and `--block-size 256`. **Arms A–D are older stacks. Do not compare a
+number in arm A against a number in candidate B.**
+
+| Arm | Date | Image | Checkpoint | What it established | Section |
+|---|---|---|---|---|---|
+| **A** bring-up | 4 Sep | `serve` (`37330c9`) | experts-only | it runs at all; MTP k=3 beats no draft | §3.1 |
+| **B** DFlash2 | 4–5 Sep | `dflash` | experts-only | DFlash2 k=7 is the fastest drafter, and it costs 58 % of the pool | §3.1 |
+| **C** current stack, control | 5 Sep | `62f53e6` | experts-only | the two-node baseline the fabric work was measured against | §3.2 |
+| **D** full-scope, first try | 5 Sep | `62f53e6` | full-scope | +24 % single stream — and, we thought, an unusable pool | §3.2 |
+| **KV-fix control / fix** | 6 Sep | `62f53e6` | experts-only | the draft page is not optional at two ranks | §4 |
+| **Candidate A** | 6 Sep | `754421f` | experts-only | the complete two-node configuration on the smaller checkpoint | §5 |
+| **Candidate B** | 6 Sep | `754421f` | **full-scope** | **the recommended TP=2 production candidate** | §5 |
 
 ### 3.1 Arms A and B — bring-up, 4–5 September 2026
 
@@ -244,8 +279,7 @@ arms C and D are the current one.** Do not compare a number in arm A against a n
 TP=2, EP off, `--attention-backend CUSTOM`, KV fp8, `gpu-memory-utilization 0.85`, no KV pin,
 `--max-model-len 1000000`, `--max-num-seqs 8`, `--max-num-batched-tokens 2048`, mesh plugin,
 **before** any of the fabric work in [06](06-nccl-mesh.md). Two speculative arrangements: none, and
-the image's built-in MTP at k=3. Published as `Zeuss5/cuda-exl3` issue #2, 4 September 2026
-`[measured-here]`.
+the image's built-in MTP at k=3. Published as `Zeuss5/cuda-exl3` issue #2 `[measured-here]`.
 
 | | no draft | MTP k=3 |
 |---|---|---|
@@ -253,24 +287,18 @@ the image's built-in MTP at k=3. Published as `Zeuss5/cuda-exl3` issue #2, 4 Sep
 | KV pool at 0.85, fp8, 1M context | **2,548,117** tokens | 1,987,179 (the MTP layer plus block 256: −22 %) |
 | Quality gates | 10/10 correctness, 12/12 code exam, 0 empty | 10/10 · 12/12 · 0 empty |
 | Single stream, 700-token code prompt | 14.6 tok/s | 30.3–30.6 tok/s, acceptance 70 % |
-| `hizset-v2` C1 / C2 / C4 / C6 / C8, per stream | 14.7 / 14.9 / 12.0 / 8.6 / 9.0 | 33.7 / 27.5 / 20.2 / 16.0 / 14.3 |
-| the same, aggregate | 14.4 / 28.8 / 46.4 / 50.6 / **70.6** | 30.6 / 48.0 / 71.0 / 85.9 / **102.4** |
-| accepted tokens per step | — | 3.3, acceptance 76–78 % |
+| `hizset-v2` C1 / C2 / C4 / C6 / C8, aggregate | 14.4 / 28.8 / 46.4 / 50.6 / **70.6** | 30.6 / 48.0 / 71.0 / 85.9 / **102.4** |
 | Prefill, 7.4K prompt, cold cache | **1,137** tok/s | 1,131 tok/s |
-| TTFT, C1 warm / C8 | 0.34 s / 0.8 s | 0.4–0.6 s / 1.3 s |
-| Category at C1, prose / code / math / JSON | — | 21.3 / 31.1 / 34.2 / 35.3 tok/s (acceptance 38 / 73 / 79 / 84 %) |
 | MMLU sample, 57 × 35 = 1,995 q, 0-shot | — | **86.4 ±0.7** |
 | Free host RAM after load tests / swap | head 5.2 GB / **3.5 GB swap**; worker-1 7.1 GB / 2.8 GB | head 4.8 GB, worker-1 6.7 GB |
 
 The swap in that last row appeared **during weight load** and was stable afterwards. It is the
-clearest single reading of what two nodes cost: 80 GiB of weights per node against production 9's
-58.3–59.1 GiB, on a part where the GPU and the host share one 121.6 GiB pool.
+clearest single reading of what two nodes cost, and it is the reason §6 still refuses to move the
+memory rung without a derivation.
 
 **Arm B — the DFlash2 port at two ranks**, image `exl3-zeus:dflash`, drafter
-`incoai/GLM-5.3-Flash-DFlash2` at k=7, same checkpoint and same env otherwise, mean of two
-`bench-sweep` rounds, 4–5 September 2026 `[measured-here]`. This is the arm that established that
-DFlash2 is the fastest option on this stack, and the three columns are directly comparable to each
-other because they were run back to back on one boot:
+`incoai/GLM-5.3-Flash-DFlash2` at k=7, same checkpoint and env otherwise, mean of two rounds
+`[measured-here]`. Three columns run back to back on one boot:
 
 | | no draft | MTP k=3 | **DFlash2 k=7** |
 |---|---|---|---|
@@ -280,133 +308,87 @@ other because they were run back to back on one boot:
 | C8 aggregate | 69.50 | 102.32 | **114.60** |
 | acceptance · accepted tokens per step | — | 77.3 % · 3.31 | **62.4 % · 5.37** |
 | KV pool | — | 1,987,179 | **825,000** |
-| Prefill 7k | 1,137 | 1,131 | 1,035 |
-| Category at C1: math / JSON / code / prose | — | 34.2 / 35.3 / 31.1 / 21.3 | **48.5 / 45.6 / 38.2** / 18.5 |
 | Gates | 10/10 · 12/12 | 10/10 · 12/12 | 10/10 · 12/12 |
 
 **What that cost.** The KV pool falls from 1,987,179 to 825,000 — **−58 %** — because the drafter's
-KV group is allocated on a 16-token page. That is the same defect [07](07-kv-and-draft-page.md) §3
-diagnoses and fixes with `HAREM_SW_BLOCK_SIZE=256`; **that fix is now measured at two ranks and it
-more than doubles the pool** (§3.5). And prose gets *slower*, 21.3 → 18.5 tok/s: at k=7 the wasted draft costs more than the
-occasional hit is worth on high-entropy text, and prose acceptance is 12.8 % against MTP's 37.7 %.
+KV group is allocated on a 16-token page. That is the defect [07](07-kv-and-draft-page.md) §3
+diagnoses; §4 is its measurement at two ranks. And prose gets *slower*, 21.3 → 18.5 tok/s: at k=7 the
+wasted draft costs more than the occasional hit is worth on high-entropy text.
 
 ### 3.2 Arms C and D — the current stack, 5 September 2026
 
-Both arms: two nodes, TP=2, EP off, image `exl3-zeus:62f53e6`, EXL3 weights, KV fp8, DFlash2 k=7,
-`gpu-memory-utilization 0.85`, `--block-size 256` requested, `--max-num-seqs 8`,
+Both arms: two nodes, TP=2, EP off, image `exl3-zeus:62f53e6`, KV fp8, DFlash2 k=7,
+`gpu-memory-utilization 0.85`, `--block-size 256`, `--max-num-seqs 8`,
 `--max-num-batched-tokens 2048`, `NCCL_MAX_NCHANNELS=8`, mesh plugin with both cables per peer,
 `CUDA_EXL3_TUNE_CACHE` warm, **no** fast-load sidecar, **no** `HAREM_SW_BLOCK_SIZE`, **no** fp8 draft
-cache, temperature 0, reasoning effort low, medians of three rounds `[measured-here]`. Arm C is
-`brandonmusic/GLM-5.3-Flash-tr3-4bpw` (routed experts only); arm D is
-`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw (full scope). **Arm D ran at `max_model_len` 65,536
-against arm C's 1,000,000**, because at 1M it could not boot, so only C1–C4 are a comparison between
-them; C6, C8, every prefill figure and the pool are not. The full account is
-[13](13-full-scope-checkpoint.md) §4–§6.
+cache, **no settle gate**, medians of three rounds `[measured-here]`. Arm C is the experts-only
+checkpoint; arm D is `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw. **Arm D ran at `max_model_len`
+65,536 against arm C's 1,000,000**, because at 1M it could not boot.
 
 | metric | **C — experts-only** | **D — full-scope** | delta, where it is one |
 |---|---|---|---|
 | C1 per stream (tok/s) | 54.69 | **68.00** | **+24.3 %** |
 | C1 aggregate (tok/s) | 47.40 | **59.93** | **+26.4 %** |
-| C2 aggregate | 68.03 | 83.02 | +22.0 % |
-| C4 aggregate | 90.66 | 111.05 | +22.5 % |
-| C6 aggregate | 110.12 | 109.75 | **void — arm D is KV-bound** |
-| C8 aggregate | 133.57 | 110.03 | **void — arm D is KV-bound** |
+| C2 / C4 aggregate | 68.03 / 90.66 | 83.02 / 111.05 | +22.0 % / +22.5 % |
+| C6 / C8 aggregate | 110.12 / 133.57 | 109.75 / 110.03 | **void — arm D is KV-bound** |
 | TTFT at C1 | 0.615 s | 0.524 s | −14.8 % |
-| draft acceptance at C1 · accepted tokens per step | 64.08 % · 5.49 | 63.14 % · 5.42 | equal |
+| acceptance at C1 · tokens per step | 64.08 % · 5.49 | 63.14 % · 5.42 | equal |
 | decode step time | 100.4 ms | 79.7 ms | −20.6 % |
-| cold first request | TTFT 1.44 s, 40.5 tok/s, acceptance 45.5 % | TTFT 0.85 s, 47.5 tok/s | faster |
-| Boot, cold, no fast-load sidecar | 396 s | 355 s | −10 % |
-| KV pool | **665,625** at 1,000,000 ctx | 31,343 at 65,536 ctx | **not comparable** |
-| Prefill, three fresh unseen 8,204-token prompts | **1,334** tok/s (1,329 / 1,334 / 1,447) | **not measurable** | see below |
-| Prefill 7k, uncached | 1,135 tok/s | not measurable | |
-| Gates, cold and warm | 10/10 · 12/12 both | 10/10 · 12/12 both | equal |
-| MMLU sample, 1,995 q, 0-shot | 86.4 ±0.7 (measured on this checkpoint at TP=2 earlier the same day) | **86.32 ±0.75** | inside the error bar |
-| Free host RAM after the run | 6.6 / 7.7 GiB | 8.9 / 10.6 GiB | full scope is lighter |
+| Boot, cold, no sidecar | 396 s | 355 s | −10 % |
+| KV pool | **665,625** at 1M ctx | 31,343 at 65,536 ctx | **not comparable** |
+| Prefill, three fresh 8,204-token prompts | **1,334** tok/s | not measurable | |
+| Gates, cold and warm | 10/10 · 12/12 | 10/10 · 12/12 | equal |
+| MMLU sample, 1,995 q, 0-shot | 86.4 ±0.7 | **86.32 ±0.75** | inside the error bar |
 
-**Arm D's cost line, and it is the reason TP=2 is a rig and not a serving configuration.** At two
-ranks the full-scope checkpoint leaves so little KV that the hybrid allocator prints
-`Setting attention block size to 4608 tokens to ensure that attention page size is >= mamba page size`
-and the pool comes out at 31,343 tokens — about 6.8 pages. Measured admission: an 844-token prompt
-serves in 1.1 s, a 1,684-token prompt in 1.7 s, and a ~2,800-token prompt is **never scheduled** —
-45 s later still `Running: 0, Waiting: 1` with KV usage at 0 % `[measured-here]`. `--block-size 256`
-has no effect in that state; the allocator overrides it.
+**Arm D's cost line said TP=2 full-scope was a rig and not a serving configuration. That judgement
+is `[retracted]`.** At 1M it failed its own budget gate with `6.6 GiB KV needed for max seq len
+1,000,000, available 0.73 GiB`; dropped to 65,536 it produced a 31,343-token pool — about 6.8 pages
+— and a ~2,800-token prompt was never scheduled. **Both readings are real, and neither survives the
+two changes that came after them:** the draft page fix cuts blocks-per-request from 640 to 280, and
+the launcher's settle gate stops a rank measuring a dirty host. With both in place the same
+checkpoint boots at `max_model_len` 1,000,000 with **16.07 GiB** of available KV memory and a
+**2,128,571**-token pool (§5.5). The arithmetic of the reversal is decomposed there.
 
 **Arm C's cost line is the plain two-node one.** 665,625 tokens against production 8's 4,699,724 on
-the same day and the same script — **14 %** — because a 164 GiB model over two nodes leaves about
-85 GiB of weights per node and very little else.
+the same day — because a 164 GiB model over two nodes leaves about 85 GiB of weights per node and
+very little else. That figure is also **an unpinned baseline**: the same env file booted through a
+settle gate on 6 September got 601,562, not 665,625 (§4).
 
-### 3.3 What we did **not** do at TP=2 — the honest list
+### 3.3 One reading that did not survive, and is kept here
 
-Everything in this table is in production at three ranks and has never been run at two `[not tested]`.
-Where an effect at TP=3 lets us say something useful about the likely direction, it is marked
-`[estimate]` and is a projection, not a measurement.
+Arm D at `max_model_len=1,000,000` implied the full-scope checkpoint was about **10 GiB heavier per
+node** than the experts-only one — while post-run free host memory on the same arm said its weights
+were ~3.3 GiB per node *lighter*. Those two readings contradicted each other and we never isolated
+the mechanism; at three ranks the sign reversed.
 
-**One row has left this table.** `HAREM_SW_BLOCK_SIZE=256` was its first entry and its largest
-projection; it was measured at two ranks on 6 September 2026 and now has its own section, §3.5. The
-projection it carried — "perhaps 0.8–1.2 M from arm C's 665,625" — was **low**, and the reasoning
-behind it was incomplete: at two ranks the defect is worse than at three, not merely as bad.
+**6 September settles it, on one boot each with the same settle gate, the same image and the same
+launcher** `[measured-here]`: consumed memory (weights + non-torch) is **89.3 / 89.2 GiB** per node
+with the experts-only checkpoint and **84.8 / 84.5 GiB** with the full-scope one. The full-scope
+checkpoint is **4.5–4.7 GiB lighter per node**, which agrees in sign and roughly in size with the
+three-node reading of 3.4 GiB lighter. The "10 GiB heavier" arithmetic stays `[retracted]` and its
+source is now named: an unsettled boot.
 
-| Not run at TP=2 | What it did at TP=3 | Expectation at TP=2 |
-|---|---|---|
-| **`HAREM_DRAFT_KV_DTYPE=fp8`** — the drafter's own cache at fp8 ([07](07-kv-and-draft-page.md) §7) | +5.6 % of pool, acceptance unchanged, speed within noise | should carry; not measured |
-| **`gpu-memory-utilization` 0.83** (production 10) | +8.7 % of pool over 0.80, swap flat | our TP=2 arms ran **0.85**, and arm A recorded 3.5 GB of swap on the head during weight load at that rung. The three-node memory rule and its ladder ([11](11-open-issues.md) §2.4) were derived at three ranks and should be re-derived at two, not copied |
-| **The fast-load sidecar** ([08](08-fast-boot.md)) | boot 618 → 274 → 251 s; weights 426 → 58 s | per rank, so two sidecars of ~1.5× the size. Every TP=2 boot above is a cold one without it |
-| **The `CUDA_EXL3_TUNE_CACHE` protocol** ([12](12-tuner-cache.md)) | three rounds instead of five | arms C and D had a warm cache; arms A and B did not, and were not run to the five-round rule either |
-| **The dual-cable plugin patch** (`patches/kernel/0005`) | +73 % on a 64 MB all-reduce, +4–6 % end to end | arms C and D carried it. Whether a **single** peer pair sees the same is unmeasured, and if your pair has one cable it is a no-op by construction |
-| **The autostart unit and a two-node reboot test** ([systemd](../systemd/README.md)) | `/health` 200 at 242 s by the harness's counter, 315 s by the wall clock | never installed at TP=2 |
-| **Expert parallelism at two ranks** | mandatory at three | legal at two, never measured |
-| **Prefill and C6/C8 for the full-scope checkpoint at two ranks** | measured at three ([13](13-full-scope-checkpoint.md) §7.3) | impossible in arm D's configuration — the long-prompt path is closed (§3.2) |
-| **A five-round arm, and a boot-to-boot spread** ([09](09-measurement-protocol.md) §1.1) | C1 spans 1.1 %, C8 2.5 %, **C4 7.4 %** across boots at three ranks | every TP=2 number above is a median of two or three rounds on **one** boot. Treat differences under about 5 % as noise |
+A separate finding from that investigation does stand: lowering `max_model_len` from 1,000,000 to
+65,536 raised available KV memory from 0.73 to **5.41 GiB**, so roughly **4.7 GiB per node of
+persistent, non-KV allocation scales with `max_model_len`** on this stack `[measured-here]`.
 
-This page therefore only **partly** closes [CONTRIBUTING](../CONTRIBUTING.md) item 10. Arms C and D
-are on the production image with the fabric work in place; what is still missing at two ranks is the
-fp8 draft cache, fast load, the memory ladder and a second boot. The draft page came off this list
-on 6 September 2026 — §3.5.
+---
 
-### 3.4 One reading that did not survive, and is kept here
+## 4. The draft KV page at two ranks — measured, 6 September 2026
 
-Arm D at `max_model_len=1,000,000` failed its own budget gate with **0.73 GiB** of available KV
-memory where the arm C control had 4.4 GiB, implying the full-scope checkpoint was about **10 GiB
-heavier per node** — while post-run free host memory on the same arm said its weights were ~3.3 GiB
-per node *lighter* `[measured-here]`. Those two readings contradict each other and we never isolated
-the mechanism. At three ranks the **sign reversed**: 3.4 GiB lighter per node and the pool 10 %
-larger. The TP=2 delta is marked **not reproduced** rather than explained
-([13](13-full-scope-checkpoint.md) §6.2, §7.5) `[retracted]`.
-
-A separate finding from the same investigation does stand and is worth carrying to any node count:
-lowering `max_model_len` from 1,000,000 to 65,536 raised available KV memory from 0.73 to **5.41
-GiB**, so roughly **4.7 GiB per node of persistent, non-KV allocation scales with `max_model_len`** on
-this stack `[measured-here]`.
-
-One number in the paragraph above is now doubtful in its own right: "the arm C control had 4.4 GiB"
-of available KV memory. Re-running that exact env file on 6 September (§3.5) printed **9.97 GiB** on
-the binding rank and 11.68 GiB on the other. We cannot reconcile them — arm C's container log was
-not kept, only its extracted pool figure — so the 4.4 GiB is best read as an inference from the
-pool rather than as a log line, and the "10 GiB heavier per node" arithmetic that rests on it is
-weaker still. It stays `[retracted]`.
-
-### 3.5 The draft KV page at two ranks — measured, 6 September 2026
-
-This closes the largest open item on the page, and the answer is stronger than the projection §3.3
-carried. Two arms back to back, one boot each, **the only difference one token in `EXTRA_ENV`**
-`[measured-here]`. Full raw record: [`results/speed/tp2-draft-page.md`](../results/speed/tp2-draft-page.md).
+This is the setting to get right before anything else. Two arms back to back, one boot each, **the
+only difference one token in `EXTRA_ENV`** `[measured-here]`. Full raw record:
+[`results/speed/tp2-draft-page.md`](../results/speed/tp2-draft-page.md).
 
 **Settings, identical in both arms.** Two nodes, TP=2, EP off, image `exl3-zeus:62f53e6`,
-`brandonmusic/GLM-5.3-Flash-tr3-4bpw` at `b20c49ba` (routed experts only), KV `fp8`, DFlash2 k=7,
-`--attention-backend CUSTOM`, `--block-size 256`, `--max-num-seqs 8`,
-`--max-num-batched-tokens 2048`, `--max-model-len 1000000`, `gpu-memory-utilization 0.85`,
-`HAREM_DISABLE_PERSISTENT_TOPK=1`, `NCCL_MAX_NCHANNELS=8`, mesh plugin with both cables,
-`CUDA_EXL3_TUNE_CACHE` warm, no fast-load sidecar, no fp8 draft cache, temperature 0, reasoning
-effort **low**, medians of three rounds. Both arms booted through the host-side settle gate
-(`MemAvailable ≥ 112 GiB`; they started at 116.9 and 117.1 GiB), so the pool figures satisfy the
-acceptance rule in [07](07-kv-and-draft-page.md) §1.1.
+experts-only checkpoint at `b20c49ba`, KV `fp8`, DFlash2 k=7, `--attention-backend CUSTOM`,
+`--block-size 256`, `--max-num-seqs 8`, `--max-num-batched-tokens 2048`, `--max-model-len 1000000`,
+`gpu-memory-utilization 0.85`, `HAREM_DISABLE_PERSISTENT_TOPK=1`, `NCCL_MAX_NCHANNELS=8`, mesh plugin
+with both cables, `CUDA_EXL3_TUNE_CACHE` warm, no fast-load sidecar, no fp8 draft cache, temperature
+0, reasoning effort **low**, medians of three rounds. Both arms booted through the host-side settle
+gate (`MemAvailable ≥ 112 GiB`; they started at 116.9 and 117.1 GiB).
 
-The patch is [`patches/tp3/patch-swblock-tp3.py`](../patches/tp3/patch-swblock-tp3.py) **unchanged** —
-it is `tp`-agnostic and gated on its own environment variable, so the control arm ran the same image
-with the knob unset. Keep it in a `patches/tp2/` tree of your own (§2.3); at two ranks there is no
-fast-load manifest to invalidate, which is the one hazard that rule exists for.
-
-#### Why the defect is *worse* at two ranks
+### 4.1 Why the defect is *worse* at two ranks
 
 The engine's own per-group decomposition, printed by `patch-kvdiag-tp3.py` in both arms:
 
@@ -423,10 +405,9 @@ The engine's own per-group decomposition, printed by `patch-kvdiag-tp3.py` in bo
 **The drafter takes 60.2 % of the divisor at two ranks against 53 % at three.** Not because the
 drafter changed — its 385 is identical — but because the target's share shrank: the platform raises
 the attention block to **4,608** tokens at TP=2 where it is 3,328 at TP=3, and that cuts the MLA
-group from 301 blocks per request to 218. A smaller denominator makes the same defect a larger
-share, which is why §3.3's projection from the TP=3 percentage came out low.
+group from 301 blocks per request to 218. A smaller denominator makes the same defect a larger share.
 
-#### What it did
+### 4.2 What it did
 
 | metric | control — page 16 | **fix — page 256** | delta |
 |---|---|---|---|
@@ -435,134 +416,312 @@ share, which is why §3.3's projection from the TP=3 percentage came out low.
 | **prefill-fresh, 3 unseen ~8.3K prompts** | **never scheduled** | **1,478 tok/s** | path opens |
 | **prefill, 7,382 tokens, uncached** | **never scheduled** | **1,267 tok/s** | path opens |
 | **largest prompt actually served** | **5,386 tokens** | **8,268**, every size served | path opens |
-| C1 aggregate | 47.41 | 47.30 | equal |
-| C1 per stream | 55.73 | 51.34 | −7.9 %, see the cost line |
+| C1 aggregate · per stream | 47.41 · 55.73 | 47.30 · 51.34 | equal · −7.9 % (see below) |
 | C2 / C4 / C6 aggregate | 68.27 / 91.65 / 113.22 | 68.72 / 93.74 / 117.71 | +0.7 / +2.3 / +4.0 % |
 | **C8 aggregate** | 127.54 | **135.59** | **+6.3 %** |
 | **TTFT median, C1 / C8** | 0.621 / 1.703 s | **0.478 / 1.244 s** | **−23 % / −27 %** |
-| draft acceptance · tokens per step, C1 | 64.48 % · 5.51 | 62.56 % · 5.38 | −1.9 points |
+| acceptance · tokens per step, C1 | 64.48 % · 5.51 | 62.56 % · 5.38 | −1.9 points |
 | gates, cold **and** warm | 10/10 · 12/12 · 0 empty | 10/10 · 12/12 · 0 empty | equal |
 | boot, cold, no sidecar | 396 s | 375 s | −5 % |
 
-The direction and size match three ranks exactly where they should: there the same change bought
-+82 % of pool, +6 % at C8 and 20–30 % off TTFT ([07](07-kv-and-draft-page.md) §3).
+The direction and size match three ranks where they should: there the same change bought +82 % of
+pool, +6 % at C8 and 20–30 % off TTFT ([07](07-kv-and-draft-page.md) §3).
 
-#### The cliff, which is the real finding
+### 4.3 The cliff, which is the real finding
 
-The control does not serve a long prompt *slowly*. It does not serve it at all. Walking prompt
-length up one request at a time, 75-second budget `[measured-here]`:
+The control does not serve a long prompt *slowly*. It does not serve it at all. Walking prompt length
+up one request at a time, 75-second budget `[measured-here]`:
 
 | prompt tokens | control | fix |
 |---|---|---|
-| 913 / 1,786 / 2,759 / 3,586 / 4,444 | served, 1.5–3.8 s | served |
-| 5,386 | served, 4.1 s | served |
+| 913 / 1,786 / 2,759 / 3,586 / 4,444 / 5,386 | served, 1.5–4.1 s | served |
 | **6,253** | **never scheduled** | served, 4.9 s |
 | 7,329 / 8,268 | — | served, 5.5 / 6.3 s |
 
-`Running: 0 reqs, Waiting: 1 reqs, GPU KV cache usage: 0.0 %`, indefinitely — the same state
-[13](13-full-scope-checkpoint.md) §6 recorded for the full-scope TP=2 arm, and the same arithmetic:
-block ids are global to one pool, one request wants 640 of the pool's 385 blocks, so it is never
-admitted. After the fix it wants 280 of 365.
+`Running: 0 reqs, Waiting: 1 reqs, GPU KV cache usage: 0.0 %`, indefinitely — one request wants 640
+of the pool's 385 blocks, and block ids are global to one pool, so it is never admitted. After the
+fix it wants 280 of 365.
 
-**And the control sits on the edge of that cliff by luck.** The arm C boot published in §3.2 got
-665,625 tokens — 426 blocks — and did serve a 7,382-token prompt, at 1,135 tok/s. The same env file,
-untouched, booted through a settle gate on 6 September gets 601,562 — 385 blocks — and cannot. The
-difference is the instrument, not the stack: the 5 September TP=2 harness had no settle gate, and
-[07](07-kv-and-draft-page.md) §1.1 says a node that starts dirty awards itself memory it does not
-have. Both readings are real boots of the same configuration. That is the point: **without the page
-fix, whether two ranks can serve an 8K prompt depends on the host's state at boot.** Treat the arm C
-prefill figures in §3.2 and §4 as measured on an unpinned baseline `[measured-here]`.
+**And the control sits on the edge of that cliff by luck.** Arm C got 426 blocks and did serve a
+7,382-token prompt at 1,135 tok/s; the same env file booted through a settle gate on 6 September
+gets 385 and cannot. The difference is the instrument, not the stack. **Without the page fix,
+whether two ranks can serve an 8K prompt depends on the host's state at boot.**
 
-#### What it cost
+### 4.4 What it cost
 
-- **Per-block memory rises about 9.1 %** — the drafter's per-block cost goes 163,840 → 2,621,440 B
-  and `num_blocks` would fall 385 → 353 at equal memory. At three ranks the price was +9.2 %.
-- **The draft group's prefix-cache matching unit coarsens 16 → 256 tokens.** Nothing measurable
-  here: with a 4,608-token attention block the prefix-cache hit rate is 0 % in both arms.
-- **Acceptance falls 1.9 points** (64.5 → 62.6 %), inside this stack's 60–65 % boot-to-boot band,
-  not confirmed on a second boot.
+- **Per-block memory rises about 9.1 %** — the drafter's per-block cost goes 163,840 → 2,621,440 B.
+  At three ranks the price was +9.2 %.
+- **The draft group's prefix-cache matching unit coarsens 16 → 256 tokens.** Nothing measurable here:
+  with a 4,608-token attention block the prefix-cache hit rate is 0 % in both arms.
+- **Acceptance falls 1.9 points**, inside this stack's 60–65 % boot-to-boot band.
 - **C1 per-stream decode reads 7.9 % lower**, the one number that moved the wrong way. The fix arm's
-  own three rounds span 50.60–55.29 (9.3 %), the C1 aggregate is equal and TTFT is 23 % better, so
-  one boot does not establish a loss. No C1 gain, and no proven C1 loss.
-- **Free host RAM falls about 1.2 GiB per node**; swap flat at 0.02–0.03 GiB in both arms.
-
-#### Still not done at two ranks
-
-One boot per arm. `HAREM_DRAFT_KV_DTYPE=fp8`, fast load, the memory ladder and expert parallelism
-remain `[not tested]` here, and the page fix was **not** tried on top of the full-scope checkpoint at
-TP=2, whose pool is clamped by a different mechanism (§3.2) — that one is still open.
+  own three rounds span 9.3 %, the C1 aggregate is equal and TTFT is 23 % better. No C1 gain, and no
+  proven C1 loss. **Candidate A, one image later and on a second boot, reads 54.72 per stream** —
+  back inside the control's band, which is what "not established" looked like.
 
 ---
 
-## 4. The trade-off, measured
+## 5. The TP=2 production candidate — measured, 6 September 2026
 
-Three nodes win. On this stack the third node is not only a bigger memory pool — it is faster, per
-stream as well as in aggregate, and that is the opposite of what "fewer ranks, fewer collectives,
-lower latency" would predict.
+Two complete candidates, identical in every respect except the checkpoint and the one patch and one
+flag that serving it needs. **Candidate B, the full-scope one, is the recommended configuration**:
+it is faster on every concurrency, has a 42 % larger pool, is lighter in host memory, and its
+quality gates are indistinguishable. Candidate A is kept for anyone who has the 164 GB
+routed-experts-only checkpoint and does not want to fetch the other one.
 
-Like for like, same day, same image, same harness, same experts-only checkpoint, DFlash2 k=7
+### 5.1 What both candidates are
+
+Two nodes — the head node at rank 0, worker-1 at rank 1 — TP=2, **EP off**, image `exl3-zeus:754421f`,
+`patches/tp2full/`, `scripts/start-tp2full.sh` with its settle gate, KV `fp8`, **fp8 draft cache**,
+DFlash2 k=7, `--attention-backend CUSTOM`, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`,
+`--max-num-seqs 8`, `--max-num-batched-tokens 2048`, **`--max-model-len 1000000`**,
+`gpu-memory-utilization 0.85`, `HAREM_DISABLE_PERSISTENT_TOPK=1`, `NCCL_MAX_NCHANNELS=8`, mesh plugin
+`patched2` with both cables and `NCCL_PTR_CUDA`, warm `CUDA_EXL3_TUNE_CACHE`, per-rank fast-load
+sidecar, `--safetensors-load-strategy eager`, `--no-enable-flashinfer-autotune`, temperature 0,
+reasoning effort **low**. Speed is the median of rounds 2–4 of a four-round sweep; round 1 is
+reported separately as the tuner-cache check (§5.6).
+
+The only differences between them:
+
+| | **A — experts-only** | **B — full-scope (recommended)** |
+|---|---|---|
+| checkpoint | `brandonmusic/GLM-5.3-Flash-tr3-4bpw` @ `b20c49ba`, 164 GB | `turboderp/GLM-5.3-Flash-exl3` @ 4.05 bpw, 154 GB |
+| `HAREM_EXL3_FULLSCOPE` | unset | `1` → `patch-fullscope-tp2.py` |
+| `--hf-overrides` | absent | `{"quantization_config_file":"…/quantization_config.json"}` |
+| what is 4-bit | routed experts only; attention, shared expert and `lm_head` stay BF16 | all of it — `CUDA_EXL3_DEBUG_NAMES=1` prints **203 EXL3 / 113 bf16** modules against A's 0 EXL3 in the same places |
+
+### 5.2 The numbers
+
+| | **A — experts-only** | **B — full-scope** | B vs A |
+|---|---|---|---|
+| **KV pool at `max_model_len` 1,000,000** | 1,500,000 (**1.50×**) | **2,128,571** (**2.13×**) | **+41.9 %** |
+| `num_blocks` · blocks/request | 420 · 280 | **596** · 280 | +41.9 % |
+| Available KV memory, rank 0 / rank 1 | 11.70 / 11.34 GiB | **16.07 / 16.23 GiB** | +37–43 % |
+| Consumed memory per node (weights + non-torch) | 89.30 / 89.23 GiB | **84.77 / 84.51 GiB** | **−4.5 GiB** |
+| **C1 aggregate** (tok/s) | 48.76 | **58.50** | **+20.0 %** |
+| **C1 per stream** | 54.72 | **62.55** | **+14.3 %** |
+| C2 aggregate | 68.24 | **82.45** | +20.8 % |
+| C4 aggregate | 96.52 | **112.62** | +16.7 % |
+| C6 aggregate | 115.69 | **137.37** | +18.7 % |
+| **C8 aggregate** | 137.41 | **155.75** | **+13.3 %** |
+| C8 per stream | 20.90 | 22.17 | +6.1 % |
+| **TTFT median, C1 / C8** | 0.468 / 1.249 s | **0.407 / 1.077 s** | −13.0 % / −13.8 % |
+| acceptance · tokens per step, C1 | 65.47 % · 5.58 | 59.98 % · 5.20 | −5.5 pt, see the cost line |
+| acceptance · tokens per step, C4 / C8 | 63.60 · 5.45 / 62.12 · 5.35 | 63.67 · 5.46 / 62.84 · 5.40 | equal |
+| cold first request | TTFT 0.78 s, 37.7 tok/s, acc 41.1 % | TTFT 0.76 s, **50.8** tok/s, acc 42.8 % | +35 % |
+| **Prefill, 3 fresh unseen ~8.4K prompts** | **1,444** tok/s | 1,400 tok/s | −3.0 %, equal |
+| Prefill, 7,382 tokens, uncached | 1,241 tok/s | **1,289** tok/s | +3.9 %, equal |
+| **Boot, fast-load** | **272 s** | **272 s** | identical |
+| Boot, one-off dump (writes the sidecar) | 997 s | 998 s | identical |
+| Sidecar size per rank | 82.6 GiB (36 files) | **75.2 GiB** (32 files) | −9 % |
+| weight restore time | 90.1 s, 952 MB/s | 88.0 s, 918 MB/s | equal |
+| Correctness probe / code exam, **cold and warm** | 10/10 · 12/12 both | 10/10 · 12/12 both | equal |
+| **Tool-call gate** | **8/8** | **8/8** | equal |
+| **MMLU sample**, 57 × 35 = 1,995 q, 0-shot | **86.37 ±0.74** | **86.02 ±0.75** | −0.35 pt, **inside one error bar** |
+| **Needle-lite**, 64K and 128K, three depths | **6/6** (80,113-token prompts served) | **6/6** (same prompts) | equal |
+| `MemAvailable` / swap after the full run | 6.0 / 7.2 GiB · 0.03 / 0.02 GiB | 5.7 / 7.0 GiB · 0.03 / 0.02 GiB | swap flat in both |
+
+### 5.3 What the fp8 draft cache did, isolated by arithmetic
+
+`HAREM_DRAFT_KV_DTYPE=fp8` was `[not tested]` at two ranks until now. It is in both candidates, so it
+is not isolated as an A/B arm — but the engine's own decomposition isolates it exactly, because it
+changes one number and nothing else. `SlidingWindowSpec` bytes-per-block goes **2,621,440 →
+1,310,720 B** while its 25 blocks-per-request and every other group stay identical, so
+blocks-per-request stays 280 and the freed memory turns straight into `num_blocks`:
+
+| | draft cache `auto` (§4 fix arm) | **draft cache fp8** (candidate A) |
+|---|---|---|
+| `SlidingWindowSpec` bytes/block | 2,621,440 B | **1,310,720 B** |
+| blocks per request | 280 | 280 |
+| `num_blocks` | 365 | **420** |
+| **KV pool** | 1,303,571 | **1,500,000** |
+
+**+15.1 % of pool** `[measured-here]`, against +5.6 % at three ranks — larger here for the same
+reason the page defect was larger, a smaller denominator. Acceptance and accepted-tokens-per-step are
+inside their band and the gates are unchanged. The two arms are one image apart (`62f53e6` →
+`754421f`), so the *pool* attribution is exact arithmetic but the *speed* comparison across them is
+not; we do not make one.
+
+One behavioural note worth recording: at three ranks the fp8 draft cache pushed the drafter onto a
+FlashInfer path and **CUDA graphs stopped capturing**. At two ranks they capture normally — 19
+PIECEWISE and 8 FULL graphs in the boot log of both candidates `[measured-here]`.
+
+### 5.4 Both cables of the pair, measured
+
+`port_xmit_data` deltas across the four-round C1–C8 sweep, read on both nodes
+([06](06-nccl-mesh.md) §6 is the method) `[measured-here]`:
+
+| node | device | candidate A | candidate B |
+|---|---|---|---|
+| head | `rocep1s0f0` | 92,299 MB | 91,736 MB |
+| head | `roceP2p1s0f0` | 90,180 MB | 89,544 MB |
+| head | `rocep1s0f1`, `roceP2p1s0f1` | 0.0 | 0.0 |
+| worker-1 | `rocep1s0f1` | 92,061 MB | 91,495 MB |
+| worker-1 | `roceP2p1s0f1` | 89,944 MB | 89,354 MB |
+| worker-1 | `rocep1s0f0`, `roceP2p1s0f0` | 0.0 | 0.0 |
+
+**Two devices per node move ~90 GB each and the split is 50.5 / 49.5.** That closes the question
+[06](06-nccl-mesh.md) left open for a *single* peer pair: the dual-cable patch (`patches/kernel/0005`)
+is not a three-node effect. The zero rows are the ports facing the third node, which is not in this
+cluster — exactly what `FABRIC_PEERS` with one address per node expects.
+
+### 5.5 The reversal: full-scope at `max_model_len` 1,000,000
+
+Arm D could not boot there: `6.6 GiB KV needed for max seq len 1,000,000, available 0.73 GiB`.
+Candidate B boots there with **16.07 GiB available** and a 2,128,571-token pool. The gap is 22×, so
+it is worth decomposing rather than asserting `[measured-here]`:
+
+| term | effect | what it does to arm D's failure |
+|---|---|---|
+| `HAREM_SW_BLOCK_SIZE=256` | blocks/request 640 → 280 | the 6.6 GiB requirement becomes ~2.9 GiB |
+| the launcher's **settle gate** | `MemAvailable` 116.9–117.1 GiB at snapshot time on both nodes | 0.73 GiB available becomes 16.07 GiB |
+| `HAREM_DRAFT_KV_DTYPE=fp8` | `num_blocks` +15.1 % at fixed memory | pool, not admission |
+
+**The settle gate is the larger half, and it is not a tuning knob — it is a measurement bug fix.**
+Arm D snapshotted a host that had not finished reclaiming the previous container, and
+[07](07-kv-and-draft-page.md) §1.1 already says a rank that does that writes itself memory it does
+not have. What is new is how large the error can be: it was the difference between "this
+configuration cannot serve" and "this configuration is the recommended one".
+
+### 5.6 The tuner cache at two ranks
+
+Four rounds per candidate, warm `CUDA_EXL3_TUNE_CACHE`. Round 1 against the median of rounds 2–4
 `[measured-here]`:
 
-| | TP=2 (arm C, 2 nodes) | TP=3 production 8 (3 nodes) | two-node share |
+| | A, C1 | A, C8 | B, C1 | B, C8 |
+|---|---|---|---|---|
+| round 1 | 47.25 | 135.54 | 60.14 | 152.63 |
+| median of rounds 2–4 | 48.76 | 137.41 | 58.50 | 155.75 |
+| round 1 error | −3.1 % | −1.4 % | **+2.8 %** | −2.0 % |
+
+Unordered and inside ±3 %, which is what [12](12-tuner-cache.md) §4 measured at three ranks — round 1
+is no longer a penalty, and it is not a bonus either. Three tune events were logged on the whole
+boot. **Three rounds is enough at two ranks too.** The observed spread of rounds 2–4 was 1.3–6.9 %
+for candidate A and 2.0–3.1 % for candidate B, so the "treat differences under about 5 % as noise"
+rule stands here as well.
+
+### 5.7 The autostart unit, tested
+
+`systemd/harem-exl3-tp2.service` and `systemd/motor-onkosul-exl3-tp2.sh` installed on both nodes,
+`daemon-reload`, then `systemctl start` (worker-1 first) → `/health` → gates → `systemctl stop`, with
+the three-node unit stopped throughout `[measured-here]`:
+
+| | |
+|---|---|
+| `systemctl start` returned | **3 s / 6 s** — the preflight is 1 s |
+| **`/health` 200** | **+261 s** from the first `systemctl start` |
+| KV pool on that boot | **2,153,571**, +1.2 % against the hand-started boot of the same env |
+| correctness probe · code exam | **10/10** · **12/12** |
+| `systemctl stop` | clean on both; units `inactive`, no containers left |
+
+**The first attempt failed, and it failed correctly.** The unit had been installed before its
+`ENV_FILE` was pointed at the full-scope environment file, so the preflight looked for the *other*
+candidate's fast-load sidecar — deleted to make disk room — and refused in one second with
+`fast-load sidecar missing`, before docker was touched. That is check 7 of the preflight doing the
+job it exists for `[measured-here]`.
+
+It is deliberately left **`disabled`**: on our cluster `harem-exl3.service` (three nodes) is the
+enabled autostart, and the two units carry `Conflicts=` for each other precisely so that only one can
+ever run.
+
+**We have not run a two-node reboot test** `[not tested]`. The three-node one is in
+[systemd/README](../systemd/README.md).
+
+### 5.8 Quality, side by side
+
+| gate | A — experts-only | B — full-scope | TP=3 production 10, for reference |
 |---|---|---|---|
-| C1 per stream | 54.69 | 59.94 (and 64.24 on a second run of the same day) | 85–91 % |
-| C8 aggregate | 133.57 | 178.55 | 75 % |
-| Prefill, fresh unseen prompts | 1,334 | 1,774 | 75 % |
-| **KV pool at 1M** | **665,625** | **4,699,724** | **14 %** |
-| **the same, with the draft page fix at both ranks** (§3.5) | **1,303,571** | 4,413,223 | **30 %** |
-| draft acceptance at C1 | 64.1 % | 63.9 % | equal |
-| Boot | 396 s, no fast-load | 265 s, fast-load | — |
-| Gates | 10/10 · 12/12 | 10/10 · 12/12 | equal |
+| correctness probe, cold / warm | 10/10 · 10/10 | 10/10 · 10/10 | 10/10 |
+| code exam, cold / warm | 12/12 · 12/12 | 12/12 · 12/12 | 12/12 |
+| tool-call gate | **8/8** | **8/8** | — |
+| MMLU sample, 1,995 q, 0-shot | **86.37 ±0.74** | **86.02 ±0.75** | 86.47 ±0.74 |
+| needle-lite, 64K + 128K × 3 depths | **6/6** | **6/6** | 20/20 at 1M (the full suite) |
 
-Two rows in that table are arm C's and were measured **without** the draft page fix and **without**
-the settle gate; §3.5 re-measured the same configuration with the gate and got 601,562 tokens and no
-long-prompt path at all. Read the 14 % row as "two ranks, neither node's stack fixed"; the 30 % row
-is the fair comparison once both rank counts run the setting this repository ships.
+Every MMLU figure this stack has produced at either rank count — 86.02, 86.32, 86.37, 86.4, 86.47 —
+sits inside a single error bar of every other. **Quality is equal, so the choice between the two
+candidates is made on speed and pool, and both favour B.**
 
-And with the full-scope checkpoint, one arm at each rank count — not like for like, because arm D
-ran at `max_model_len` 65,536 and production 9 at 1,000,000, but the direction is not in doubt:
-**68.00 tok/s per stream at two ranks against 75.91 at three** `[measured-here]`.
+The needle probe serves **80,113-token prompts** at three depths in both candidates. That is the
+long-prompt path of §4 open at full length rather than merely at 8K.
+
+Full raw record: [`results/speed/tp2-production-candidate.md`](../results/speed/tp2-production-candidate.md).
+
+---
+
+## 6. What is still **not** measured at two ranks
+
+This list is much shorter than it was, and every row now carries a reason rather than an omission.
+
+| Not run at TP=2 | Why not, and what it would take |
+|---|---|
+| **The `gpu-memory-utilization` ladder.** Every TP=2 arm ran **0.85** | This is the one deliberate refusal. KV maximisation is the last step in this project's order of work and it needs the cluster's owner, not an agent. It also has a two-node-specific warning attached: arm A recorded **3.5 GB of swap on the head during weight load** at this rung (§3.1), and at three ranks 0.85 was *rejected* for swap growth while 0.83 was taken ([11](11-open-issues.md) §2.4). The three-node ladder must be **re-derived** at two ranks, not copied — the memory left after a fixed cost is not linear in the node count `[not tested]` |
+| **A two-node reboot test** | The unit is installed and start/stop-tested (§5.7), but a power-on trial takes the cluster down and the three-node unit is the enabled production autostart. Reboot **both** nodes or neither: the preflight passes on a single node whose peer is gone `[not tested]` |
+| **Expert parallelism at two ranks** | Legal (§1.1), never measured. It changes which kernel path the MoE stage takes ([05](05-expert-parallel-and-cuda-exl3-fixes.md)) and `patches/tp2full/` already carries `patch-epfilter-tp3.py` so that trying it needs no tree change — and therefore no new dump boot `[not tested]` |
+| **A second boot of each candidate**, and a boot-to-boot spread | Every number in §5 is a median of three rounds on **one** boot per candidate. At three ranks the boot-median spread is C1 1.1 %, C8 2.5 %, **C4 7.4 %**. The pool, memory, boot-time and gate rows are far too large a difference to be boot noise; the speed rows carry that uncertainty and the B-over-A margins (+13 to +21 %) clear it comfortably `[not tested]` |
+| **`patch-vllm-tp3.py` at two ranks** | A no-op by arithmetic (§1.1), deliberately not shipped, therefore never measured. If you keep one tree for both rank counts you will run it; we do not expect a difference and we have not shown one `[not tested]` |
+| **Anything at one or four nodes** | Out of scope for this page; [00-start-here](00-start-here.md) says what we can and cannot say about other node counts |
+
+Two rows that used to live here are gone: the fast-load sidecar and the dual-cable plugin patch are
+both measured at two ranks now (§5.2, §5.4), and so are the tuner-cache protocol (§5.6), the fp8
+draft cache (§5.3), the autostart unit (§5.7) and the draft KV page (§4).
+
+---
+
+## 7. The trade-off, measured
+
+Three nodes still win. On this stack the third node is not only a bigger memory pool — it is faster,
+per stream as well as in aggregate, and that is the opposite of what "fewer ranks, fewer collectives,
+lower latency" would predict.
+
+Like for like where it can be: both sides on the **full-scope** checkpoint, DFlash2 k=7, the same
+harness and the same protocol. The rank counts run at different memory rungs — 0.85 at two nodes,
+0.83 at three — because neither ladder is transferable; that difference is called out in the pool row
+`[measured-here]`:
+
+| | **TP=2 candidate B** (2 nodes, 0.85) | **TP=3 production 10** (3 nodes, 0.83) | two-node share |
+|---|---|---|---|
+| C1 aggregate | 58.50 | 70.5 | 83 % |
+| C1 per stream | 62.55 | 76.9 | 81 % |
+| C8 aggregate | 155.75 | 194.0 | 80 % |
+| Prefill, fresh unseen ~8.4K prompts | 1,400 | 1,769 | 79 % |
+| **KV pool at 1M** | **2,128,571** | **5,619,834** | **38 %** — and the two rungs differ |
+| TTFT, C1 / C8 | 0.407 / 1.077 s | 0.280 / 0.826 s | +45 % / +30 % worse |
+| Consumed memory per node | 84.8 GiB | 58.3–59.1 GiB | the whole story |
+| Boot, fast-load | 272 s | 251 s | comparable |
+| Sidecar per rank | 75.2 GiB | 53 GiB | EP is why |
+| Quality gates · tool-call | 10/10 · 12/12 · 8/8 | 10/10 · 12/12 | equal |
+| MMLU sample | §5.8 | 86.47 ±0.74 | |
 
 **Why the third node also wins on latency.** A decode step here is weight-bandwidth bound, and the
 profile says so: at production 7 the dense BF16 GEMM alone was 45.3 % of a single-stream step, and in
 the engine the MoE trellis GEMM runs at **78–85 % of a measured 225 GB/s** ruler
 ([10](10-results-and-roofline.md) §5). Adding a rank cuts each rank's weight traffic by a third. The
-collective it costs in exchange is real but bounded: on production 9, NCCL and the CPU gap **together**
-are at most **17.19 ms of a 72.5 ms step** with the profiler off `[measured-here]`, and going from two
-peers to three does not add all of that. The bandwidth term wins, and it is not close.
+collective it costs in exchange is real but bounded: on production 9, NCCL and the CPU gap
+**together** are at most **17.19 ms of a 72.5 ms step** with the profiler off `[measured-here]`. The
+bandwidth term wins, and it is not close.
+
+**What changed on 6 September is the size of the gap, not its direction.** The two-node share of
+single-stream throughput was 85–91 % before, but measured against a three-node arm on a *different*
+checkpoint; on the same checkpoint and with both stacks carrying the settings this repository ships,
+it is 81–83 % of speed and **38 % of pool** rather than 14 %. Two nodes went from a configuration
+that silently refused 8K prompts to one that serves **2.1 concurrent million-token requests**.
 
 **What TP=2 wins, plainly.** One node, and a recipe with the whole of
 [03](03-tp3-padding-and-sidecars.md) and [13](13-full-scope-checkpoint.md) §7 taken out of it. That
 is a real answer for anyone who owns two Sparks, and it is the whole reason this page exists — but it
 is not a latency argument, and this repository will not make one.
 
-**Where the pool difference comes from, since it is the largest number in the table.**
-164 GiB of weights over two nodes is about 82 GiB per node before anything else is allocated;
-121.6 GiB of unified memory minus that, minus the ~9 GiB vLLM takes at init and the ~4.7 GiB of
-`max_model_len`-scaled buffers, leaves single-digit GiB for KV — we measured 9.97 GiB on the binding
-rank at 0.85 `[measured-here]`. Over three nodes the same weights are ~55 GiB per node and the
-remainder roughly quadruples. The third node buys 1.5× the memory and delivers several times the
-pool, because what is left over after a fixed cost is not linear in the memory.
-
-**With the draft page fixed at both rank counts the gap narrows from seven-fold to about 3.4×**, and
-the reason is in §3.5: the page defect was costing two ranks more than three, so fixing it helps the
-two-node side more. The third node is still the larger memory argument by a wide margin. What
-changed is that at two ranks the pool is now above one full-length request instead of below it —
-concurrency 1.30x against 0.60x — which is the difference between a configuration that serves 8K
-prompts and one that silently never schedules them.
-
 ---
 
-## 5. If you run this at two ranks, tell us
+## 8. If you run this at two ranks, tell us
 
-[CONTRIBUTING](../CONTRIBUTING.md) has the format. The four things worth most from a two-node
-cluster, in order:
+[CONTRIBUTING](../CONTRIBUTING.md) has the format. The four things worth most from a two-node cluster,
+in order:
 
-1. **A second boot of the draft page arms in §3.5.** That measurement is done — pool +117 %, the
-   long-prompt path opened, gates unchanged — but it is one boot per arm, and the three-node
-   boot-to-boot spread is up to 7.4 % at C4. The pool and cliff findings are far too large to be
-   boot noise; the speed rows are not, and C1 per stream is the one that most needs a second look.
-3. **Expert parallelism on at two ranks.** Legal, never measured, and it changes which kernel path
-   the MoE stage takes ([05](05-expert-parallel-and-cuda-exl3-fixes.md)).
-4. **The memory ladder at two ranks.** 0.85 is where our arms ran and it is also where arm A found
-   3.5 GB of swap during weight load. Where the safe rung actually sits at two nodes is unknown.
+1. **The memory ladder.** 0.85 is where all our arms ran and it is also where arm A found 3.5 GB of
+   swap during weight load. Where the safe rung actually sits at two nodes is the largest open
+   question on this page, and the one thing we deliberately did not touch.
+2. **A second boot of candidate B**, so the speed rows in §5.2 stop resting on one boot each.
+3. **A two-node reboot test** with `harem-exl3-tp2.service` enabled on both nodes.
+4. **Expert parallelism on at two ranks.** Legal, never measured, and the tree is already ready
+   for it.

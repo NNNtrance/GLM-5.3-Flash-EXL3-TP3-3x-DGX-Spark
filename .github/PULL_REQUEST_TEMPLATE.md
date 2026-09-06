@@ -69,7 +69,8 @@ it before anything else.
 ## 6. Retractions are welcome
 
 **A pull request that withdraws a number is worth more here than one that adds a number, and it will
-be merged with thanks.** This repository has published and then withdrawn thirty-two of its own
-claims; they are kept, in place, with what replaced them. If you measured something of ours properly
+be merged with thanks.** This repository has published and then withdrawn thirty-seven of its own
+claims; they are kept, in place, with what replaced them (`docs/11-open-issues.md` §1 says what that
+number counts). If you measured something of ours properly
 and it does not hold, open the pull request. Say what you ran, what you got, and which claim it
 overturns. We do not ask for a replacement number as the price of a correction.

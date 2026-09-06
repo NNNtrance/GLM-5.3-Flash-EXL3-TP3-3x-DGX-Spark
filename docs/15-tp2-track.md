@@ -612,6 +612,11 @@ rule stands here as well.
 
 ### 5.7 The autostart unit, tested
 
+**Every figure in this section is candidate B's.** Candidate C's unit is the same unit, pointing at
+the same launcher with a different environment file and a different fast-load sidecar — one
+`EXTRA_ENV` word between them — so nothing here changes for it, but **it was not re-timed under the
+unit** `[not tested]`. The 272 s in §5.9 is a `docker run` fast-load boot, not a `systemctl start`.
+
 `tracks/tp2/harem-exl3-tp2.service` and `tracks/tp2/motor-onkosul-exl3-tp2.sh` installed on both nodes,
 `daemon-reload`, then `systemctl start` (worker-1 first) → `/health` → gates → `systemctl stop`, with
 the three-node unit stopped throughout `[measured-here]`:

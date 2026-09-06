@@ -11,6 +11,81 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-07 — Consistency pass, part 2: the systemd page, the tree naming, the charts, and the retraction count
+
+**Documentation only. No measurement was re-run and no claim was rewritten — one published figure was
+wrong and is corrected, and everything else is a count, a label or a cross-reference catching up.**
+
+**One corrected figure.** `results/configs/production-configurations.csv` row 11 carried
+`boot_s` **251**, which is production **9**'s fast-load boot. Production 11's own note in the same row,
+the README and `audit/` all say **271 s** (236 s from `systemctl start`). The column now reads 271 and
+the note says where the 251 came from. Nothing else on the row moves.
+
+**The systemd page was a configuration-10 page.** It documented one whole-cluster reboot and said the
+start-order tolerance had been "demonstrated once". There have been **three** — configurations 10, 11
+and 12, reading **315 s** (wall clock; 242 s by the harness counter, both printed), **312 s** and
+**311 s** from the `reboot` command. The page now leads with all three and keeps configuration 10's
+trial in full as `[history]`, because it is the only one whose log contradicts itself and the only one
+with a phase decomposition. `results/boot/boot-ledger.md` gains configuration 12's row so the
+citation resolves, and `HELP-WANTED` §2, `docs/09` §11, `docs/14` §10.1a and `tracks/README.md` no
+longer say "one trial".
+
+**The two-node autostart figure was candidate B's and is now labelled as such.** The 261 s
+`systemctl start` → `/health` trial ran on candidate B; **candidate C was never re-timed under the
+unit** `[not tested]`. Its unit is the same unit pointing at the same launcher with a different
+environment file and sidecar, and the 272 s in `docs/15` §5.9 is a `docker run` fast-load boot, not a
+`systemctl start`. Labelled in the README's candidate-C table, `tracks/tp2/README.md`, `docs/15` §5.7
+and the systemd page.
+
+**The launcher directory and the patch-tree directory are two things**, and five places said
+`tp3full/` while the environment template pointed `TP3_DIR` at a configuration-named tree. Nothing was
+renamed — the two are genuinely separate on our nodes, `ExecStart` follows the launcher and `TP3_DIR`
+follows the patches, and only the second is hashed into the fast-load manifest identity. Said once in
+each of `tracks/README.md`, `tracks/tp3/README.md`, `systemd/README.md`, quick-start step 8, the
+prelude's header and the environment template's own comment.
+
+**Both charts stopped at production 10 and one of them carried a retracted claim.**
+`charts/speed-by-configuration.svg` now runs to configuration 12 (its data always came from the CSV;
+the caption said "all 5 September" and quoted one memory fraction for twelve configurations).
+`charts/kv-pool-progression.svg` had a hard-coded series ending at production 9 and a footer arguing
+that 0.85 was rejected on free host RAM — **that rejection is retracted** (§2.4): the 6 September
+ladder re-climbed the fraction against swap traffic under load, 0.85, 0.87 and 0.88 all pass, and
+**0.90** is the rejected rung. The 0.85 bar is now grey and labelled as retracted, 0.90 is the red
+one, and the series ends at production 12's **7,041,322**. `results/configs/kv-pool-progression.csv`
+gains the four readings the new bars need, so the chart is still nothing but a view of a committed
+CSV.
+
+**The retraction count is stated once and is the same everywhere: thirty-seven.** It was quoted as
+"thirty-two" in five places, "six" in the style guide and "twenty-five" in one paragraph of docs/11
+itself. `docs/11` §1's opening paragraph now defines it — the **32 rows** of §1.9's audit table plus
+the **five** withdrawn findings that are not rows of it (§1.5, the first bullet of §1.8, §1.11, §1.12
+and §1.13) — and every other place quotes that number and points at the definition. **A retracted
+correction is a retraction**, which is what §1.12 and §1.13 are; `audit/` §6 was missing both and now
+indexes them.
+
+**[@drakosha](https://github.com/drakosha) is credited in [CREDITS.md](CREDITS.md).** He opened
+[vllm#55221](https://github.com/vllm-project/vllm/issues/55221) and corrected the failure mode we had
+built a four-layer safety story on — §1.13, the first of our retractions a reader outside this stack
+caught. The same page's claim that the workspace patch is "not in production" predated its promotion
+and is corrected.
+
+**Stale text found in passing, each against this repository's own later measurement:** `docs/11`
+§2.29 still called TP=3 + expert parallelism + CUDA graphs a mode that "has never run here" after its
+own 6 September battery ran it without a hang; `results/memory/indexer-workspace-ab.md`'s banner
+tagged two ranks `[not tested]` while §6 of the same file carries the two-rank +32.14 %;
+`CONTRIBUTING` item 5 asked for MMLU at TP=3, which has been a TP=3 figure since 5 September (the
+open item is the full 14,042-question run), item 7 repeated the retracted "0.85 was rejected" and
+item 10 told two-node readers they have no current figures; `docs/14` said "eighty-six failures"
+where two of the eighty-six are entries we did not hit and say so; the three-node patch tree is
+**23** files rather than twenty-two in four places; `tracks/tp3/README.md`'s numbers table was
+production 10's; `results/speed/tp2-production-candidate.md` had a second top-level heading; and
+five cross-references pointed at `docs/15` §3.5, which is `docs/15` §4 since that section was
+promoted.
+
+Link check: 1,445 relative links, none broken. Privacy grep clean over the whole tree.
+
+---
+
 ## 2026-09-07 — Content types on production 12: the pool grew 38 % and no category noticed, and the prose row is decomposed down to the drafter
 
 **The category probe had not run for four configurations, and it has now run on the production one.**
@@ -993,7 +1068,7 @@ was low.** `HAREM_SW_BLOCK_SIZE=256` — the draft KV page, 16 to 256 tokens —
 untested item on the TP=2 page, carrying an `[estimate]` of "perhaps 0.8-1.2 M from arm C's
 665,625". We ran the control and the fix back to back at two ranks on 6 September 2026, one boot
 each, the only difference one token in `EXTRA_ENV`. New section
-[docs/15](docs/15-tp2-track.md) §3.5, raw record
+[docs/15](docs/15-tp2-track.md) §3.5 (now §4), raw record
 [`results/speed/tp2-draft-page.md`](results/speed/tp2-draft-page.md) `[measured-here]`.
 
 **KV pool 601,562 to 1,303,571, +116.7 %** (+109.6 % after normalising for the 3.4 % more KV memory
@@ -1944,7 +2019,7 @@ Production configuration 6 is **unchanged**. Everything in this entry is measure
   boot on all three nodes. That is now the standing price of every kernel-image change.
 - The implementation is upstream's; ours was the measurement that asked for it. Credit in
   [CREDITS.md](CREDITS.md).
-- Closes the open item in [docs/08](docs/08-fast-boot.md) §10.3 and
+- Closes the open item in [docs/08](docs/08-fast-boot.md) §10, item 3, and
   [docs/11](docs/11-open-issues.md) §2.8. New page: [docs/12](docs/12-tuner-cache.md).
 
 ## 2026-09-05 — production configuration 4: fast boot

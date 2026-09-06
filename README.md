@@ -31,7 +31,7 @@ units — so they cannot be mixed by accident.
 | You have | What this repository gives you |
 |---|---|
 | **3 DGX Spark** | The **TP=3 track**: the production recipe, the quick start below, [`tracks/tp3`](tracks/tp3/README.md) |
-| **2 DGX Spark** | The **TP=2 track**: [docs/15](docs/15-tp2-track.md) and [`tracks/tp2`](tracks/tp2/README.md). At two ranks nothing needs padding, so it is a *shorter* recipe — fourteen patch files against twenty-two — rather than a cut-down one |
+| **2 DGX Spark** | The **TP=2 track**: [docs/15](docs/15-tp2-track.md) and [`tracks/tp2`](tracks/tp2/README.md). At two ranks nothing needs padding, so it is a *shorter* recipe — fourteen patch files against twenty-three — rather than a cut-down one |
 | **1 DGX Spark** | No serving recipe: 153.8 GiB of weights against 121.6 GiB of unified memory. Still yours — the image build, the GB10 kernel fixes, the measurement protocol, the model-free benches and the failure index. [docs/00 §1](docs/00-start-here.md) |
 | **4 DGX Spark** | Nothing measured `[not tested]`. The padding and expert-parallel arithmetic, the cabling problem and what we would want reported are in [HELP-WANTED.md](HELP-WANTED.md) §1 |
 
@@ -70,7 +70,7 @@ candidate B's and are inside the bands:
 | KV pool at `max_model_len` 1,000,000 | **2,692,857** tokens — about 2.7 concurrent 1M-token requests (candidate B: 2,128,571; **+26.5 %** from the workspace bound) |
 | Quality | correctness probe **10/10**, code exam **12/12** cold and warm, tool-call **8/8**, needle-lite **6/6**, one ~1M-token request and 8 × ~128K concurrent lanes correct; MMLU sample (1,995 q) **86.02 ±0.75** is candidate B's, not re-run on C |
 | Cold boot, fast-load | **272 s** (the one-off dump boot that writes the sidecar is 956 s) |
-| Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes. **No reboot test yet** `[not tested]` |
+| Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes — **candidate B, not re-run on C**. Candidate C's unit is the same unit pointing at the same launcher with a different env file and sidecar, and was not re-timed under it. **No reboot test yet** `[not tested]` |
 
 **Two ranks are 80–86 % of the speed on 38 % of the pool, at quality that is inside one error bar.**
 The side-by-side comparison, and why the third node wins on latency as well as on memory, is further
@@ -100,7 +100,7 @@ either track. **Each track is complete on its own** — its own environment temp
 tree, fast-load sidecar and autostart unit, in [`tracks/`](tracks/README.md) — so the two-node recipe
 is not a cut-down of the three-node one and no page asks you to mentally subtract a rank. At two
 ranks nothing needs padding, so it is genuinely *shorter*: the patch tree is fourteen files rather
-than twenty-two.
+than twenty-three.
 
 > **About the name "HAREM".** HAREM is simply the name we gave our three-node setup. It is hardcoded
 > in several places in the stack — patch markers (`HAREM-TP3`, `HAREM-GB10-TOPK`), environment
@@ -439,8 +439,8 @@ sits at `Running: 0, Waiting: 1, GPU KV cache usage: 0.0 %` indefinitely, becaus
 
 | | |
 |---|---|
-| [Decode throughput by production configuration](charts/speed-by-configuration.svg) | C1 and C8 across the first ten configurations, with the `cuda-exl3` commit under each |
-| [KV pool by configuration](charts/kv-pool-progression.svg) | every rung, including the one we measured and rejected |
+| [Decode throughput by production configuration](charts/speed-by-configuration.svg) | C1 and C8 across all twelve configurations, with the `cuda-exl3` commit under each. 10, 11 and 12 are memory rungs and move the pool rather than the speed |
+| [KV pool by configuration](charts/kv-pool-progression.svg) | every rung to production 12's 7,041,322, including the one we measured and rejected (0.90) and the one whose rejection we later retracted (0.85) |
 | [Where a step actually goes](charts/step-breakdown-prod9.svg) | production 9, profiled on the live server, prefill and both decode regimes |
 | [The one number production 9 was built to move](charts/dense-stage-prod7-vs-prod9.svg) | the dense stage, 45.3 % → 25.9 % of a single-stream step |
 
@@ -500,7 +500,10 @@ the silent ones, and every check below exists because something got past us once
  8. CONFIGURE.  Copy scripts/ and tracks/tp3/patches/ to ~/exl3-zeus/ on every node; hard-link
     tp3full-prelude.sh to the name tp3-prelude.sh inside that directory. Derive each node's
     env from tracks/tp3/env.tp3-full.example WITH SED, per node -- never copy the file between
-    nodes. Point CUDA_EXL3_TUNE_CACHE at a directory under the /cache mount BEFORE the first
+    nodes. The launcher directory and the patch-tree directory are two things; the examples
+    use tp3full/ for both for brevity. Set TP3_DIR (and OVERLAY_DIR) to wherever you put the
+    patch tree -- any name works, and it is the one the sidecar identity hashes.
+    Point CUDA_EXL3_TUNE_CACHE at a directory under the /cache mount BEFORE the first
     boot, or every benchmark you run measures the tuner rather than your change (docs/12).
     CHECK: MASTER_ADDR is rank 0's MANAGEMENT address, never a fabric one. A fabric address
            hangs the rendezvous silently; scripts/start-tp3.sh refuses one outright.

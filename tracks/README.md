@@ -29,7 +29,7 @@ tracks/
     env.tp3-full.example         the full-scope template -- this is production
     harem-exl3.service           the autostart unit
     motor-onkosul-exl3.sh        its preflight
-    patches/                     the in-container patch tree, 22 files
+    patches/                     the in-container patch tree, 23 files
     patches-optional/sm12/       measured, free, NOT in production -- the one sm_12x fix
                                  that did not ride with production 11
     patches/indexer-workspace/
@@ -59,6 +59,13 @@ launcher mounts `$TP3_DIR/tp3-prelude.sh` at `/start.sh`, `tp3-prelude.sh` insid
 **hard link** to `tp3full-prelude.sh` rather than a copy, and the directory's file list and the full
 text of the prelude are hashed into the fast-load sidecar's identity
 ([docs/08](../docs/08-fast-boot.md) §4).
+
+**The launcher directory and the patch-tree directory are two things.** The examples on this page use
+`tp3full/` for both, for brevity; the unit's `WorkingDirectory`/`ExecStart` point at wherever
+`start-tp3.sh` lives, and `TP3_DIR` and `OVERLAY_DIR` point at wherever the patches, the prelude and
+the overlay live. On our nodes those are separate directories and the second is named after the
+configuration, which is why [`tp3/env.tp3-full.example`](tp3/env.tp3-full.example) shows a
+configuration-named path. Any name works: set `TP3_DIR` to wherever you put the patch tree.
 
 So the copy is still:
 
@@ -97,7 +104,7 @@ says which lines.
 | [`results/`](../results/README.md) · [`charts/`](../charts/) | Each file's header names its arm and its rank count |
 | [`audit/`](../audit/README.md) | The post-install self-check. Its bands are the three-node ones and it says so |
 | [`envs/README.md`](../envs/README.md) | The rule that governs both tracks: derive each node's file with `sed`, on that node, and **never copy a finished env file between nodes** |
-| [`systemd/README.md`](../systemd/README.md) | The autostart hazard, the install commands and the one reboot test we have run. The units themselves are per track and live here |
+| [`systemd/README.md`](../systemd/README.md) | The autostart hazard, the install commands and the three whole-cluster reboot tests we have run. The units themselves are per track and live here |
 
 ## Which track a file belongs to, when it is not obvious
 

@@ -20,6 +20,12 @@
 # $HOME/exl3-zeus/tp3full. The launcher mounts "$TP3_DIR/tp3-prelude.sh", so
 # this file is hard-linked to that name inside tp3full/ -- one inode, so the
 # two names cannot drift apart.
+#
+# The launcher directory and the patch-tree directory are two things; these
+# comments use tp3full/ for both for brevity, and on our own nodes the patch
+# tree is a separate directory named after the configuration. Any name works:
+# set TP3_DIR to wherever you put the patch tree -- that is the directory whose
+# file list and prelude text the fast-load manifest hashes.
 #   --entrypoint bash "$IMAGE" /start.sh <model path> <vllm args...>
 #
 # TP3_STRICT=0 turns the failures into warnings. Do not use it to get past a

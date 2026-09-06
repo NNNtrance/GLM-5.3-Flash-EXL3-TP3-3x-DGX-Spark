@@ -88,13 +88,14 @@ off, which is the arrangement question only you can answer.
 **Effort: about an hour, one reboot.** This is the cheapest open item on the page and it closes a
 `[not tested]` that a two-node owner hits on their first power cut.
 
-`systemd/README.md` records **one** three-node trial: `/health` 200 at 242 s by the harness's own
-counter and **315 s by the wall clock in the same log**, the unit finishing at +98 to +103 s, the KV
-pool coming back within 0.6 % of a hand-started boot. Nothing enforces the start order — the unit
-starts all ranks concurrently and the test passed because the workers' rendezvous retries until rank
-0 appears, with `TimeoutStartSec=1200` about five times a normal boot. **That is tolerance, not a
-guarantee, and it has been demonstrated once.** Whether it still holds with one worker instead of
-two is unmeasured.
+`systemd/README.md` records **three** three-node trials, one per production configuration: `/health`
+200 at **315 s** by the wall clock on configuration 10 (242 s by the harness's own counter, which is
+why both are printed), **312 s** on 11 and **311 s** on 12, the unit finishing at +98 to +103 s, the
+KV pool coming back within 0.6 % of a hand-started boot each time. Nothing enforces the start order —
+the unit starts all ranks concurrently and the tests passed because the workers' rendezvous retries
+until rank 0 appears, with `TimeoutStartSec=1200` about four times a normal boot. **That is tolerance,
+not a guarantee, and it has been demonstrated three times rather than proved once.** Whether it still
+holds with one worker instead of two is unmeasured.
 
 The two-node edits are four, in `docs/15-tp2-track.md` §2.6: `WorkingDirectory` and `ExecStart` point
 at your two-node tree, `FABRIC_PEERS` in the preflight becomes one address per node rather than two
@@ -565,5 +566,6 @@ Repeated from `CONTRIBUTING.md` because it is the shortest way to save your afte
   before you push; we do, before every commit.
 
 **A pull request that withdraws one of our numbers is worth more here than one that adds a number.**
-We keep the mistake and add the retraction rather than deleting the mistake — thirty-two of them are
-in `docs/11` §1 — and we do not ask for a replacement figure as the price of a correction.
+We keep the mistake and add the retraction rather than deleting the mistake — thirty-seven of them
+are in `docs/11` §1, whose opening paragraph says what that number counts — and we do not ask for a
+replacement figure as the price of a correction.

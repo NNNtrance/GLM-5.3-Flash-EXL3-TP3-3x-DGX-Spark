@@ -42,9 +42,10 @@ your track's example rather than the whole file.
 welcome as a measurement, and a silent failure — no log line at all — is worth more to us than a
 loud one; §11 of [docs/14](docs/14-troubleshooting.md) is the index of the twenty we hit that
 produced no error message. And **a pull request that withdraws one of our numbers is worth more than
-one that adds a number**: thirty-two claims of ours did not survive their own raw data, they are kept
-in place with what replaced them ([docs/11](docs/11-open-issues.md) §1), and we do not ask for a
-replacement figure as the price of a correction.
+one that adds a number**: thirty-seven claims of ours did not survive their own raw data, they are
+kept in place with what replaced them ([docs/11](docs/11-open-issues.md) §1, whose opening paragraph
+says what that number counts), and we do not ask for a replacement figure as the price of a
+correction.
 
 If you run one of the items below, please open a pull request adding your raw output under
 `results/community/<your-handle>/<item>/` plus a short Markdown summary. Every number needs its
@@ -78,22 +79,34 @@ effort, `max_tokens`, concurrency, prompt type, how many sweep rounds and which 
    0005 only exists on a fabric with more than one cable per node pair. If yours has one cable per
    pair, `NCCL_MESH_LINKS_PER_PEER=1` makes 0005 a no-op and 0006 is still worth measuring on its
    own. Start by reading your own `port_xmit_data` counters — see [docs/06](docs/06-nccl-mesh.md) §6.
-5. **MMLU at TP=3.** Ours is a 1,995-question sample measured at TP=2. The gates are identical
-   between the two arrangements, so we do not expect a difference — which is exactly why someone
-   should check.
+5. **The full MMLU.** The 1,995-question sample **is** a TP=3 figure — 86.47 ±0.74, measured on the
+   production checkpoint on 5 September — so the gap is not the rank count, it is the sample. The
+   full **14,042-question** run has been staged twice and deferred on time both times, most recently
+   in the production-12 battery ([`results/gates/quality-battery-production-12.md`](results/gates/quality-battery-production-12.md)).
+   It is roughly a day of engine time here and it is the single largest quality number this
+   repository does not have `[not tested]`.
 6. **The newer checkpoint revision** (`aba59d21`, four days newer than the `b20c49ba` we pinned). A
    clean A/B against ours with the correctness probe, the code exam and an MMLU sample.
-7. **The memory ladder at 0.82–0.83.** 0.85 was rejected on the free-memory rule, but that was
-   measured before the page-cache remedy in [docs/08](docs/08-fast-boot.md). The rung may sit
-   differently now.
+7. **The memory ladder above 0.88, and the same ladder at two ranks.** The "0.85 was rejected" that
+   stood here is **retracted** ([docs/11](docs/11-open-issues.md) §2.4): it rested on a free-memory
+   rule measured before the page-cache remedy in [docs/08](docs/08-fast-boot.md). Re-climbed on
+   6 September against **swap traffic under load**, 0.85, 0.87 and 0.88 all pass and 0.90 is rejected;
+   production is 0.88 ([`results/memory/ladder-6sep.md`](results/memory/ladder-6sep.md)). What is open
+   is what sits between 0.88 and 0.90, and the whole ladder at **two** ranks, which must be re-derived
+   rather than copied ([docs/15](docs/15-tp2-track.md) §6).
 8. **The fast-load read path.** `HAREM_FASTLOAD_READ=mmap` exists in the code and has never been run.
    The sidecar currently reads at 0.88–1.04 GB/s where the same NVMe gives another loader 3.1 GB/s.
    Weight load could go from 67 s to about 20.
 9. **`block_m` under expert parallelism.** The alignment needs the global expert count and the
    block-size heuristic is about rows per expert. A sweep would say whether the two uses want
    different numbers.
-10. **A two-node (TP=2) measurement on the current stack.** Everything here moved a long way since
-    the TP=2 numbers were taken, and readers with two Sparks have no current figures at all.
+10. **The two-node gaps that are left.** Two Sparks are no longer an afterthought here: the track
+    page is [docs/15](docs/15-tp2-track.md), the files are [`tracks/tp2`](tracks/tp2/README.md), and
+    **candidate C** is a complete measured configuration. What is genuinely missing is in
+    [docs/15](docs/15-tp2-track.md) §6, and the four we would most like are a **two-node reboot
+    test**, the **memory ladder at two ranks**, **expert parallelism on at two ranks** (legal, never
+    measured) and a **second boot of each candidate** so the speed rows carry a boot-to-boot spread
+    rather than one boot's median `[not tested]`.
 11. **The whole fabric story on an NVFP4 stack.** `NCCL_MAX_NCHANNELS=8` (+13 % at C8 for one line),
     then the two plugin patches. All three are properties of the plugin and the wiring, not of the
     quantization, so they should transfer — and if they do, most of the EXL3-versus-NVFP4 gap in

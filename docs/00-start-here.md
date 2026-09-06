@@ -137,7 +137,8 @@ And the directories:
 - [09 — Measurement protocol](09-measurement-protocol.md), before you measure anything. Boot-to-boot
   spread on this stack is **up to 16 % on C8** with nothing changed at all, so a difference under
   about 5 % on one boot is not a result.
-- [11 — Open issues](11-open-issues.md) §1, before you quote a number. Thirty-two claims of ours did
-  not survive contact with their own raw data, and they are kept in place with what replaced them.
+- [11 — Open issues](11-open-issues.md) §1, before you quote a number. **Thirty-seven** claims of
+  ours did not survive contact with their own raw data, and they are kept in place with what replaced
+  them. §1's opening paragraph says exactly what that number counts.
 - [HELP-WANTED.md](../HELP-WANTED.md), if you would like to close one of the gaps. It is ranked, it
   carries the expected effort for each item, and it says what a one-node owner can and cannot check.

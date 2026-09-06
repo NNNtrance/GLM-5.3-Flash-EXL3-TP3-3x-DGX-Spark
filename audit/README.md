@@ -584,6 +584,10 @@ Everything we published here and then withdrew. The full text of each, with the 
 overturned it, is in [docs/11](../docs/11-open-issues.md) §1 unless the `#` column names another
 page — this is the index, so a reviewer can see the shape of our error rate in one place.
 
+The count is **thirty-seven**, and [docs/11](../docs/11-open-issues.md) §1's opening paragraph defines
+it: the 32 rows of that page's audit table plus the five withdrawn findings that are not rows of it.
+The rows below are the ones with a story worth telling, not the whole 37.
+
 | # | What we claimed | What it actually was |
 |---|---|---|
 | 1.1 | The missing `n_rows` also costs the non-expert-parallel path | It does not; the tail is handled there |
@@ -594,6 +598,8 @@ page — this is the index, so a reviewer can see the shape of our error rate in
 | 1.6 | The mesh ceiling is ~13 GB/s against a 25 GB/s link, and GPUDirect is the fix | Two errors in one sentence, both ours |
 | 1.7 | A pair of cables is worth 50 GB/s, so the collective runs at 28 % of the fabric | 50 GB/s is the **wire**; the card sits in a **PCIe Gen5 x4** slot, so the real ceiling is ~15 GB/s per card and ~30 GB/s per node |
 | 1.8 | Two smaller ones — a retired patch, and a CUDA-graph capture claim | See docs/11 |
+| 1.12 | "The 36/9 drafter sidecar removed the `22 % 4` head-count obstacle" — **our own correction of row 8, and it was wrong too** | Graphs captured on that boot because the draft KV was **bf16** (FlashAttention, no head check). The sidecar changed nothing: at three ranks it makes the division `22 % 3`. Since production 7 (fp8 draft KV → FlashInfer) graphs are **off** at TP=3 and **on** at TP=2 on the same image; the declaration is filed as [vllm#55581](https://github.com/vllm-project/vllm/issues/55581) |
+| 1.13 | "A too-small indexer workspace ends in upstream's locked-workspace `AssertionError`" — published in our patch docstring, in HELP-WANTED §9 and on an upstream thread, with that assertion as the load-bearing safety layer | **Corrected by the issue's author, not by us** ([@drakosha](https://github.com/drakosha) on [vllm#55221](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5561194190)). Both indexers request a **static** size, so the assertion cannot fire from this path at all. The real failure mode is a **silent clamp** producing wrong answers, and the load-bearing layer is ours — the startup refusal. **The first of our retractions a reader outside this stack caught** |
 | 1.10 | Three rows of the step-time breakdown, and the ranked target list built on them | `exl3_moe_combine` at 1.5 % of a chunk — **the kernel does not exist in this build**; `_zero_kv_blocks` at 1.3 % measures **0.09 %**; the "5.45 ms C1 idle" is **3.47 ms** once the profiler's own cost is subtracted, so graph coverage is worth +1.5–2 % rather than +6 % |
 | 2.3 | 8.2 GiB per worker is stranded; equalising ranks is worth 8–26 % of pool | **The instrument.** The pool is a difference between two `/proc/meminfo` readings and runs backwards; acting on this would have over-committed the head node |
 | 2.17 | The mHC triple shares a buffer, so the fusion is blocked | Thread-local dataflow, not a shared buffer |

@@ -3,9 +3,12 @@
 **Applies to: both tracks.** Every entry carries its own **Track** line — see the third convention
 below.
 
-Eighty-six failures, with the exact text where one exists. This page is the reason the rest of the
+Eighty-six entries, with the exact text where one exists. This page is the reason the rest of the
 repository can be short: if you are stuck, the answer is probably here, and if it is not, the shape of
-the answer probably is.
+the answer probably is. **Two of the eighty-six are not failures we hit**, and each says so in its own
+heading: §9.8 is a corruption the code blocks before it can happen, and §9.9 is a hypothesis a
+measurement refuted before it cost us anything. They are counted and kept because this is where a
+reader will look for them.
 
 **Read §0 first if something is wrong right now.** Everything after it is organised by subsystem, and
 §1 indexes it by what you actually see on your screen.
@@ -1477,8 +1480,9 @@ Two more things the unit does not do, both stated in [`systemd/`](../systemd/REA
 
 - **It does not enforce the worker-2 → worker-1 → head start order.** systemd starts the three units
   independently. The all-three reboot test passed on the workers' rendezvous retrying until rank 0
-  appears, plus a `TimeoutStartSec` about five times a normal boot — margin, not a guarantee, and one
-  trial. If the rendezvous ever times out on a cold cluster, this is why.
+  appears, plus a `TimeoutStartSec` about four times a normal boot — margin, not a guarantee, and
+  three whole-cluster trials rather than a proof. If the rendezvous ever times out on a cold cluster,
+  this is why.
 - **Nothing watches the container once it is up.** `--restart no` is deliberate and unchanged. One
   outage during this work ran an hour purely because the only thing being watched was a benchmark
   log; a 60-second `docker ps` plus `/health` poll that dumps `docker logs --tail 40` when the
@@ -1559,8 +1563,8 @@ Things we published here and then disproved are **not** on this page — they ar
 [11 — Open issues](11-open-issues.md) §1, with the measurement that overturned each, and indexed in
 [audit/](../audit/README.md) §6. Two of them are the shape of every other mistake on this stack:
 
-- **The ruler gets measured too.** Seven of thirty-two retractions are a number we quoted instead of
-  measuring — a catalogue bandwidth, a wire capacity, and once **a figure the engine printed in its
+- **The ruler gets measured too.** Seven of the thirty-two audit rows are a number we quoted instead
+  of measuring — a catalogue bandwidth, a wire capacity, and once **a figure the engine printed in its
   own log about its own memory**.
 - **A pair of sweeps is not a result.** Six more are a single probe or a confounded pair treated as
   evidence, against a stack whose boot-to-boot spread reaches 15.9 %.

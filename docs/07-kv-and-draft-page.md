@@ -188,7 +188,7 @@ caching `[measured-here]`.
 > while the fixed arm served 8,268 tokens in 6.3 s. The drafter's share of the blocks-per-request
 > divisor is **60.2 %** at two ranks against 53 % here, because the platform raises the attention
 > block to 4,608 tokens there and the target's own share shrinks. The hybrid allocator did **not**
-> swallow the page, which was the open worry. [15](15-tp2-track.md) §3.5 and
+> swallow the page, which was the open worry. [15](15-tp2-track.md) §4 and
 > [`results/speed/tp2-draft-page.md`](../results/speed/tp2-draft-page.md).
 
 ## 3. Root cause: the drafter's page is 16 tokens
@@ -280,7 +280,7 @@ first-order term was gone.
 
 **The "second-order" half of that sentence has itself been corrected by measurement.** We ran the
 page fix at two ranks on 6 September 2026 and it was worth **+117 %** there, against +82 % here
-([15](15-tp2-track.md) §3.5). Second-order in *memory*, yes — the drafter still costs 0.6 % of a
+([15](15-tp2-track.md) §4). Second-order in *memory*, yes — the drafter still costs 0.6 % of a
 block. But in the counter that actually divides the pool it is the **larger** term at two ranks, not
 the smaller one: 60.2 % of blocks per request against 53 % at three. Ranking the two causes by which
 one the third node fixed was the mistake; they are independent, and the page term grows as the node

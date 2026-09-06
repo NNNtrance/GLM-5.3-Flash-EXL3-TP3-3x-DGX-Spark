@@ -138,24 +138,33 @@ it lands well inside the 6 % this figure used to swing by before the settle gate
 ([docs/07](../../docs/07-kv-and-draft-page.md) §1.1). It is the strongest evidence we have that the
 gate measures what it claims to.
 
-### The same test on production 11, 6 September 2026
+### The same test on production 11 and production 12, 6 September 2026
 
 Repeated on production configuration 11 (the same stack at `gpu-memory-utilization` 0.87 with the
-sm_12x correctness set), one trial, `reboot` issued to all three nodes at once `[measured-here]`:
+sm_12x correctness set) and again on **production configuration 12** (0.88 with the sparse-indexer
+K-gather workspace bound, which is what our nodes serve today). One trial each, `reboot` issued to all
+three nodes at once `[measured-here]`:
 
-| | production 10, 5 Sep | production 11, 6 Sep |
-|---|---|---|
-| `/health` 200 from the reboot command | 242 s by the harness counter, **315 s** by the wall clock | **312 s**, wall clock, one figure only |
-| `harem-exl3.service` on all three | active | active |
-| ConnectX-7 on all three | 4/4 | 4/4 |
-| KV pool on that boot | 5,652,892 | **6,382,920** |
-| gates after it | 10/10 · 12/12 | 10/10 · 12/12 **cold and warm**, tool-call 8/8, needle-lite 6/6 |
-| swap traffic during the battery that followed | not sampled | **si + so exactly 0 on all three nodes** |
+| | production 10, 5 Sep | production 11, 6 Sep | **production 12, 6 Sep** |
+|---|---|---|---|
+| `/health` 200 from the reboot command | 242 s by the harness counter, **315 s** by the wall clock | **312 s**, wall clock, one figure only | **311 s**, wall clock, one figure only |
+| `harem-exl3.service` on all three | active | active | **active, and `enabled`** |
+| ConnectX-7 on all three | 4/4 | 4/4 | **4/4** |
+| KV pool on that boot | 5,652,892 | **6,382,920** | **7,041,322** |
+| gates after it | 10/10 · 12/12 | 10/10 · 12/12 **cold and warm**, tool-call 8/8, needle-lite 6/6 | 10/10 · 12/12 **cold and warm**, tool-call 8/8, needle-lite 6/6 |
+| swap traffic during the battery that followed | not sampled | **si + so exactly 0 on all three nodes** | swap **in** exactly 0 on all three; swap-out 5 / 10 / 10 KiB with swap **used** 0.000 GiB |
 
-**312 against 315 s: the autostart cost did not move**, and this time there is no contradiction to
-print, because the driver timed the reboot command itself rather than trusting a harness counter. The
-pool cross-check holds at the higher rung too — 6,382,920 from the reboot against 6,366,391 from a
-settled `docker run` of the same configuration, **+0.3 %**.
+**311 against 312 against 315 s: the autostart cost has not moved across three configurations and two
+memory rungs**, and on the last two there is no contradiction to print, because the driver timed the
+reboot command itself rather than trusting a harness counter. The pool cross-check holds at every rung
+— 6,382,920 from the reboot against 6,366,391 from a settled `docker run` of the same configuration,
+**+0.3 %**; at 0.88 the reboot boot is the **headline** pool figure of production 12, the lowest of its
+three boots (7,170,798 / 7,088,154 / 7,041,322) and the one the configuration is published on.
+
+Production 12's row is transcribed from
+[`../configs/production-configurations.csv`](../configs/production-configurations.csv) row 12 and
+[`../memory/indexer-workspace-ab.md`](../memory/indexer-workspace-ab.md) §7.1; as above, the raw
+capture is not included because it is a transcript of `ssh` to three named hosts.
 
 The clean boot was also the campaign's noise check. Production 11's load boot had read C4 at 135.0
 against the reference's 144.2, the only number that had moved; the clean boot read **145.9**, above

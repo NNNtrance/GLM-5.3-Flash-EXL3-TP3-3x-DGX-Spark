@@ -8,8 +8,11 @@ configuration 12**, together with the `gpu-memory-utilization` 0.88 rung; the pr
 numbers are §7.1.
 
 **Applies to: the three-node TP=3 track as measured here.** The patch is rank-agnostic and the
-arithmetic is not; at two ranks the same buffer is the same size, because it is sized from
-`max_model_len` and nothing else `[not tested]`.
+arithmetic is not: the buffer is sized from `max_model_len` and nothing else, so two ranks reserve the
+same 4.92 GiB per rank against a pool a third the size. That was **measured the same day**, and it is
+worth three times as much there — a same-session two-node A/B reads **+32.14 %** of pool against the
++10.25 % on this page, and the two-node recipe with its sidecar restored went **+26.5 %**
+`[measured-here]`. §6 and [docs/15](../../docs/15-tp2-track.md) §5.9.
 
 Settings, all three arms: image `exl3-zeus:754421f` (`cuda-exl3` at `754421f`), vLLM
 `0.1.dev20051+g487ecf187`, TP=3 + expert parallel, full-scope EXL3 weights

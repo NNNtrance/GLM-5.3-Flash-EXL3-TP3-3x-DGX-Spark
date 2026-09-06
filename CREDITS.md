@@ -335,6 +335,26 @@ offered upstream with its description in `patches/kernel/0003-PR-DESCRIPTION.md`
   ([docs/11](docs/11-open-issues.md) §2.29). No fix merged at the time of writing; we carry no patch
   for it, by choice.
 
+### [@drakosha](https://github.com/drakosha) — the correction we did not find ourselves
+
+- **What we owe him:** the retraction in [docs/11](docs/11-open-issues.md) §1.13. He opened
+  [vllm-project/vllm#55221](https://github.com/vllm-project/vllm/issues/55221), the sparse-indexer
+  K-gather workspace issue our own patch works around, and when we posted the failure mode we had
+  built our safety story on — "a too-small workspace ends in upstream's locked-workspace
+  `AssertionError`" — he
+  [corrected it](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5561194190): both
+  indexers ask the `WorkspaceManager` for a **static** size and slice per chunk afterwards, so the
+  request never grows and that assertion cannot fire from this path at all. The real failure mode is
+  a **silent clamp** producing wrong answers, and the load-bearing safety layer is ours rather than
+  upstream's. We had the evidence in our own A/B — one resize event per rank, for the life of the
+  engine — and had not read it.
+- **Why it is here rather than in a footnote:** it is the first of this repository's retractions that
+  a reader outside this stack caught, and it is the one we would least have found alone. The
+  correction is carried in [`results/memory/indexer-workspace-ab.md`](results/memory/indexer-workspace-ab.md)
+  §2, [docs/11](docs/11-open-issues.md) §2.28, [HELP-WANTED](HELP-WANTED.md) §9 and the patch's own
+  docstring, and the thread is answered.
+- **Licence:** not applicable — we vendor nothing of his. What we took is a correction.
+
 ### `autoscriptlabs/nccl-mesh-plugin` — the fabric transport
 
 - **What we use it for:** NCCL over three direct ConnectX-7 links with no switch. Without it there is
@@ -491,11 +511,13 @@ because it is the smaller, more readable statement of the same three loader laye
 
 [`tracks/tp3/patches/indexer-workspace/patch-indexer-workspace-tp3.py`](tracks/tp3/patches/indexer-workspace/patch-indexer-workspace-tp3.py)
 was added on 6 September. It is ours, the finding behind it is ours — read out of vLLM's own source
-and then confirmed with an upstream debug switch — and it is **not in production**: it bounds the
-sparse indexer's K-gather workspace, worth +10.25 % of KV pool
+and then confirmed with an upstream debug switch — and it **shipped the same evening as production
+configuration 12**: it bounds the sparse indexer's K-gather workspace, worth +10.25 % of KV pool at
+three ranks and +32.14 % at two
 ([`results/memory/indexer-workspace-ab.md`](results/memory/indexer-workspace-ab.md)). The defect it
 works around belongs upstream rather than here, where it was already reported three days before we
-measured it; our numbers are on that thread
+measured it; our numbers are on that thread, and so is the correction that became
+[docs/11](docs/11-open-issues.md) §1.13
 ([vllm-project/vllm#55221](https://github.com/vllm-project/vllm/issues/55221),
 [HELP-WANTED](HELP-WANTED.md) §9).
 

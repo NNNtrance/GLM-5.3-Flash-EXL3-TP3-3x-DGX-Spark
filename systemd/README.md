@@ -1,9 +1,9 @@
-# systemd — the autostart unit, and the reboot it was tested against
+# systemd — the autostart unit, and the reboots it was tested against
 
 > **This directory used to hold a template with three things wrong with it, and nothing installed
 > anywhere.** All three are fixed, the unit is installed and `enabled` on all three of our nodes, and
 > it has been through a **simultaneous reboot of the whole cluster with a live health check at the
-> other end** `[measured-here]`. The unit is
+> other end** three times — on production configurations 10, 11 and 12 `[measured-here]`. The unit is
 > [`harem-exl3.service`](../tracks/tp3/harem-exl3.service); the preflight it calls is
 > [`motor-onkosul-exl3.sh`](../tracks/tp3/motor-onkosul-exl3.sh) and is now a real script rather than
 > a name. Read this page before you install either.
@@ -50,11 +50,18 @@ disable it in the same change. On our nodes `harem-motor.service` is now `disabl
 > engine on those nodes; and `FABRIC_PEERS` becomes **one** address per node rather than two (the
 > ConnectX-7 check stays `4/4` — it counts ports, not peers).
 >
-> **Installed, started, health-checked and stopped on both nodes on 6 September 2026**: `systemctl
-> start` returned in 3 s / 6 s, `/health` 200 at **+261 s**, KV pool 2,153,571, correctness 10/10 and
-> code exam 12/12, `systemctl stop` clean `[measured-here]`. Its first attempt **failed correctly** —
-> the preflight refused in one second because the fast-load sidecar the environment file named was
-> not on disk, before docker was touched, which is check 7 doing its job.
+> **Installed, started, health-checked and stopped on both nodes on 6 September 2026, on
+> candidate B**: `systemctl start` returned in 3 s / 6 s, `/health` 200 at **+261 s**, KV pool
+> 2,153,571, correctness 10/10 and code exam 12/12, `systemctl stop` clean `[measured-here]`. Its
+> first attempt **failed correctly** — the preflight refused in one second because the fast-load
+> sidecar the environment file named was not on disk, before docker was touched, which is check 7
+> doing its job.
+>
+> **Candidate C**, the published two-node configuration since that evening, runs the *same* unit and
+> the same launcher with a different environment file and a different fast-load sidecar — one
+> `EXTRA_ENV` word between them — so nothing on this page changes for it. Its boot was **not
+> re-timed under the unit** `[not tested]`; the 261 s above is candidate B's and the 272 s in
+> [docs/15](../docs/15-tp2-track.md) §5.9 is a `docker run` fast-load boot, not a `systemctl start`.
 >
 > It is left **`disabled`**: exactly one of the two units may be enabled. And the reboot rule becomes
 > "reboot **both** together, never one" — we have **not** run a two-node reboot test `[not tested]`.
@@ -115,11 +122,12 @@ time nothing has sent a packet yet.
 
 **2. systemd will not honour the worker-2 → worker-1 → head start order.** It still will not, and
 this is the honest half of the page. The three units start independently with no ordering between
-them. What made the reboot test pass is not ordering, it is that the workers' rendezvous retries
-until rank 0 appears and `TimeoutStartSec=1200` is roughly **five times** a normal 251 s boot. That is
-tolerance, not a guarantee, and it has been demonstrated **once** `[measured-here]`. If you want the
-guarantee rather than the margin, put a rank-dependent delay or a peer-port poll in `ExecStartPre`; we
-have not `[not tested]`.
+them. What made the reboot tests pass is not ordering, it is that the workers' rendezvous retries
+until rank 0 appears and `TimeoutStartSec=1200` is roughly **four times** a normal 272 s boot. That is
+tolerance, not a guarantee, and it has been demonstrated **three times** — one whole-cluster reboot on
+each of production configurations 10, 11 and 12 `[measured-here]`. If you want the guarantee rather
+than the margin, put a rank-dependent delay or a peer-port poll in `ExecStartPre`; we have not
+`[not tested]`.
 
 **3. `ExecStop` named the wrong container.** The template said `harem_glm53_lil`, which is the NVFP4
 container, so `systemctl stop` would have reported success and stopped nothing. It now names
@@ -128,16 +136,42 @@ container, so `systemctl stop` would have reported success and stopped nothing. 
 Two smaller changes came with them. `TimeoutStartSec` went **900 → 1200**: 900 s covers a fast-load
 boot with room, but not a **620 s dump boot** that also has to wait out the preflight and the settle
 gate, and a unit that times out mid-load leaves a container running that systemd believes is gone.
-And `WorkingDirectory` and `ExecStart` both point at `tp3full/`, which is the production tree since
-configuration 9 — there is exactly one launcher and the second copy is what made the profiler answer
-404 for a week ([docs/14](../docs/14-troubleshooting.md) §8.7).
+And `WorkingDirectory` and `ExecStart` both point at `tp3full/`, which is where the launcher has lived
+since configuration 9 — there is exactly one launcher and the second copy is what made the profiler
+answer 404 for a week ([docs/14](../docs/14-troubleshooting.md) §8.7). **The launcher directory and
+the patch-tree directory are two things**; the examples use `tp3full/` for both for brevity, but on our
+nodes the patch tree is a directory of its own named after the configuration. Set `TP3_DIR` (and
+`OVERLAY_DIR`) in your environment file to wherever you put the patch tree, whatever you call it —
+`ExecStart` follows the launcher, `TP3_DIR` follows the patches, and only the second one is hashed
+into the fast-load sidecar's identity.
 
 ---
 
-## The reboot test
+## The reboot tests
 
-One trial, the whole cluster, from power-on to a served token `[measured-here]`, 5 September 2026,
-production configuration 10:
+Three trials, one per production configuration, each of them the whole cluster from power-on to a
+served token with the gates read afterwards `[measured-here]`. **The current one is production
+configuration 12** — `gpu-memory-utilization` 0.88 with the sparse-indexer workspace bound, which is
+what the units on our nodes start today:
+
+| | production 10, 5 Sep | production 11, 6 Sep | **production 12, 6 Sep** |
+|---|---|---|---|
+| `/health` 200 from the `reboot` command | 242 s by the harness counter, **315 s** by the wall clock | **312 s**, wall clock | **311 s**, wall clock |
+| `harem-exl3.service` on all three | `active` | `active` | **`active`, and `enabled`** |
+| ConnectX-7 on all three | 4/4 | 4/4 | **4/4** |
+| KV pool on that boot | 5,652,892 | 6,382,920 | **7,041,322** |
+| gates after it | 10/10 · 12/12 | 10/10 · 12/12 cold and warm, tool-call 8/8, needle-lite 6/6 | **10/10 · 12/12 cold and warm**, tool-call 8/8, needle-lite 6/6 |
+
+**311 against 312 against 315 s: the autostart cost has not moved across three configurations and two
+memory rungs.** Raw log and the phase decomposition:
+[`../results/boot/boot-ledger.md`](../results/boot/boot-ledger.md);
+configuration 12's row is
+[`../results/configs/production-configurations.csv`](../results/configs/production-configurations.csv)
+row 12 and the [CHANGELOG](../CHANGELOG.md) entry for 6 September.
+
+The trial below is the first one, kept in full because it is the only one whose log contradicts
+itself and the only one with a phase decomposition — 5 September 2026, production configuration 10
+`[history]`:
 
 | | |
 |---|---|

@@ -47,29 +47,38 @@ prelude are hashed into the fast-load sidecar's identity
 ([docs/08](../../docs/08-fast-boot.md) §4). See [tracks/README.md](../README.md) for the copy and the
 link.
 
+**The launcher directory and the patch-tree directory are two things**; the examples use `tp3full/`
+for both for brevity, and on our own nodes the patch tree is a separate directory named after the
+configuration (which is why [`env.tp3-full.example`](env.tp3-full.example) shows one). Set `TP3_DIR`
+and `OVERLAY_DIR` to wherever you put the patch tree and the overlay; the systemd unit's `ExecStart`
+follows the launcher instead.
+
 ---
 
 ## What this track measures
 
-**Production configuration 10** — three DGX Spark nodes, one 4-bit EXL3 checkpoint, realistic
-prompts, temperature 0, reasoning effort `low`, 5 September 2026 `[measured-here]`:
+**Production configuration 12** — three DGX Spark nodes, one 4-bit EXL3 checkpoint, realistic
+prompts, temperature 0, reasoning effort `low`, 6 September 2026 `[measured-here]`. Speed is the pool
+of six sweep rounds over **two boots** of this configuration:
 
-| | |
-|---|---|
-| Single-stream decode (C1) | **70.5** tok/s aggregate (**76.9** per stream) |
-| Aggregate at 8 concurrent streams (C8) | **194.0** tok/s |
-| Prefill, fresh unseen ~8K prompts | **1,769** tok/s |
-| KV pool at `max_model_len` 1,000,000 | **5,619,834** tokens at `gpu-memory-utilization` 0.83 |
-| Quality | correctness probe **10/10**, code exam **12/12** cold and warm; MMLU sample (1,995 q) **86.47 ±0.74** |
-| Cold boot, `docker run` → API ready | **251 s** |
-| Boot from power-on, all three nodes together | `/health` 200 at **242 s** by the harness's counter, **315 s** by the wall clock in the same log. Both are printed because they disagree; **315 s is the one to plan with** |
+| | | production 10 `[history]` |
+|---|---|---|
+| Single-stream decode (C1) | **69.7** tok/s aggregate (**75.6** per stream) | 70.5 (76.9) |
+| Aggregate at 8 concurrent streams (C8) | **196.1** tok/s | 194.0 |
+| Prefill, fresh unseen ~8K prompts | **1,744** tok/s | 1,769 |
+| KV pool at `max_model_len` 1,000,000 | **7,041,322** tokens at `gpu-memory-utilization` 0.88 | 5,619,834 at 0.83 |
+| Quality | correctness probe **10/10**, code exam **12/12** cold and warm; tool-call gate **8/8**; needle-lite **6/6** at 64K and 128K; MMLU sample (1,995 q) **86.47 ±0.74**, carried from configuration 9 `[not tested]` here | 10/10 · 12/12; MMLU 86.47 ±0.74 |
+| Cold boot, `docker run` → API ready | **272 s** (the dump boot that writes the sidecar is 590 s) | 251 s |
+| Boot from power-on, all three nodes together | `/health` 200 at **311 s** by the wall clock, timed from the `reboot` command | 242 s by the harness's counter, **315 s** by the wall clock in the same log — both printed because they disagree, and 315 s was the figure to plan with |
 
 Settings for every row: image `exl3-zeus:754421f`, TP=3 + expert parallel, full-scope EXL3 weights
 (`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw), `kv-cache-dtype fp8` and an fp8 draft cache, DFlash2
 draft at k=7, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`, `--max-num-batched-tokens 2048`,
 `--max-num-seqs 8`, `NCCL_MAX_NCHANNELS=8`, per-rank pre-sliced sidecar, warm MLA tuner cache, mesh
-plugin with both links per peer and `NCCL_PTR_CUDA`, the launcher's memory settle gate. Speed is the
-median of three sweep rounds, which the persisted tuner cache is what earns
+plugin with both links per peer and `NCCL_PTR_CUDA`, the launcher's memory settle gate. Configuration
+12 adds the sm_12x correctness set (`HAREM_SM12_ITEMS=pdl,kpool`) and the sparse-indexer K-gather
+workspace bound (`HAREM_INDEXER_WS_MODE=bound`), which configuration 10 predates. Configuration 10's
+speed is the median of three sweep rounds, which the persisted tuner cache is what earns
 ([docs/09](../../docs/09-measurement-protocol.md), [docs/12](../../docs/12-tuner-cache.md)).
 
 **Before you read a few-percent difference here as a result:** on this stack C1 boot medians span

@@ -266,13 +266,13 @@ ledgers for both candidates live under our own measurement directory, not in thi
 
 ---
 
-# Candidate C — candidate B plus the indexer workspace bound, measured 6 September 2026
+## Candidate C — candidate B plus the indexer workspace bound, measured 6 September 2026
 
 **The recommended configuration.** Everything above holds; the only change is
 `HAREM_INDEXER_WS_MODE=bound` in `EXTRA_ENV`, which sizes the sparse indexer's K-gather workspace
 from its real bound instead of `40 × max_model_len`. Narrative and cost: [docs/15](../../docs/15-tp2-track.md) §5.9.
 
-## The A/B that separated it — one environment line, both arms eager `[measured-here]`
+### The A/B that separated it — one environment line, both arms eager `[measured-here]`
 
 Neither arm could use a fast-load sidecar: adding `patch-indexer-workspace-tp3.py` to the tree
 changes the manifest identity, and there was no disk for a second two-node sidecar when the arms
@@ -308,7 +308,7 @@ clock, temperature or power telemetry was sampled, and the arms ran in a fixed o
 was run three more times on the same engine and landed at 1,321 / 1,302 / 1,296 — the control's
 1,315 sits in the middle of that spread.
 
-## Stress, bound arm
+### Stress, bound arm
 
 | Gate | Result |
 |---|---|
@@ -325,7 +325,7 @@ was run three more times on the same engine and landed at 1,321 / 1,302 / 1,296 
 next attempt. Two attempts, one empty, one correct, **no wrong code in either**. The fixed probe
 scores both fields: [`bench/needle-1m-bothfields.py`](../../bench/needle-1m-bothfields.py).
 
-## The production configuration, fast-load restored
+### The production configuration, fast-load restored
 
 | | Candidate B | **Candidate C** | delta |
 |---|---:|---:|---:|

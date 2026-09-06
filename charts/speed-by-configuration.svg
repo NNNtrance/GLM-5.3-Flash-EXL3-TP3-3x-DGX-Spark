@@ -1,86 +1,101 @@
-<svg xmlns='http://www.w3.org/2000/svg' width='1010' height='470' viewBox='0 0 1010 470' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>
-<rect width='1010' height='470' fill='#ffffff'/>
+<svg xmlns='http://www.w3.org/2000/svg' width='1010' height='504' viewBox='0 0 1010 504' font-family='system-ui,-apple-system,Segoe UI,Roboto,sans-serif'>
+<rect width='1010' height='504' fill='#ffffff'/>
 <text x='20.0' y='28.0' font-size='17' fill='#1c2430' text-anchor='start' font-weight='600'>Decode throughput by production configuration</text>
 <text x='20.0' y='46.0' font-size='11.5' fill='#5c6675' text-anchor='start'>12 short English code prompts (hizset-v2), realistic not synthetic. TP=3 + expert parallelism, EXL3 4bpw, KV fp8, DFlash2 k=7,</text>
-<text x='20.0' y='61.0' font-size='11.5' fill='#5c6675' text-anchor='start'>gpu-memory-utilization 0.80, temperature 0, reasoning effort low. Configurations 1-8 serve a routed-experts-only checkpoint;</text>
-<text x='20.0' y='76.0' font-size='11.5' fill='#5c6675' text-anchor='start'>configuration 9 serves a full-scope one. Source: results/configs/production-configurations.csv. All 5 September 2026.</text>
-<rect x='20.0' y='98.0' width='11.0' height='11.0' rx='2' fill='#1f8a4c'/>
-<text x='36.0' y='107.0' font-size='11' fill='#1c2430' text-anchor='start'>aggregate tok/s at C8</text>
-<rect x='203.2' y='98.0' width='11.0' height='11.0' rx='2' fill='#2b5fd9'/>
-<text x='219.2' y='107.0' font-size='11' fill='#1c2430' text-anchor='start'>aggregate tok/s at C1</text>
+<text x='20.0' y='61.0' font-size='11.5' fill='#5c6675' text-anchor='start'>temperature 0, reasoning effort low. gpu-memory-utilization is 0.80 through configuration 9, then 0.83 / 0.87 / 0.88 - the memory</text>
+<text x='20.0' y='76.0' font-size='11.5' fill='#5c6675' text-anchor='start'>rungs 10, 11 and 12 climbed. Configurations 1-8 serve a routed-experts-only checkpoint, 9 onwards a full-scope one.</text>
+<text x='20.0' y='91.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Source: results/configs/production-configurations.csv. 5-6 September 2026.</text>
+<rect x='20.0' y='113.0' width='11.0' height='11.0' rx='2' fill='#1f8a4c'/>
+<text x='36.0' y='122.0' font-size='11' fill='#1c2430' text-anchor='start'>aggregate tok/s at C8</text>
+<rect x='203.2' y='113.0' width='11.0' height='11.0' rx='2' fill='#2b5fd9'/>
+<text x='219.2' y='122.0' font-size='11' fill='#1c2430' text-anchor='start'>aggregate tok/s at C1</text>
 <line x1='62.0' y1='392.0' x2='988.0' y2='392.0' stroke='#d8dce3'/>
 <text x='54.0' y='396.0' font-size='10' fill='#5c6675' text-anchor='end'>0</text>
-<line x1='62.0' y1='338.6' x2='988.0' y2='338.6' stroke='#d8dce3'/>
-<text x='54.0' y='342.6' font-size='10' fill='#5c6675' text-anchor='end'>50</text>
-<line x1='62.0' y1='285.2' x2='988.0' y2='285.2' stroke='#d8dce3'/>
-<text x='54.0' y='289.2' font-size='10' fill='#5c6675' text-anchor='end'>100</text>
-<line x1='62.0' y1='231.8' x2='988.0' y2='231.8' stroke='#d8dce3'/>
-<text x='54.0' y='235.8' font-size='10' fill='#5c6675' text-anchor='end'>150</text>
-<line x1='62.0' y1='178.4' x2='988.0' y2='178.4' stroke='#d8dce3'/>
-<text x='54.0' y='182.4' font-size='10' fill='#5c6675' text-anchor='end'>200</text>
-<line x1='62.0' y1='125.0' x2='988.0' y2='125.0' stroke='#d8dce3'/>
-<text x='54.0' y='129.0' font-size='10' fill='#5c6675' text-anchor='end'>250</text>
-<rect x='80.3' y='230.8' width='26.0' height='161.2' rx='0' fill='#1f8a4c'/>
-<rect x='110.3' y='337.4' width='26.0' height='54.6' rx='0' fill='#2b5fd9'/>
-<text x='93.3' y='225.8' font-size='10.5' fill='#1c2430' text-anchor='middle'>150.9</text>
-<text x='123.3' y='332.4' font-size='10.5' fill='#1c2430' text-anchor='middle'>51.1</text>
-<text x='108.3' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 1</text>
-<text x='108.3' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>bc0e0f6s</text>
-<rect x='172.9' y='227.7' width='26.0' height='164.3' rx='0' fill='#1f8a4c'/>
-<rect x='202.9' y='336.6' width='26.0' height='55.4' rx='0' fill='#2b5fd9'/>
-<text x='185.9' y='222.7' font-size='10.5' fill='#1c2430' text-anchor='middle'>153.8</text>
-<text x='215.9' y='331.6' font-size='10.5' fill='#1c2430' text-anchor='middle'>51.9</text>
-<text x='200.9' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 2</text>
-<text x='200.9' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>f4987cf</text>
-<rect x='265.5' y='218.1' width='26.0' height='173.9' rx='0' fill='#1f8a4c'/>
-<rect x='295.5' y='335.6' width='26.0' height='56.4' rx='0' fill='#2b5fd9'/>
-<text x='278.5' y='213.1' font-size='10.5' fill='#1c2430' text-anchor='middle'>162.8</text>
-<text x='308.5' y='330.6' font-size='10.5' fill='#1c2430' text-anchor='middle'>52.8</text>
-<text x='293.5' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 3</text>
-<text x='293.5' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>f4987cf</text>
-<rect x='358.1' y='219.2' width='26.0' height='172.8' rx='0' fill='#1f8a4c'/>
-<rect x='388.1' y='333.9' width='26.0' height='58.1' rx='0' fill='#2b5fd9'/>
-<text x='371.1' y='214.2' font-size='10.5' fill='#1c2430' text-anchor='middle'>161.8</text>
-<text x='401.1' y='328.9' font-size='10.5' fill='#1c2430' text-anchor='middle'>54.4</text>
-<text x='386.1' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 4</text>
-<text x='386.1' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>f4987cf</text>
-<rect x='450.7' y='221.2' width='26.0' height='170.8' rx='0' fill='#1f8a4c'/>
-<rect x='480.7' y='333.8' width='26.0' height='58.2' rx='0' fill='#2b5fd9'/>
-<text x='463.7' y='216.2' font-size='10.5' fill='#1c2430' text-anchor='middle'>159.9</text>
-<text x='493.7' y='328.8' font-size='10.5' fill='#1c2430' text-anchor='middle'>54.5</text>
-<text x='478.7' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 5</text>
-<text x='478.7' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>9bf594c</text>
-<rect x='543.3' y='211.6' width='26.0' height='180.4' rx='0' fill='#1f8a4c'/>
-<rect x='573.3' y='331.2' width='26.0' height='60.8' rx='0' fill='#2b5fd9'/>
-<text x='556.3' y='206.6' font-size='10.5' fill='#1c2430' text-anchor='middle'>168.9</text>
-<text x='586.3' y='326.2' font-size='10.5' fill='#1c2430' text-anchor='middle'>56.9</text>
-<text x='571.3' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 6</text>
-<text x='571.3' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'></text>
-<rect x='635.9' y='205.0' width='26.0' height='187.0' rx='0' fill='#1f8a4c'/>
-<rect x='665.9' y='331.1' width='26.0' height='60.9' rx='0' fill='#2b5fd9'/>
-<text x='648.9' y='200.0' font-size='10.5' fill='#1c2430' text-anchor='middle'>175.1</text>
-<text x='678.9' y='326.1' font-size='10.5' fill='#1c2430' text-anchor='middle'>57</text>
-<text x='663.9' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 7</text>
-<text x='663.9' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>9bf594c</text>
-<rect x='728.5' y='204.7' width='26.0' height='187.3' rx='0' fill='#1f8a4c'/>
-<rect x='758.5' y='331.2' width='26.0' height='60.8' rx='0' fill='#2b5fd9'/>
-<text x='741.5' y='199.7' font-size='10.5' fill='#1c2430' text-anchor='middle'>175.4</text>
-<text x='771.5' y='326.2' font-size='10.5' fill='#1c2430' text-anchor='middle'>56.9</text>
-<text x='756.5' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 8</text>
-<text x='756.5' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>62f53e6</text>
-<rect x='821.1' y='181.4' width='26.0' height='210.6' rx='0' fill='#1f8a4c'/>
-<rect x='851.1' y='317.3' width='26.0' height='74.7' rx='0' fill='#2b5fd9'/>
-<text x='834.1' y='176.4' font-size='10.5' fill='#1c2430' text-anchor='middle'>197.2</text>
-<text x='864.1' y='312.3' font-size='10.5' fill='#1c2430' text-anchor='middle'>69.9</text>
-<text x='849.1' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 9</text>
-<text x='849.1' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>754421f</text>
-<rect x='913.7' y='184.8' width='26.0' height='207.2' rx='0' fill='#1f8a4c'/>
-<rect x='943.7' y='316.7' width='26.0' height='75.3' rx='0' fill='#2b5fd9'/>
-<text x='926.7' y='179.8' font-size='10.5' fill='#1c2430' text-anchor='middle'>194</text>
-<text x='956.7' y='311.7' font-size='10.5' fill='#1c2430' text-anchor='middle'>70.5</text>
-<text x='941.7' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 10</text>
-<text x='941.7' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>754421f</text>
+<line x1='62.0' y1='341.6' x2='988.0' y2='341.6' stroke='#d8dce3'/>
+<text x='54.0' y='345.6' font-size='10' fill='#5c6675' text-anchor='end'>50</text>
+<line x1='62.0' y1='291.2' x2='988.0' y2='291.2' stroke='#d8dce3'/>
+<text x='54.0' y='295.2' font-size='10' fill='#5c6675' text-anchor='end'>100</text>
+<line x1='62.0' y1='240.8' x2='988.0' y2='240.8' stroke='#d8dce3'/>
+<text x='54.0' y='244.8' font-size='10' fill='#5c6675' text-anchor='end'>150</text>
+<line x1='62.0' y1='190.4' x2='988.0' y2='190.4' stroke='#d8dce3'/>
+<text x='54.0' y='194.4' font-size='10' fill='#5c6675' text-anchor='end'>200</text>
+<line x1='62.0' y1='140.0' x2='988.0' y2='140.0' stroke='#d8dce3'/>
+<text x='54.0' y='144.0' font-size='10' fill='#5c6675' text-anchor='end'>250</text>
+<rect x='74.5' y='239.9' width='24.1' height='152.1' rx='0' fill='#1f8a4c'/>
+<rect x='102.6' y='340.5' width='24.1' height='51.5' rx='0' fill='#2b5fd9'/>
+<text x='86.5' y='234.9' font-size='10.5' fill='#1c2430' text-anchor='middle'>150.9</text>
+<text x='114.6' y='335.5' font-size='10.5' fill='#1c2430' text-anchor='middle'>51.1</text>
+<text x='100.6' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 1</text>
+<text x='100.6' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>bc0e0f6s</text>
+<rect x='151.6' y='237.0' width='24.1' height='155.0' rx='0' fill='#1f8a4c'/>
+<rect x='179.8' y='339.7' width='24.1' height='52.3' rx='0' fill='#2b5fd9'/>
+<text x='163.7' y='232.0' font-size='10.5' fill='#1c2430' text-anchor='middle'>153.8</text>
+<text x='191.8' y='334.7' font-size='10.5' fill='#1c2430' text-anchor='middle'>51.9</text>
+<text x='177.8' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 2</text>
+<text x='177.8' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>f4987cf</text>
+<rect x='228.8' y='227.9' width='24.1' height='164.1' rx='0' fill='#1f8a4c'/>
+<rect x='256.9' y='338.8' width='24.1' height='53.2' rx='0' fill='#2b5fd9'/>
+<text x='240.9' y='222.9' font-size='10.5' fill='#1c2430' text-anchor='middle'>162.8</text>
+<text x='269.0' y='333.8' font-size='10.5' fill='#1c2430' text-anchor='middle'>52.8</text>
+<text x='254.9' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 3</text>
+<text x='254.9' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>f4987cf</text>
+<rect x='306.0' y='228.9' width='24.1' height='163.1' rx='0' fill='#1f8a4c'/>
+<rect x='334.1' y='337.2' width='24.1' height='54.8' rx='0' fill='#2b5fd9'/>
+<text x='318.0' y='223.9' font-size='10.5' fill='#1c2430' text-anchor='middle'>161.8</text>
+<text x='346.1' y='332.2' font-size='10.5' fill='#1c2430' text-anchor='middle'>54.4</text>
+<text x='332.1' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 4</text>
+<text x='332.1' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>f4987cf</text>
+<rect x='383.1' y='230.8' width='24.1' height='161.2' rx='0' fill='#1f8a4c'/>
+<rect x='411.2' y='337.1' width='24.1' height='54.9' rx='0' fill='#2b5fd9'/>
+<text x='395.2' y='225.8' font-size='10.5' fill='#1c2430' text-anchor='middle'>159.9</text>
+<text x='423.3' y='332.1' font-size='10.5' fill='#1c2430' text-anchor='middle'>54.5</text>
+<text x='409.2' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 5</text>
+<text x='409.2' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>9bf594c</text>
+<rect x='460.3' y='221.7' width='24.1' height='170.3' rx='0' fill='#1f8a4c'/>
+<rect x='488.4' y='334.6' width='24.1' height='57.4' rx='0' fill='#2b5fd9'/>
+<text x='472.4' y='216.7' font-size='10.5' fill='#1c2430' text-anchor='middle'>168.9</text>
+<text x='500.5' y='329.6' font-size='10.5' fill='#1c2430' text-anchor='middle'>56.9</text>
+<text x='486.4' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 6</text>
+<text x='486.4' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'></text>
+<rect x='537.5' y='215.5' width='24.1' height='176.5' rx='0' fill='#1f8a4c'/>
+<rect x='565.6' y='334.5' width='24.1' height='57.5' rx='0' fill='#2b5fd9'/>
+<text x='549.5' y='210.5' font-size='10.5' fill='#1c2430' text-anchor='middle'>175.1</text>
+<text x='577.6' y='329.5' font-size='10.5' fill='#1c2430' text-anchor='middle'>57</text>
+<text x='563.6' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 7</text>
+<text x='563.6' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>9bf594c</text>
+<rect x='614.6' y='215.2' width='24.1' height='176.8' rx='0' fill='#1f8a4c'/>
+<rect x='642.8' y='334.6' width='24.1' height='57.4' rx='0' fill='#2b5fd9'/>
+<text x='626.7' y='210.2' font-size='10.5' fill='#1c2430' text-anchor='middle'>175.4</text>
+<text x='654.8' y='329.6' font-size='10.5' fill='#1c2430' text-anchor='middle'>56.9</text>
+<text x='640.8' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 8</text>
+<text x='640.8' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>62f53e6</text>
+<rect x='691.8' y='193.2' width='24.1' height='198.8' rx='0' fill='#1f8a4c'/>
+<rect x='719.9' y='321.5' width='24.1' height='70.5' rx='0' fill='#2b5fd9'/>
+<text x='703.9' y='188.2' font-size='10.5' fill='#1c2430' text-anchor='middle'>197.2</text>
+<text x='732.0' y='316.5' font-size='10.5' fill='#1c2430' text-anchor='middle'>69.9</text>
+<text x='717.9' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 9</text>
+<text x='717.9' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>754421f</text>
+<rect x='769.0' y='196.4' width='24.1' height='195.6' rx='0' fill='#1f8a4c'/>
+<rect x='797.1' y='320.9' width='24.1' height='71.1' rx='0' fill='#2b5fd9'/>
+<text x='781.0' y='191.4' font-size='10.5' fill='#1c2430' text-anchor='middle'>194</text>
+<text x='809.1' y='315.9' font-size='10.5' fill='#1c2430' text-anchor='middle'>70.5</text>
+<text x='795.1' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 10</text>
+<text x='795.1' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>754421f</text>
+<rect x='846.1' y='189.3' width='24.1' height='202.7' rx='0' fill='#1f8a4c'/>
+<rect x='874.2' y='321.8' width='24.1' height='70.2' rx='0' fill='#2b5fd9'/>
+<text x='858.2' y='184.3' font-size='10.5' fill='#1c2430' text-anchor='middle'>201.1</text>
+<text x='886.3' y='316.8' font-size='10.5' fill='#1c2430' text-anchor='middle'>69.6</text>
+<text x='872.2' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 11</text>
+<text x='872.2' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>754421f</text>
+<rect x='923.3' y='194.3' width='24.1' height='197.7' rx='0' fill='#1f8a4c'/>
+<rect x='951.4' y='321.7' width='24.1' height='70.3' rx='0' fill='#2b5fd9'/>
+<text x='935.4' y='189.3' font-size='10.5' fill='#1c2430' text-anchor='middle'>196.1</text>
+<text x='963.5' y='316.7' font-size='10.5' fill='#1c2430' text-anchor='middle'>69.7</text>
+<text x='949.4' y='409.0' font-size='11.5' fill='#1c2430' text-anchor='middle'>prod 12</text>
+<text x='949.4' y='423.0' font-size='9.5' fill='#5c6675' text-anchor='middle'>754421f</text>
 <text x='20.0' y='428.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Configuration 9 is the only step that changed the checkpoint rather than a flag, an image or the fabric, and it is the largest single move here:</text>
-<text x='20.0' y='444.0' font-size='11.5' fill='#5c6675' text-anchor='start'>+22.9 % at C1 and +12.5 % at C8 against configuration 8. Draft acceptance is unchanged once pooled by draft token (the 2.4-point gap first published was a harness artefact); the cost is a second patch tree.</text>
-<text x='20.0' y='460.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Image tag under each pair is the cuda-exl3 commit that configuration was built from.</text>
+<text x='20.0' y='444.0' font-size='11.5' fill='#5c6675' text-anchor='start'>+22.9 % at C1 and +12.5 % at C8 against configuration 8. Draft acceptance is unchanged once pooled by draft token (the 2.4-point gap first</text>
+<text x='20.0' y='460.0' font-size='11.5' fill='#5c6675' text-anchor='start'>published was a harness artefact); the cost is a second patch tree.</text>
+<text x='20.0' y='476.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Configurations 10, 11 and 12 are memory work, not speed work: they buy KV pool (5.62M -&gt; 6.38M -&gt; 7.04M) with every level inside its band.</text>
+<text x='20.0' y='492.0' font-size='11.5' fill='#5c6675' text-anchor='start'>Image tag under each pair is the cuda-exl3 commit that configuration was built from. The KV chart is where 10, 11 and 12 are read.</text>
 </svg>

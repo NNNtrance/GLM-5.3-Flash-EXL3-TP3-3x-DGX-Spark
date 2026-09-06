@@ -612,7 +612,9 @@ itself an instrument that has to agree with a clock before it is quoted.
 
 Two protocol notes for anyone repeating it. **One trial is one trial** — systemd starts the three
 units with no ordering between them, and what carried this boot is the workers' rendezvous retrying
-until rank 0 appears, not a guarantee. And **a reboot is the cleanest baseline a pool number can
+until rank 0 appears, not a guarantee. The test has since been repeated on production configurations
+11 and 12, reading 312 s and 311 s against this boot's 315 s; three trials are three trials, and the
+ordering is still not enforced. And **a reboot is the cleanest baseline a pool number can
 have**, which is what makes the +0.6 % agreement with a settled `docker run` the strongest check on
 the settle gate we have run.
 

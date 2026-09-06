@@ -3,7 +3,7 @@
 **Applies to: TP=2 only.** This is the tree the two-node production candidate of
 [docs/15](../../../docs/15-tp2-track.md) §5 runs. It is [`tracks/tp3/patches/`](../../tp3/patches/) with every
 file that exists only to serve a pad removed, plus the two-node full-scope loader patch. Fourteen
-files against twenty-two.
+files against twenty-three.
 
 **Why a tree of its own and not a flag.** The directory's **file list and content are the fast-load
 manifest identity** ([docs/08](../../../docs/08-fast-boot.md) §4): every `patch-*.py` in it and the full

@@ -19,7 +19,7 @@ Three nodes instead of two: [tracks/tp3](../tp3/) and the [README quick start](.
 | File | What it is |
 |---|---|
 | [`env.tp2-full.example`](env.tp2-full.example) | **The production-candidate template.** `NNODES=2`, `TP_SIZE=2`, `ENABLE_EP=0`, no padding sidecar, `gpu-memory-utilization` **0.85** rather than the three-node 0.88, and four settings that are not optional at two ranks |
-| [`patches/`](patches/) | The in-container patch tree — fourteen files against the three-node tree's twenty-two, because nothing here has to pad anything. [`patches/README.md`](patches/README.md) is the inventory |
+| [`patches/`](patches/) | The in-container patch tree — fourteen files against the three-node tree's twenty-three, because nothing here has to pad anything. [`patches/README.md`](patches/README.md) is the inventory |
 | [`harem-exl3-tp2.service`](harem-exl3-tp2.service) | The autostart unit. It is a unit **of its own** — you do not edit the three-node one. Installed, started, health-checked and stopped on both nodes on 6 September 2026, and left `disabled`, because exactly one of the two units may be enabled |
 | [`motor-onkosul-exl3-tp2.sh`](motor-onkosul-exl3-tp2.sh) | Its preflight — `FABRIC_PEERS` is **one** address per node rather than two; the ConnectX-7 check stays `4/4`, because it counts ports on the node, not peers |
 
@@ -52,7 +52,7 @@ TP=2 patch dropped into the TP=3 tree that did it
 | `HAREM_DISABLE_PERSISTENT_TOPK=1` | vLLM's sparse-attention indexer picks `persistent_topk`, which cannot run on a GB10: 85 CTAs against 48 SMs, and the fallback wants ≥128 KB of shared memory where the part has 101,376 bytes |
 | `--block-size 256` | With `index_kpool` 4 and fp8 KV, DeepGEMM's arch-12 path needs `block_kv` exactly 64 |
 | `--kv-cache-dtype fp8` | The same kernel constraint |
-| `HAREM_SW_BLOCK_SIZE=256` | **Mandatory in practice.** The drafter's KV group is allocated on a 16-token page, and at two ranks it takes 60.2 % of the blocks-per-request divisor against 53 % at three. Without the fix the pool is 601,562 tokens and **a 6,253-token prompt is never scheduled at all** ([docs/15](../../docs/15-tp2-track.md) §3.5) |
+| `HAREM_SW_BLOCK_SIZE=256` | **Mandatory in practice.** The drafter's KV group is allocated on a 16-token page, and at two ranks it takes 60.2 % of the blocks-per-request divisor against 53 % at three. Without the fix the pool is 601,562 tokens and **a 6,253-token prompt is never scheduled at all** ([docs/15](../../docs/15-tp2-track.md) §4) |
 
 ## What TP=2 buys, and what it does not
 
@@ -84,7 +84,7 @@ temperature 0, reasoning effort `low`, median of sweep rounds 2-4 `[measured-her
 | TTFT, C1 / C8 | **0.381** / **1.054** s |
 | Quality | correctness probe **10/10**, code exam **12/12** cold and warm, tool-call **8/8**, needle-lite **6/6**; MMLU sample (1,995 q) **86.02 ±0.75** |
 | Cold boot, fast-load | **272 s** (the one-off dump boot that writes the sidecar is 956 s) |
-| Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes. **No reboot test yet** `[not tested]` |
+| Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes — **candidate B, not re-run on C**. Candidate C's unit points at the same launcher with a different env file and sidecar and was not re-timed under it. **No reboot test yet** `[not tested]` |
 | Consumed memory per node | **79.5 / 80.4 GiB** |
 
 **MMLU is candidate B's**: candidate C changes no weight and no kernel, only the size of a

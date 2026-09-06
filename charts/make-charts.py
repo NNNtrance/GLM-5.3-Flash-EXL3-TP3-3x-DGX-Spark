@@ -102,12 +102,13 @@ def nice_max(v, steps=5):
 # --------------------------------------------------------------- chart 1 ----
 def speed_by_configuration():
     rows = [r for r in read("configs/production-configurations.csv") if num(r["c1_total_tokps"])]
-    sv = SVG(1010, 470)
+    sv = SVG(1010, 504)
     y0 = sv.head(
         "Decode throughput by production configuration",
         "12 short English code prompts (hizset-v2), realistic not synthetic. TP=3 + expert parallelism, EXL3 4bpw, KV fp8, DFlash2 k=7,",
-        "gpu-memory-utilization 0.80, temperature 0, reasoning effort low. Configurations 1-8 serve a routed-experts-only checkpoint;",
-        "configuration 9 serves a full-scope one. Source: results/configs/production-configurations.csv. All 5 September 2026.")
+        "temperature 0, reasoning effort low. gpu-memory-utilization is 0.80 through configuration 9, then 0.83 / 0.87 / 0.88 - the memory",
+        "rungs 10, 11 and 12 climbed. Configurations 1-8 serve a routed-experts-only checkpoint, 9 onwards a full-scope one.",
+        "Source: results/configs/production-configurations.csv. 5-6 September 2026.")
     sv.legend(20, y0 + 16, [("aggregate tok/s at C8", GREEN), ("aggregate tok/s at C1", BLUE)])
 
     top, bot, left, right = y0 + 34, 392, 62, 988
@@ -136,26 +137,33 @@ def speed_by_configuration():
 
     sv.text(20, 428, "Configuration 9 is the only step that changed the checkpoint rather than a flag, an image or the fabric, and it is the largest single move here:",
             11.5, SUB)
-    sv.text(20, 444, "+22.9 % at C1 and +12.5 % at C8 against configuration 8. Draft acceptance is unchanged once pooled by draft token (the 2.4-point gap first published was a harness artefact); the cost is a second patch tree.",
+    sv.text(20, 444, "+22.9 % at C1 and +12.5 % at C8 against configuration 8. Draft acceptance is unchanged once pooled by draft token (the 2.4-point gap first",
             11.5, SUB)
-    sv.text(20, 460, "Image tag under each pair is the cuda-exl3 commit that configuration was built from.", 11.5, SUB)
+    sv.text(20, 460, "published was a harness artefact); the cost is a second patch tree.", 11.5, SUB)
+    sv.text(20, 476, "Configurations 10, 11 and 12 are memory work, not speed work: they buy KV pool (5.62M -> 6.38M -> 7.04M) with every level inside its band.",
+            11.5, SUB)
+    sv.text(20, 492, "Image tag under each pair is the cuda-exl3 commit that configuration was built from. The KV chart is where 10, 11 and 12 are read.", 11.5, SUB)
     sv.save("speed-by-configuration.svg")
 
 # --------------------------------------------------------------- chart 2 ----
 def kv_pool_progression():
     want = [
-        ("TP=2, DFlash2 k=7,\ndraft page 16", "825000", SLATE),
-        ("prod 1\nbc0e0f6, MNBT 4096", "1627170", SLATE),
-        ("prod 2\nf4987cf, MNBT 2048", "2428769", BLUE),
+        ("TP=2 DFlash2\nk=7, page 16", "825000", SLATE),
+        ("prod 1\nbc0e0f6\nMNBT 4096", "1627170", SLATE),
+        ("prod 2\nf4987cf\nMNBT 2048", "2428769", BLUE),
         ("prod 3\ndraft page 256", "4413223", BLUE),
-        ("prod 4\nfast-boot sidecar", "4468319", BLUE),
-        ("prod 6\ndual link + PTR_CUDA", "4449035", BLUE),
-        ("prod 7\nfp8 draft cache", "4699724", BLUE),
+        ("prod 4\nfast-boot\nsidecar", "4468319", BLUE),
+        ("prod 6\ndual link +\nPTR_CUDA", "4449035", BLUE),
+        ("prod 7\nfp8 draft\ncache", "4699724", BLUE),
         ("prod 8\nimage 62f53e6", "4696969", BLUE),
-        ("prod 9\nfull-scope checkpoint", "5165289", GREEN),
-        ("0.85 rung\nREJECTED on free RAM", "5256198", RED),
+        ("prod 9\nfull-scope\ncheckpoint", "5165289", BLUE),
+        ("0.85 on prod 3\nrejected, then\nretracted", "5256198", SLATE),
+        ("prod 10\n0.83 rung", "5619834", BLUE),
+        ("prod 11\n0.87 +\nsm_12x set", "6382920", BLUE),
+        ("prod 12\n0.88 +\nindexer bound", "7041322", GREEN),
+        ("0.90 rung\nREJECTED on\nswap traffic", "6870523", RED),
     ]
-    sv = SVG(940, 480)
+    sv = SVG(1180, 498)
     y0 = sv.head(
         "KV pool by configuration, all at gpu-memory-utilization 0.80 unless marked",
         "Tokens in the pool, read from the engine's own 'GPU KV cache size' line on a load boot with a settled memory baseline.",
@@ -164,7 +172,7 @@ def kv_pool_progression():
     sv.legend(20, y0 + 16, [("in production", BLUE), ("current production", GREEN),
                             ("superseded", SLATE), ("measured and rejected", RED)])
 
-    top, bot, left, right = y0 + 36, 388, 66, 866
+    top, bot, left, right = y0 + 36, 388, 66, 1106
     vals = [num(v) for _, v, _ in want]
     ymax, step = nice_max(max(vals))
     def Y(v):
@@ -186,10 +194,11 @@ def kv_pool_progression():
         for j, part in enumerate(label.split("\n")):
             sv.text(cx, bot + 16 + j * 12, part, 9.5, INK if j == 0 else SUB, "middle")
 
-    sv.text(20, 428, "The 0.85 rung is the tallest bar and it is not in production: at 0.85 the head node had 1.9 GiB of free host RAM and 1.6 GB of swap in use.",
+    sv.text(20, 446, "The grey 0.85 bar was published as a rejected rung, on free host RAM against a 4 GiB rule. That ruler was wrong and the rejection is retracted (docs/11 section 2.4):",
             11.5, SUB)
-    sv.text(20, 444, "On a unified-memory machine free host RAM is the safety margin, and the rule is 4 GiB. A pool you cannot serve from is not a pool.", 11.5, SUB)
-    sv.text(20, 460, "Production 9 gained its 10 % without moving the fraction at all: a full-scope checkpoint consumes 3.4 GiB less per node.", 11.5, SUB)
+    sv.text(20, 462, "the 6 September ladder re-climbed it against SWAP TRAFFIC UNDER LOAD instead - 0.85, 0.87 and 0.88 all pass, and 0.90 is the rejected rung, 1,519 MiB out and 143 MiB back in.",
+            11.5, SUB)
+    sv.text(20, 478, "Production 12 is 0.88 plus the sparse-indexer workspace bound: 7,041,322 tokens, 4.3x production 1's pool. The 0.90 bar is measured and must not be quoted as an achievable pool.", 11.5, SUB)
     sv.save("kv-pool-progression.svg")
 
 # --------------------------------------------------------------- chart 3 ----

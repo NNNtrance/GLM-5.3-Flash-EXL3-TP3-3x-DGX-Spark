@@ -10,10 +10,17 @@ elsewhere.
 
 ## 1. Retracted
 
+**Thirty-seven retractions.** That is the number this repository quotes everywhere, and this is what
+it counts: the **32 rows** of the audit table in §1.9, plus the **five** withdrawn findings of §1 that
+are not rows of that table — §1.5, the first bullet of §1.8, §1.11, §1.12 and §1.13. A retracted
+*correction* is a retraction in its own right, which is why §1.12 and §1.13 are counted rather than
+folded into the rows they correct. The other numbered subsections are the long-form accounts of rows
+that are already in the table and are not counted twice.
+
 Seven things we wrote down as findings and later measured properly, plus two smaller ones, plus the
 step-time breakdown that a real profiler run corrected in three places (§1.10), plus a kernel ratio
 withdrawn the same night it was published (§1.11), plus a full audit of every claim of ours that a
-later measurement overturned (§1.9 — **32 of them**, as of the 5 September pass), plus a CUDA-graph
+later measurement overturned (§1.9 — **32 rows**, as of the 5 September pass), plus a CUDA-graph
 reason that was right about the fact and wrong about the cause (§1.12), plus a failure mode we had
 published upstream and someone else corrected (§1.13). Each was published — in a report, an upstream
 issue, or both — before it was corrected. Two of them (§1.6 and §1.7) are the same number, corrected
@@ -202,7 +209,7 @@ the mistakes is visible in one place `[retracted]`.
 | 31 | Full scope is "+9.5 % aggregate / +25 % per stream" against a control C1 of "54.7 / 54.3" | Transcription, not measurement: 54.7 is the control's **per-stream** median and 54.3 its round-3 per-stream value; the aggregate median is **47.40**. Like for like it is **+26.4 % aggregate, +24.3 % per stream**. Posted upstream in the wrong form | [10](10-results-and-roofline.md) §2.2 |
 | 32 | A full-scope checkpoint is ~10 GiB **heavier** per node, so the TP=3 pool would fall 4.70 M → ~3.4 M, −27 %, and the 1M-context claim was at risk | **Not reproduced.** At TP=3 it is **3.4 GiB lighter** and the pool is **10 % larger**. The TP=2 pair was confounded — different checkpoints *and* different `max_model_len`, on an arm whose own report showed free KV scaling with `max_model_len`. Recorded as not reproduced rather than explained: the mechanism was never isolated | §2.22, [13](13-full-scope-checkpoint.md) §6.2, §7.5 |
 
-Read the shape rather than the rows. **Seven of the thirty-two are a ruler we quoted instead of
+Read the shape rather than the rows. **Seven of the thirty-two rows are a ruler we quoted instead of
 measured** (1, 2, 3, 4, 15, 25, and the roofline percentages that followed). **Six are a single pair
 of sweeps, a single probe, or a confounded pair treated as a result** (9, 10, 16, 19, 30, 32). **Three are an arithmetic
 model that a bench refuted** (5, 6, 24). **Three are a model-free measurement carried onto the
@@ -1371,7 +1378,8 @@ the same: #49547 (FlashInfer's *native* decode path genuinely capped at single-t
 +16 % on GB10 — a different code path from XQA), #53030 (PIECEWISE + spec-decode silently rejects every
 draft, which is why `cudagraph_mode=PIECEWISE` is not a workaround), and #40969 (GB10 hang with
 `FULL_AND_PIECEWISE` + chunked prefill on DeepSeek-V4-Flash — the risk on the day the gate is fixed,
-because TP=3 + expert parallel + graphs has never run here; TP=2 runs that mode for hours without it).
+because TP=3 + expert parallel + graphs ran a full battery on 6 September without a hang, see §2.29;
+TP=2 runs that mode for hours).
 
 **What it is worth.** Two independent derivations ([10](10-results-and-roofline.md) §5.8's gap census
 on production 7, and the production-9 launch count of 2,738 kernels/step) put the ceiling at
@@ -1600,7 +1608,7 @@ measured here `[not tested]`.
   "stranded" memory off it and were about to over-commit the head node by exactly the amount that had
   already produced a swapping boot (§2.3). Nothing about the number was a lie; we simply never asked
   what it measured.
-- **Two of the twenty-five retractions in §1.9 are us re-opening something we had already closed and
+- **Two of the thirty-two rows of §1.9 are us re-opening something we had already closed and
   measured.** `NCCL_BUFFSIZE` was listed as an open lever twelve hours after it had been eliminated,
   because the elimination lived in one report and the candidate list was written from another. The
   fix is not diligence, it is that a closed item has to be closed **in the place where the next

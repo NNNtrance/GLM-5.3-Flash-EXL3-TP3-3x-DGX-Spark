@@ -544,7 +544,12 @@ not; we do not make one.
 
 One behavioural note worth recording: at three ranks the fp8 draft cache pushed the drafter onto a
 FlashInfer path and **CUDA graphs stopped capturing**. At two ranks they capture normally — 19
-PIECEWISE and 8 FULL graphs in the boot log of both candidates `[measured-here]`.
+PIECEWISE and 8 FULL graphs in the boot log of both candidates `[measured-here]`. The asymmetry is
+not FlashInfer's capability but its support gate: it divides the *target's* per-rank heads by the
+*draft's* KV heads — 32 % 4 = 0 here, 22 % 3 = 1 at three ranks — while the kernel it actually runs
+(XQA) is the same on both. Filed upstream as [vllm#55581](https://github.com/vllm-project/vllm/issues/55581) and priced in
+[11](11-open-issues.md) §2.29. **When per-stream speed is compared across the two tracks, this is a
+≤2 % term in TP=2's favour** `[estimate]`, and the 1.10 GiB graph pool is a term against its KV.
 
 ### 5.4 Both cables of the pair, measured
 

@@ -119,6 +119,13 @@ On the NVFP4 sibling stack the CUDA-graph estimator was a **3.9 GiB** item and t
 real give-back. **On this stack it charges nothing**, so that lever does not exist here — do not carry
 it over ([10](10-results-and-roofline.md) §5.8).
 
+**Why it is zero, and what it would cost to make it non-zero (6 September).** The `NONE` comes from a
+wrong declaration, not from a kernel limit — FlashInfer's support gate divides the target's 22 heads
+by the draft's 3 KV heads ([11](11-open-issues.md) §2.29, [vllm#55581](https://github.com/vllm-project/vllm/issues/55581)). If the gate were fixed the graph
+pool would come *out of this ledger*: the two-node arrangement of the same image charges **1.10 GiB**
+per rank for it `[measured-here]` and the profiler's estimator reserves up to 2.64 GiB — at three ranks
+**−2 to −5 % of the KV pool** for a single-stream gain bounded at 1.2–2.3 % `[estimate]`. Left off.
+
 ### 2.4 The "driver takes 14.2 GiB" figure is stale by about 10 GiB
 
 Measured two ways on the same day:

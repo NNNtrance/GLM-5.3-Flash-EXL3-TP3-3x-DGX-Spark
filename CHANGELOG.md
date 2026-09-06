@@ -11,6 +11,33 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — CUDA graphs at three ranks are off because of a wrong declaration, not a kernel limit; filed upstream as vllm#55581, and left off
+
+**No configuration changed.** The item the owner queued — "what did eager cost us?" — was answered by
+reading code rather than by a boot, and the answer corrects three pages. Since production 7 every
+TP=3 boot resolves `cudagraph_mode=NONE`, and this repository said that was because FlashInfer cannot
+capture an 8-token verify batch. It can. FlashInfer's `get_cudagraph_support()` divides the *target*
+model's per-rank query heads (22 at TP=3) by the *draft* group's KV heads (3) and, on the remainder,
+declares `UNIFORM_SINGLE_TOKEN_DECODE`; the builder that actually runs uses the draft's own 12 heads
+(12 % 3 = 0), passes the same test, and serves on the XQA decode kernel — `decode_backend=xqa` is in
+the same boot log. The two-node arrangement of the same image, where the division is 32 % 4 = 0,
+captures graphs (`Graph capturing finished in 11 secs, took 1.10 GiB`). Filed as
+[vllm-project/vllm#55581](https://github.com/vllm-project/vllm/issues/55581) `[measured-here]`.
+
+**Priced, and left off.** The ceiling is +1.2–2.3 % single-stream and +0.5–0.8 % at C8 — inside the
+bands we grade in — and the graph pool is 1.1–2.6 GiB per rank out of the KV budget, −2 to −5 % of
+the pool; the only env-only way to get graphs back (bf16 draft KV) costs −6.5 to −9.5 %. A fix on our
+side would be a new patch file and therefore a sidecar re-dump. The three-arm A/B that would settle
+the price is designed and listed as [HELP-WANTED](HELP-WANTED.md) §11.
+
+**Corrected:** [docs/11](docs/11-open-issues.md) §1.9 row 8 — "the 36/9 drafter sidecar removed the
+obstacle" — was wrong and is retracted as §1.12; the full item is §2.29. [docs/10](docs/10-results-and-roofline.md)
+§5.8, [docs/14](docs/14-troubleshooting.md) §7.7, [docs/15](docs/15-tp2-track.md) §5.3 and
+[docs/17](docs/17-memory-ledger.md) §2.3 carry the correction, and the TP=2/TP=3 comparison now names
+the ≤2 % graph term in TP=2's favour. Both env examples say what `ENFORCE_EAGER=0` does and does not do.
+
+---
+
 ## 2026-09-06 — The audit page grades against production 12, and the free-RAM floor leaves the script
 
 **`audit/` had drifted one configuration behind the cluster.** Since 6 September its §1 said

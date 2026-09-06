@@ -329,6 +329,11 @@ offered upstream with its description in `patches/kernel/0003-PR-DESCRIPTION.md`
   three-way merge onto the image's own vLLM tree rather than hand-copied
   ([docs/04](docs/04-dflash2-port.md)).
 - **Licence:** **Apache-2.0**, as above.
+- **Reported upstream by us (6 September 2026):** [vllm-project/vllm#55581](https://github.com/vllm-project/vllm/issues/55581) —
+  FlashInfer's `get_cudagraph_support()` checks the *target* model's head count against the *draft*
+  group's KV heads, which turns CUDA graphs off at TP=3 while the same image captures them at TP=2
+  ([docs/11](docs/11-open-issues.md) §2.29). No fix merged at the time of writing; we carry no patch
+  for it, by choice.
 
 ### `autoscriptlabs/nccl-mesh-plugin` — the fabric transport
 

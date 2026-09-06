@@ -15,8 +15,9 @@ image `exl3-zeus:62f53e6`, KV `fp8`, DFlash2 draft k=7, `--block-size 256`,
 `NCCL_MESH_LINKS_PER_PEER=0 NCCL_MESH_PTR_CUDA=1 NCCL_MESH_FLUSH=1`, temperature 0, **reasoning
 effort `low`**, 5 September 2026. Production configuration 7 adds `HAREM_DRAFT_KV_DTYPE=fp8` and the
 launcher's memory settle gate; production 8 moves the image to `62f53e6` and changes nothing else.
-CUDA graphs are **off** on both — not by `--enforce-eager`, but because spec-decode plus the
-FlashInfer backend cannot capture an 8-token verify batch (§5.8) — and it costs less than the boot log
+CUDA graphs are **off** on both — not by `--enforce-eager`, but because FlashInfer's support gate *declares* the
+drafter's group unable to capture an 8-token verify batch (§5.8; the declaration is wrong — it divides the target's
+head count by the draft's — and is filed upstream as [vllm#55581](https://github.com/vllm-project/vllm/issues/55581)) — and it costs less than the boot log
 suggests. Rows that predate production 7 are labelled in §2. Speed on this configuration is the **median of three sweep rounds**
 — the persisted tuner cache is what makes three enough ([09](09-measurement-protocol.md) §1,
 [12](12-tuner-cache.md)); the older arms in §2 are five-round medians with two discarded. Raw tables
@@ -1011,6 +1012,20 @@ are eleven sequentially dependent layers) and replicating the drafter costs more
 dense GEMM is already 8.32 ms at C1). Overlap is the only lever, and overlap is 0.014 ms.
 
 ---
+
+**Correction, 6 September — the declaration is wrong, and the kernel is not the limit** `[measured-here]`.
+FlashInfer's `get_cudagraph_support()` decides the level by `num_qo_heads % num_kv_heads == 0`, and it
+takes `num_qo_heads` from the **target** model (22 per rank at TP=3) while `num_kv_heads` belongs to the
+group being asked about — the **drafter's** (3 per rank). 22 % 3 = 1, so it declares
+`UNIFORM_SINGLE_TOKEN_DECODE`. The builder that actually runs takes its head count from the group's own
+layers (12 per rank; 12 % 3 = 0), passes the same test, and selects the XQA decode kernel —
+`decode_backend=xqa` sits three lines above the warning in the same boot log. The identical image at
+TP=2 (32 % 4 = 0) captures graphs: `Graph capturing finished in 11 secs, took 1.10 GiB`. So the
+paragraph above is right about *what* the engine does and wrong about *why*: FULL capture is not
+impossible on this drafter, it is mis-declared. Filed upstream as [vllm#55581](https://github.com/vllm-project/vllm/issues/55581); the arithmetic, the price of
+turning graphs back on (a graph pool of 1.1–2.6 GiB per rank, −2 to −5 % of KV, for a ceiling of
++1.2–2.3 % single-stream) and the A/B that would settle it are in [11](11-open-issues.md) §2.29. We
+leave them off.
 
 ## 6. Ranked targets, and who owns them
 

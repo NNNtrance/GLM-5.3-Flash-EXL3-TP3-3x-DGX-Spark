@@ -1011,7 +1011,7 @@ cache so N ranks do not race it. Default unset → upstream behaviour byte for b
 
 ### 7.7 CUDA graphs are off, and the log names the reason
 
-**Track:** both — spec-decode against FlashInfer's cudagraph support level; no rank term.
+**Track:** TP=3 — the rank term is the whole cause (below). TP=2 captures graphs on the same image.
 
 ```
 CUDAGraphMode.FULL_AND_PIECEWISE is not supported with spec-decode for attention backend
@@ -1025,9 +1025,19 @@ FlashInfer declares `UNIFORM_SINGLE_TOKEN_DECODE`, and the drafter is on FlashIn
 cache is fp8** — which is production 7's own pool win. **It is not `--enforce-eager` that turns graphs
 off.**
 
+**Why it declares that, and why only at three ranks (6 September).** FlashInfer's
+`get_cudagraph_support()` divides the *target* model's per-rank query heads by the *draft* group's KV
+heads — 22 % 3 = 1 at TP=3, 32 % 4 = 0 at TP=2 — while the builder that actually runs uses the draft's
+own 12 heads (12 % 3 = 0) and selects the XQA decode kernel: `decode_backend=xqa` is in the same boot
+log, three lines above the warning. The declaration is wrong, the kernel is not; filed upstream as
+[vllm#55581](https://github.com/vllm-project/vllm/issues/55581). At two ranks the same image prints `Graph capturing finished in 11 secs, took 1.10 GiB`.
+
 **Fix: none taken.** Three routes exist and all cost something. Returning to bf16 draft KV has
 already been tried and read the same tok/s, and costs 5.6 % of pool. The whole lever is worth
-1.4–1.9 ms, **+1.5–2.1 %**. PIECEWISE also silently disables spec-decode (vLLM #53030).
+1.4–1.9 ms, **+1.5–2.1 %**. PIECEWISE also silently disables spec-decode (vLLM #53030). The upstream
+fix is a one-parameter change to the gate; on our side it would be a new patch file, which re-dumps
+the fast-load sidecar ([08](08-fast-boot.md)). Priced, with the A/B that would settle it, in
+[11](11-open-issues.md) §2.29.
 
 ### 7.8 Full scope is a **prefill regression** on the dense path
 

@@ -492,6 +492,34 @@ repository should be quoted as a max-effort number.
 
 ---
 
+## 11. CUDA graphs at three ranks — off because of a wrong declaration; the one-hour A/B nobody has run
+
+**Effort: nothing, if you only want the finding — it is filed. One engine hour on a three-node
+cluster, if you want the price.**
+
+At TP=3 this stack serves with `cudagraph_mode=NONE`, and the reason is not the one we published
+until 6 September. FlashInfer's `get_cudagraph_support()` divides the *target* model's per-rank query
+heads (22) by the *draft* group's KV heads (3) and, finding a remainder, declares the drafter unable
+to capture the 8-token verify batch — while the builder that actually runs uses the draft's own 12
+heads, passes the same test, and serves on the XQA kernel the gate says cannot be graphed. At two
+ranks the division is 32 % 4 = 0 and the same image captures graphs. [docs/11](docs/11-open-issues.md)
+§2.29 has the arithmetic; the report is ours:
+
+| | |
+|---|---|
+| Issue | [vllm-project/vllm#55581](https://github.com/vllm-project/vllm/issues/55581) — the gate uses the wrong model's head count |
+| Fix | one parameter: derive the head count from the group's own layers, as the builder does. Offered in the issue; no PR at the time of writing |
+| What we did with it | **nothing** — the ceiling is +1.2–2.3 % single-stream (inside our ±4 % band) and the graph pool is 1.1–2.6 GiB per rank out of KV |
+
+**What would settle the price** `[not tested]`: three env-only arms on the production-12 tree —
+**A** production 12, **B** = A without `HAREM_DRAFT_KV_DTYPE=fp8` (drafter → FlashAttention → graphs
+on), **C** = B + `ENFORCE_EAGER=1`. B − C is the graph lever at equal KV geometry; A − C is the fp8
+draft cache. `scripts/ab-quick2-full.sh` per arm, cold + warm gates and the tool-call gate mandatory
+(a bad capture shows up as acceptance or gate failures, not as an error), about 17 minutes an arm.
+If B − C is under +2 % at C1 the item closes without anyone writing the patch. Expect it to be — and
+say so if a three-round median cannot resolve it, because that is the finding too. A fix on our side
+would be a new patch file, which re-dumps the fast-load sidecar ([docs/08](docs/08-fast-boot.md)).
+
 ## What we would rather you did not send
 
 Repeated from `CONTRIBUTING.md` because it is the shortest way to save your afternoon:

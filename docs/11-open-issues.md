@@ -173,7 +173,7 @@ the mistakes is visible in one place `[retracted]`.
 | 5 | Expert-stationary scheduling is worth 14–27 % of MoE traffic | Doubling blocks per expert costs 1.11×, not 2×; the trellis stays L2-resident | §2.12 |
 | 6 | The KV-zeroing gate is worth −1.2…1.4 % of prefill | 85.5 % of those bytes are Mamba/KDA state; safe remainder **−0.19 %** | §2.13 |
 | 7 | NCCL picks `LL` at 16 MB and leaves half the link unused | Forcing LL there is **11× worse**; the tuner is not choosing it | §1.4 |
-| 8 | No CUDA graphs on this stack / the `22 % 4` head-count obstacle | That was a different image. Here graphs capture and run (PIECEWISE **and** FULL); the 36/9 drafter sidecar removed the obstacle | [tracks/tp3/env.tp3.example](../tracks/tp3/env.tp3.example) |
+| 8 | No CUDA graphs on this stack / the `22 % 4` head-count obstacle | **Our correction was itself wrong (§1.12).** Graphs captured on that boot because the draft KV was bf16 (FlashAttention, whose declaration has no head check); the 36/9 sidecar removed nothing — at three ranks it makes the gate's division 22 % 3 — and since production 7 (fp8 draft KV → FlashInfer) graphs are **off** at TP=3 and **on** at TP=2 on the same image. The gate is wrong, filed as vllm#55581 | §1.12, §2.29 |
 | 9 | One upstream build is ~10 % slower end to end | Boot-to-boot variance is 15.9 % | §1.3 |
 | 10 | Build `1699c89` costs 16 % at C1 | Single round. Over five rounds there is no loss (+1.2 %) | §1.3 |
 | 11 | Disabling flashinfer autotune saves 34 s | ~3.5 s | §1.8 |
@@ -224,6 +224,17 @@ printed**, in its own log, about its own memory. It was still a ruler, it was st
 it was still wrong.
 
 ---
+
+### 1.12 "The 36/9 drafter sidecar removed the `22 % 4` head-count obstacle"
+
+Row 8 of §1.9 corrected an earlier "no CUDA graphs on this stack" claim with that sentence. The fact
+was right for the boot it described — graphs captured — and the reason was wrong. They captured
+because the draft KV was **bf16**, which puts the drafter on FlashAttention, whose cudagraph
+declaration has no head check at all. The sidecar changed nothing about the gate: at three ranks it
+makes FlashInfer's division 22 % 3 = 1, and the moment production 7 moved the draft cache to fp8
+(FlashInfer) the graphs went off at TP=3 and stayed off — while TP=2, where the same division is
+32 % 4 = 0, captures them on the same image. §2.29 has the code and the arithmetic; the declaration
+is filed upstream as [vllm#55581](https://github.com/vllm-project/vllm/issues/55581). Retracted 6 September 2026 `[retracted]`.
 
 ## 2. Open, with a known next step
 
@@ -884,7 +895,7 @@ fix returns 57 → 59.1 tok/s. Ranked by expected value against that base
 | 1 | **Fuse the glue kernels** (717 of the boundaries sit in front of norm / elementwise / copy) | 0.6–1.0 ms (0.6–1.1 %) | 0.5–0.9 ms | `compilation mode NONE` today — torch.compile is off entirely, so nothing is fused. The blocker is that PIECEWISE silently disables spec-decode (vLLM #53030) and the drafter's own speculator declares PIECEWISE unsupported, so this is an **experiment** (compile the target model, keep `cudagraph_mode=NONE`), not a config change |
 | 2 | **De-serialise `prepare_inputs` at the step head** | 0.4–0.6 ms (0.45–0.65 %) | ~0 | **the cheapest.** The step's first 1.08 ms runs at **11.7 % GPU occupancy**: four rounds of eager `aten` ops with a pinned H2D each, then a `torch.compile` region that already operates on a deliberately *stale* confidence copy — so it has no dependency and can move into the previous step's shadow. No backend change, fp8 draft KV kept |
 | 3 | **Pinned/async the verify→draft D2H, drop the `nonzero`** | 0.15–0.25 ms | 0.20–0.30 ms | one `Memcpy DtoH (Device → Pageable)` — synchronous by definition — then `cudaStreamSynchronize` and host bookkeeping. It is the single structural gap left at C8 (8.2 % of that idle) |
-| 4 | **FULL CUDA graph for the 8-token verify batch** | 1.4–1.9 ms (1.5–2.1 %) | 1.0–1.6 ms | needs an attention backend declaring `UNIFORM_BATCH` **and** fp8 draft KV. Three routes: raise FlashInfer's fixed-`qo_len` paged-decode wrapper to `UNIFORM_BATCH` (upstream, unverified); give the drafter a Triton backend that supports fp8 KV and declares it (draft accuracy re-gated); or return to bf16 draft KV, which is ready, costs 5.6 % of pool, and **has already been tried — same 57 tok/s.** Comes *after* #1, since a graph replays whatever kernel count #1 leaves |
+| 4 | **FULL CUDA graph for the 8-token verify batch** | 1.4–1.9 ms (1.5–2.1 %) | 1.0–1.6 ms | needs an attention backend declaring `UNIFORM_BATCH` **and** fp8 draft KV. Three routes: raise FlashInfer's fixed-`qo_len` paged-decode wrapper to `UNIFORM_BATCH` (upstream, unverified); give the drafter a Triton backend that supports fp8 KV and declares it (draft accuracy re-gated); or return to bf16 draft KV, which is ready, costs 5.6 % of pool, and **has already been tried — same 57 tok/s.** Comes *after* #1, since a graph replays whatever kernel count #1 leaves. **6 Sep:** the first route is moot — the drafter already runs the graphable XQA kernel; what is wrong is FlashInfer's *declaration* (it divides the target's 22 heads by the draft's 3 KV heads), filed as [vllm#55581](https://github.com/vllm-project/vllm/issues/55581); §2.29 has the arithmetic, the price and the A/B |
 | — | draft collective overlap | up to 1.4 ms | up to 2.6 ms | not an idle item at all; it is §2.17's lever seen from the drafter's side (11 all-reduce/step at 133 µs, latency-bound, overlap measured at 0.014 ms) |
 
 1–4 do not add cleanly (1 and 4 target the same boundaries). **Realistic total: 1.0–1.5 ms/step =
@@ -1265,6 +1276,93 @@ applies — was reported upstream on 3 September, three days before we measured 
 [vllm-project/vllm#55221](https://github.com/vllm-project/vllm/issues/55221); our confirmation and
 three additions are [in that thread](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5559336290),
 and what is still open is [HELP-WANTED](../HELP-WANTED.md) §9.**
+
+---
+
+### 2.29 CUDA graphs at three ranks — off because FlashInfer's support gate does the wrong division; filed upstream, and left off
+
+**What the log says, and what it means.** Since production 7 (fp8 draft KV) every TP=3 boot prints
+
+```
+CUDAGraphMode.FULL_AND_PIECEWISE is not supported with spec-decode for attention backend
+FlashInferBackend (support: AttentionCGSupport.UNIFORM_SINGLE_TOKEN_DECODE); setting cudagraph_mode=NONE
+```
+
+and until 6 September this page, [10](10-results-and-roofline.md) §5.8 and [14](14-troubleshooting.md)
+§7.7 read that as a capability — "FlashInfer cannot capture an 8-token verify batch". It is not a
+capability. `FlashInferMetadataBuilder.get_cudagraph_support()` (`flashinfer.py:985` on our image,
+`:997` on `main` @ `52358e6e`) declares `UNIFORM_BATCH` only when `num_qo_heads % num_kv_heads == 0`,
+and it takes `num_qo_heads` from the **target** model (`model_config.get_num_attention_heads`) while
+`num_kv_heads` comes from the KV-cache group being asked about — on this engine the **drafter's**, since
+the target's attention is on cuda-exl3's custom backend and never goes near FlashInfer. The builder
+*instance* that actually runs takes its head count from the group's own layers (`flashinfer.py:759`,
+"compatible with models with non-uniform per-layer head counts"), passes the same test, and selects the
+XQA decode kernel — `decode_backend=xqa` is three lines above the warning in the same log, and the
+`Using FlashInfer for draft model non-causal attention` line that follows is only printed when that
+selection succeeded. Two functions in one file disagree, and the engine believes the wrong one
+`[measured-here]`.
+
+| per rank | TP=2 | **TP=3** |
+|---|---|---|
+| target query heads (what the gate uses) | 64/2 = 32 | 66/3 = **22** |
+| draft query heads (what the builder uses) | 32/2 = 16 | 36/3 = **12** |
+| draft KV heads (`spec.num_kv_heads`) | 8/2 = 4 | 9/3 = **3** |
+| the gate's division | 32 % 4 = 0 | **22 % 3 = 1** |
+| the builder's division | 16 % 4 = 0 | 12 % 3 = 0 |
+| declared | `UNIFORM_BATCH` | `UNIFORM_SINGLE_TOKEN_DECODE` |
+| result | `Graph capturing finished in 11 secs, took 1.10 GiB` | `cudagraph_mode=NONE`, `0.0 GiB for CUDAGraph memory` |
+
+Gates, acceptance and MMLU are identical between the two tracks ([15](15-tp2-track.md) §5.8), which
+is the other half of the evidence: the kernel the gate says cannot be graphed is the kernel serving
+both. The "22-head" history on the NVFP4 sibling was a different thing — a decode kernel computing
+wrong results at that shape; here 22 is only a number fed to a remainder.
+
+**Upstream.** [vllm#55581](https://github.com/vllm-project/vllm/issues/55581) (ours, 6 September 2026): the fix is to derive the head count from the group's own
+layers, as the builder already does — the call site holds `kv_cache_group.layer_names`. Related but not
+the same: #49547 (FlashInfer's *native* decode path genuinely capped at single-token decode, measured
++16 % on GB10 — a different code path from XQA), #53030 (PIECEWISE + spec-decode silently rejects every
+draft, which is why `cudagraph_mode=PIECEWISE` is not a workaround), and #40969 (GB10 hang with
+`FULL_AND_PIECEWISE` + chunked prefill on DeepSeek-V4-Flash — the risk on the day the gate is fixed,
+because TP=3 + expert parallel + graphs has never run here; TP=2 runs that mode for hours without it).
+
+**What it is worth.** Two independent derivations ([10](10-results-and-roofline.md) §5.8's gap census
+on production 7, and the production-9 launch count of 2,738 kernels/step) put the ceiling at
+**+1.2–2.3 % single-stream, +0.5–0.8 % at C8, ≤0.5 % of prefill** `[estimate]` — every one inside the
+band we grade in (±4 % / ±3 % / ±3 %, [09](09-measurement-protocol.md) §1.2), so the gain could not be
+confirmed on our own bench even if it were real. The one graphs-on boot we have (production 6, bf16
+draft KV) read the same single-stream tok/s as its graphs-off successor, consistent with that ceiling.
+
+**What it costs.** The graph pool comes out of the KV budget. The two-node arrangement of this image
+charges **1.10 GiB** per rank for it `[measured-here]`; the memory profiler's estimator reserves up to
+**2.64 GiB** (its 0.85 → 0.8283 equivalent on that boot). At three ranks that is **−2 to −5 % of the
+pool** `[estimate]` — never measured at TP=3, because no TP=3 boot with graphs on exists since the
+fp8 draft cache. The one env-only way to get graphs back today is to drop `HAREM_DRAFT_KV_DTYPE=fp8`
+(drafter → FlashAttention → `UNIFORM_BATCH`): −4.5 % of pool for the bf16 cache, −6.5 to −9.5 % with
+the graph pool on top.
+
+| route | feasible | needs | risk | price |
+|---|---|---|---|---|
+| `cudagraph_mode=FULL_DECODE_ONLY` | **no** — `decode_mode()` is `FULL`, same gate | — | — | — |
+| `cudagraph_mode=PIECEWISE` | no | — | #53030: every draft silently rejected | — |
+| patch the gate (one anchor, `flashinfer.py:985`) | yes | a new `patch-*.py`, which **re-dumps the fast-load sidecar** ([08](08-fast-boot.md)) | medium: #40969, and EP + graphs unrun here | KV −2…−5 % |
+| draft on `TRITON_ATTN` (declares `ALWAYS`) | possible | a selector patch, full gate battery | high: never measured, numerics unknown | unknown |
+| draft KV back to bf16 | **one env line**, sidecar stays valid | nothing | low | KV −6.5…−9.5 % |
+| leave it | — | — | none | an unmeasurable 1–2 % |
+
+**The A/B that would settle it — designed, not run** `[not tested]`: three arms on the production-12
+tree, all env-only, no dump. **A** = production 12. **B** = A without `HAREM_DRAFT_KV_DTYPE=fp8`
+(graphs on). **C** = B plus `ENFORCE_EAGER=1` (same KV geometry as B, graphs off), so **B − C is the
+graph lever alone** and A − C is the fp8-draft lever. `ab-quick2-full.sh` per arm — three sweep rounds,
+TTFT, prefill, acceptance, cold + warm gates, the tool-call gate — about 17 minutes an arm, one engine
+hour with the return boot. Kill criteria: any gate short; acceptance outside 60–65 % (an approach to
+1.00 is the #53030 signature); a hang or `EngineDeadError` (#40969); swap-in under load; and **B − C
+under +2 % at C1 closes the item** without the patch being written. Listed in
+[HELP-WANTED](../HELP-WANTED.md) §11 for a cluster with an hour to spare.
+
+**Verdict, 6 September: left off.** The declaration is filed; the price is measurable and the gain is
+not; a fix on our side costs a sidecar re-dump for a number we could not grade. What changed on this
+page is the reason — §1.9 row 8's "the sidecar removed the obstacle" was wrong, and is retracted in
+§1.12.
 
 ---
 

@@ -1,5 +1,7 @@
 # 16 — Comparison with other published recipes
 
+**Applies to: both tracks.** §3 is two nodes, §4 is three, and §4.4 is four.
+
 A dozen public recipes serve GLM-5.3-Flash as an EXL3 checkpoint on DGX Spark hardware. This page puts
 what they publish beside what we measured, at the matching node count, **without touching either
 side's numbers**.

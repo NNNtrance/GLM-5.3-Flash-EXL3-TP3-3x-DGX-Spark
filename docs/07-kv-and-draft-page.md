@@ -1,5 +1,8 @@
 # 07 — The KV pool and the draft page
 
+**Applies to: both tracks.** The draft page defect is measured at both rank counts, and it is worse
+at two than at three.
+
 The KV pool went from 825,000 tokens at TP=2 to **4,699,724** at TP=3, and most of that came from two
 changes that cost no memory at all — a per-request block counter, and then the drafter's own cache
 precision. This page is why the pool was small, why the obvious

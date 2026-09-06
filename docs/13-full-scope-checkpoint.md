@@ -1,5 +1,8 @@
 # 13 — The full-scope checkpoint: five loader layers, a padded load, and the dense stage measured
 
+**Applies to: both tracks.** §4–§6 are the TP=2 dress rehearsal; §7, the padded-load port, applies
+only at three ranks.
+
 **This is the production recipe.** Since 5 September 2026, 18:40 local, this stack serves
 `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw at TP=3 with expert parallelism — production
 configuration 9.

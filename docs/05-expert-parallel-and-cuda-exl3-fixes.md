@@ -1,5 +1,8 @@
 # 05 — Expert parallelism and the cuda-exl3 fixes
 
+**Applies to: both tracks.** Expert parallelism is mandatory at three ranks and optional at two,
+where it is never measured `[not tested]`; §3.5, the GB10 top-k overlay, applies at any node count.
+
 Expert parallelism is not optional here: at TP=3 the EXL3 trellis cannot be sliced, so the experts
 must be distributed whole ([03](03-tp3-padding-and-sidecars.md) §1). When we first turned it on, the
 three-node arrangement was **8–29 % slower than two nodes**. This page is what that turned out to be.

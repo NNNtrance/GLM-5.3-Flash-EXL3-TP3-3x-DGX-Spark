@@ -1,5 +1,8 @@
 # 02 — Building the engine image
 
+**Applies to: both tracks.** TP=2 needs no image newer than the loader patch; TP=3 with the
+full-scope checkpoint needs the padded-load path.
+
 This page builds the container that serves the model: **two layers on one pinned base image**,
 built independently on all three nodes ([00](00-hardware-and-os.md)) from one source tarball.
 Nothing here starts an engine; serving flags are in [03](03-tp3-padding-and-sidecars.md) and

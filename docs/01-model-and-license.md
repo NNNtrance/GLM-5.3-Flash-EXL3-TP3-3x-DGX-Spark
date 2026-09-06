@@ -1,5 +1,7 @@
 # 01 — Model and licence
 
+**Applies to: both tracks.** The same two checkpoints and the same two licences at either rank count.
+
 Which checkpoints this recipe serves, why those, what their licences actually say, and the two
 structural facts about EXL3 weights that dictate every parallelism decision downstream.
 

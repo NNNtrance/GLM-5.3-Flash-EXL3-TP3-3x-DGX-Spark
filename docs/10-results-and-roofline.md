@@ -1,5 +1,8 @@
 # 10 — Results and roofline
 
+**Applies to: TP=3.** The tables are the three-node ones. The two rulers, and the method that
+measured them rather than quoting them, apply at any node count.
+
 The full tables, the progression that produced them, and how close any of it is to what the hardware
 can physically do.
 

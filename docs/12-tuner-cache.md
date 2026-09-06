@@ -1,5 +1,7 @@
 # 12 — The MLA tuner cache, and the measurement tax it was charging
 
+**Applies to: both tracks.** It decides your sweep protocol at either rank count.
+
 The kernel that decodes attention on this stack picks its launch configuration by trying candidates
 at first use and keeping the winner. The winner was kept in a **process-local map**, so every boot
 re-tuned from nothing, and every batch shape the engine had not seen yet paid for a tune *while

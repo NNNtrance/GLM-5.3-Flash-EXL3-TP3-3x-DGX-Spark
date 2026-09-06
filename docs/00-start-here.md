@@ -1,5 +1,7 @@
 # 00 — Start here: how many nodes do you have?
 
+**Applies to: both tracks**, and to anyone holding one node or four.
+
 This repository documents two working tracks over the same stack, plus a large amount of work that
 belongs to neither. This page routes you to the right one in about a minute, and then says which of
 the other pages apply to you.

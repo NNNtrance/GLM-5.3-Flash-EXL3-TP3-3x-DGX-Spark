@@ -1,5 +1,8 @@
 # 04 — The DFlash2 port
 
+**Applies to: both tracks.** The drafter's GQA divides by two, so the 32/8 → 36/9 pad described here
+is a TP=3 detail inside a shared page.
+
 The base image ships **DFlash v1**. It had never run a DFlash2 drafter, and — as the first boot proved — it
 could not have run DFlash v1 either, because the *target* half of the interface was missing from its GLM-5.3
 model file. This page is the whole port: the upstream delta, the two gaps that delta did not cover, our

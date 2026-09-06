@@ -1,5 +1,8 @@
 # 06 — The NCCL mesh: the cliff, the half of the fabric nobody was using, and the wall behind it
 
+**Applies to: both tracks.** The channel cap is a plugin property, not a peer-count property. With
+one cable per pair, set `NCCL_MESH_LINKS_PER_PEER=1` and `patches/kernel/0005` becomes a no-op.
+
 The mesh plugin is what makes a switchless three-node triangle work at all ([00](00-hardware-and-os.md)). This page
 is two findings against it, three months of hardware apart in feel and one day apart in fact.
 

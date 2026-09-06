@@ -1,5 +1,8 @@
 # 08 — Fast boot: 618 s to 274 s, and then to 251 s
 
+**Applies to: both tracks.** The sidecar is per rank, so two ranks means two sidecars; we never built
+one at TP=2 `[not tested]`.
+
 Cold boot on this stack — container start to `Application startup complete` — took **617.9 s**. It now takes **251 s** on
 production configuration 9, and it took **273.6 s** on the arm this page itemises; the weight-loading phase inside it went from
 **426.3 s to 67.2 s** (6.3×), and to **57.9 s** once the checkpoint underneath it got smaller (§8.1). Speed, quality and the KV pool did not pay for it:

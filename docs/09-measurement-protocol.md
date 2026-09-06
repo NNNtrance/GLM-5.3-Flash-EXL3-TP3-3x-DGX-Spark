@@ -1,5 +1,7 @@
 # 09 — Measurement protocol
 
+**Applies to: both tracks.** If you read one page of this repository, read this one.
+
 Four different ways to measure a lie on this stack, and the protocol that stops each one. Every
 retraction in [11](11-open-issues.md) is a case of one of these, and every one of them was published
 before it was caught.

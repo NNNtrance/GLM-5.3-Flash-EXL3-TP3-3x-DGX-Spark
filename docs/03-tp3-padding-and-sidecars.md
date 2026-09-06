@@ -1,5 +1,8 @@
 # 03 — TP=3 padding and sidecars
 
+**Applies to: TP=3 only.** All five shapes divide by two and leave whole 128-blocks, so there is
+nothing to pad at two ranks — [15](15-tp2-track.md) §1.1.
+
 GLM-5.3-Flash has 64 attention heads, 64 KDA heads, a 154,880-token vocabulary, a 2,048-wide shared
 expert and 2,048-wide routed experts. None of those five numbers divides by three. This page is how
 the model runs on three nodes anyway: what gets padded, what must never be padded, where the padding

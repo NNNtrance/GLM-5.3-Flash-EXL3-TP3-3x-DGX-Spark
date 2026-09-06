@@ -1,5 +1,7 @@
 # 11 — Open issues, retractions, and what we never ran
 
+**Applies to: both tracks.** The retractions are the whole stack's.
+
 This stack is not finished. This page is the honest edge of it: what is unresolved, what we published
 and then withdrew, and what we simply have not measured. Nothing here is hidden in a footnote
 elsewhere.

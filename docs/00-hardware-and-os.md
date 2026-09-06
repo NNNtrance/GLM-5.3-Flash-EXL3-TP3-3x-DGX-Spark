@@ -1,5 +1,8 @@
 # 00 — Hardware, firmware and OS: the complete environment record
 
+**Applies to: both tracks.** The fabric sections describe a three-cable ring; two nodes are one pair
+of it.
+
 Everything below the container. Three DGX Spark nodes, their firmware, the direct-attached fabric
 and how it is actually wired, the exact software versions this stack was measured on, every
 system-level change we made, and — just as important — the system-level changes we deliberately did

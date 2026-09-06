@@ -197,6 +197,16 @@ longer rather than ours:
   because the number was impossible — the same failure our own model-free MoE bench had just
   committed at small M, on the same day, from the other direction. **Synthetic benches flatter small
   inputs**; that lesson is worth more than either measurement.
+  **He then closed the same item a second time, against his own earlier answer, on 6 September.** We
+  sent the selection statistics he had asked for — median 2,049 selected keys per query row and a
+  median adjacent-row overlap of 0.9258, about 152 keys turning over per row — which showed this
+  configuration sitting roughly 76× away from the low-turnover arm rather than between his two arms.
+  He built a third arm calibrated to that turnover, swept context, and published `5fd7299`,
+  *"Correct the MLA prefill ceiling: at production overlap there is no gap"*: at 262K context the
+  production-pattern arm is within **1.6 %** of the fully cache-resident arm (2,422.8 against
+  2,385.8 µs) while the independent arm needs 3,474 µs, because the live key set is the residence
+  window (~4,096 keys, ≈4.5 MiB) rather than the chunk footprint `[reported]`. **The "21–26 % overlap
+  gap" is withdrawn on his side and the item closes at zero.**
 - **A conclusion of his own, withdrawn against his own advice.** He had told us a cooperative
   (`grid.sync`) MoE stage was never worth paying for, because "inside a CUDA graph a kernel boundary
   is cheap enough". Our trace says production runs with **graphs off** — spec-decode plus FlashInfer
@@ -392,6 +402,30 @@ We vendor no files from either of these. What we took is practice and arithmetic
   a model that stays fluent and gets the answers wrong.
 - We re-derived each of those from this checkpoint's own shapes and check them at load time rather
   than trusting them ([docs/03](docs/03-tp3-padding-and-sidecars.md) §5).
+
+### `tpurtell/glm-5.3-flash-ext3-2x-rtx` — four sm_12x findings, and a ReplaySSM extension we did not take
+
+- **Licence:** **Apache-2.0**.
+- **What we took: four defect reports and the shape of their fixes**, reported to us as items 1–4 of
+  [`Zeuss5/cuda-exl3` issue #6](https://github.com/Zeuss5/cuda-exl3/issues/6) and originally found in
+  their own dual-Spark qualification. The PDL gate that turns Programmatic Dependent Launch on for
+  unqualified sm_12x parts; the uninitialised K-pool top-k buffer and its unbounded reader, which are
+  the write and the read of one array; and the indexer's Triton specialisation. **Credit for all four
+  is theirs.** Our scripts in
+  [`tracks/tp3/patches-optional/sm12/`](tracks/tp3/patches-optional/sm12/) are re-implementations
+  against our own anchors — three images, three different line numbers and, for the K-pool buffer,
+  three different site counts — and the Apache-2.0 attribution travels with them.
+- **What we measured and reported back**, so the ledger is not one-sided: no PDL race is detectable
+  on this three-node GB10 topology by a logit-divergence probe, PDL on/off is a wash on 48 SMs, item
+  4 is smaller than the issue implies (triton 3.7.1 gives an int argument three specialisation
+  classes, not one per value, and the tree's warmup already covers most of them), and the PDL gate
+  has one call site on the EXL3 side that the issue does not list
+  ([`results/kernels/sm12-stack-patches-ab.md`](results/kernels/sm12-stack-patches-ab.md)).
+- **What we did not take:** `patches/vllm-replayssm-spec.patch`, which lifts upstream vLLM's refusal
+  to run ReplaySSM alongside drafting and would take this stack's KDA state slots from 9 to 2. It
+  applies 127/127 clean to our image and is pure Python and Triton. It is not adopted, the reasons
+  are speed and an unproven fp16 replay rather than the code, and both are written down in
+  [HELP-WANTED](HELP-WANTED.md) §6.
 
 ### `NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark` — our own sibling recipe
 

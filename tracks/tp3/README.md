@@ -18,6 +18,7 @@ Two nodes instead of three: [tracks/tp2](../tp2/) and [docs/15](../../docs/15-tp
 | [`env.tp3-full.example`](env.tp3-full.example) | **The production template.** Full-scope checkpoint, `gpu-memory-utilization` 0.83, fp8 KV and fp8 draft cache, `HAREM_SW_BLOCK_SIZE=256`, `NCCL_MAX_NCHANNELS=8`. Every variable carries a one-line reason and the ones with a real cost carry the measurement that decided them |
 | [`env.tp3.example`](env.tp3.example) | The routed-experts-only template — production configurations 1 to 8, and the rollback |
 | [`patches/`](patches/) | The in-container patch tree for the full-scope checkpoint: the ten-anchor loader patch, the image gate, the sidecar generator, the prelude. [`patches/README.md`](patches/README.md) is the inventory |
+| [`patches-optional/sm12/`](patches-optional/sm12/) | **Not part of the recipe.** Three sm_12x fixes that were measured on this stack, cost nothing measurable, and were deliberately not adopted — kept here, outside the tree the prelude applies, with the knobs that gate them and the sidecar warning that copying them into the production tree costs a dump boot |
 | [`harem-exl3.service`](harem-exl3.service) | The autostart unit, installed and `enabled` on all three of our nodes |
 | [`motor-onkosul-exl3.sh`](motor-onkosul-exl3.sh) | Its preflight: seven checks, at most ten minutes of waiting |
 

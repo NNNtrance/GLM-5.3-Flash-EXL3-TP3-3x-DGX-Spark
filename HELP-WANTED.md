@@ -295,7 +295,48 @@ the engine for identical shapes, the gap is a heuristic and it is fixable at the
 
 ---
 
-## 8. The open items already written up in docs/11
+## 8. MLA prefill at production overlap — a one-bench falsification, on a 48-SM part
+
+**Effort: one tier A bench, minutes, engine down. One node is enough, and it needs no fabric.**
+Pending on our side: we will run it after the current engine work, and until then it is
+`[not tested]`.
+
+**What happened, because the item this replaces was closed at a number and is now closed at zero.**
+The `cuda-exl3` author's MLA-prefill benchmark had two arms: a *drifting* one, in which about **2**
+keys of a query row's selection turn over from the row before it, and an *independent* one, in which
+every row selects freshly. Ours was assumed to sit between them, and a **"21-26 % overlap gap, worth
+about 2 % of a prefill chunk"** was quoted on that assumption.
+
+Then we measured the selection itself. A diagnostic hook reading back the token-granular selection
+buffer in a steady 1,792-row prefill chunk gives **median 2,049 selected keys per row and a median
+adjacent-row overlap of 0.9258** over 7,168 rows `[measured-here]` —
+[`results/kernels/sm12-stack-patches-ab.md`](results/kernels/sm12-stack-patches-ab.md) §8. That is
+**about 152 keys turning over per row, roughly 76x the drifting arm**: production was two orders of
+magnitude away from the arm it was being compared against, not between the two.
+
+He built a third arm calibrated to that turnover, swept context, and **corrected his own conclusion**
+in commit **`5fd7299`**, *"Correct the MLA prefill ceiling: at production overlap there is no gap"*
+`[reported]`. At **262K context** the production-pattern arm runs within **1.6 %** of the fully
+cache-resident arm — **2,422.8 µs against 2,385.8 µs** — while the independent arm needs **3,474 µs**.
+The mechanism is that the live key set is the **residence window**, about **4,096 keys ≈ 4.5 MiB**,
+not the chunk's whole footprint, so it fits even a 24 MiB L2. **MLA prefill is compute-bound at
+production overlap; the 21-26 % gap does not exist and the item closes at zero.** The only lever left
+on that kernel is reducing the work it does, not the traffic it moves.
+
+**The falsification he proposed, which is what this item asks for.** Every number above is from his
+hardware. On a **48-SM GB10** with a 24 MiB L2, run `bench/bench_mla_prefill.py`'s **production arm
+at 262K context** and check that it lands **within a few percent of the drifting arm**. If it does,
+the closure transfers to this part. If it does not — if the production arm sits closer to the
+independent arm on a smaller machine — then the residence-window argument is part-dependent and the
+gap is real here even though it is not there, which is a result worth more than a confirmation.
+
+**Report:** the three arms' microseconds at 262K, the L2 size and SM count of the part, the
+`cuda-exl3` commit, and the context sweep either side of 262K if you have the time — the crossover,
+if there is one, is the interesting part.
+
+---
+
+## 9. The open items already written up in docs/11
 
 `docs/11-open-issues.md` §2 is "open, with a known next step", §3 is "never run", and
 `CONTRIBUTING.md` lists twelve with their reasons. Rather than repeat them, the four that would move

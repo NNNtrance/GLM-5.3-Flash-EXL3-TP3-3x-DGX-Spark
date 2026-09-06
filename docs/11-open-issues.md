@@ -1084,6 +1084,72 @@ on its own; it is worth carrying into the next arm that touches the drafter.
 
 </details>
 
+### 2.27 The four sm_12x stack patches — measured, free, and deliberately not shipped
+
+**Closed as a question, open as an option.** Four findings against this stack on sm_12x hardware
+([Zeuss5/cuda-exl3 issue #6](https://github.com/Zeuss5/cuda-exl3/issues/6), found by
+`tpurtell/glm-5.3-flash-ext3-2x-rtx`, Apache-2.0) were re-implemented against our own anchors, put
+behind runtime knobs and run as a five-arm A/B in a diagnostic image on 6 September 2026
+`[measured-here]`. Production configuration 10 was never modified and the patches were verified
+absent from the live container afterwards.
+
+**The item that mattered was item 1, the PDL gate.** vLLM's `is_arch_support_pdl()` returns
+`major >= 9`, so Programmatic Dependent Launch is on for sm_121 — a part on which it was never
+qualified — across every KDA and mHC launch site, and 34 of this model's 45 layers are KDA. The
+upstream report is of KDA recurrent-state races on exactly that path. **We could not detect one.**
+Byte identity has no power here (the fused MoE epilogue's bf16 `atomicAdd` alone puts a varying
+4.34e-3 per layer under everything), so the probe measures the run-to-run floor first: **the
+between-arm p95 came out *below* the within-arm p95** — 6.2–6.5e-02 against 7.7–8.0e-02 — with no
+prompt above K = 4 and, in the first of the two comparisons, later token divergence between arms
+than within one. On speed the gate is a wash on 48 SMs: **C1 +0.8 %, C8 +0.7 %** pooled over six
+PDL-on and three PDL-off rounds, both inside the band. The single number outside its band, C1
+per-stream decode at +5.4 %, was deleted by a repeat: one PDL-on arm read 69.75 (a nominal +10.8 %),
+the identical configuration repeated read 76.17, between the two PDL-off readings.
+
+**Items 2 and 3 are the write and the read of one array** — an uninitialised top-k buffer whose
+positive residue expands into real token indices — and they cost nothing measurable, including the
+prefill memset the preparation note had priced as "not free on this part". **Item 4 is smaller than
+the issue implies**: triton 3.7.1 gives an int argument three specialisation classes, not one per
+value, and the tree's own warmup already covers most of them, so at most one cold compile per engine
+process is at stake — and across cold, freshly booted processes we could not see it from the client
+at all.
+
+**The decision, and the reason it is not "adopt".** Items 2 and 3 are correctness-class: their value
+rests on a mechanism, not on a measurement, and **this A/B did not show that mechanism firing**. What
+it showed is that fitting the insurance costs nothing. Those are different statements. A change
+without a reason is not made to a configuration that passed a three-node reboot test, so the three
+adoptable patches sit in [`../tracks/tp3/patches-optional/sm12/`](../tracks/tp3/patches-optional/sm12/)
+and **ride with the next production change** rather than earning a boot of their own. Full tables,
+arms, floors and the two instrument caveats:
+[`../results/kernels/sm12-stack-patches-ab.md`](../results/kernels/sm12-stack-patches-ab.md).
+
+**What the campaign's instrument closed elsewhere, which is the larger result.** Arm 1 also carried a
+diagnostic hook that read back the token-granular selection buffer, producing the datum
+[issue #5](https://github.com/Zeuss5/cuda-exl3/issues/5) had asked for: **median 2,049 selected keys
+per query row and a median adjacent-row top-k overlap of 0.9258** over 7,168 rows `[measured-here]`.
+That is about **152 keys turning over per row**, roughly 76× the ~2 keys of the kernel author's
+"drifting" arm — so production did not sit between his two arms at all. He built a third arm
+calibrated to our turnover, swept context, and corrected his own conclusion in **`5fd7299`**
+(*"Correct the MLA prefill ceiling: at production overlap there is no gap"*) `[reported]`: at **262K
+context** the production-pattern arm runs within **1.6 %** of the fully cache-resident arm — 2,422.8 µs
+against 2,385.8 µs — while the independent arm needs 3,474 µs, because the live key set is the
+**residence window** (~4,096 keys, ≈4.5 MiB) rather than the chunk footprint and therefore fits even
+a 24 MiB L2. **MLA prefill is compute-bound at production overlap, and the "21–26 % overlap gap,
+about 2 % of a prefill chunk" quoted before this measurement does not exist. The item closes at
+zero**; the only lever left on that kernel is reducing its work, not its traffic. This repository
+never carried the 21–26 % figure in a document, so there is nothing here to withdraw — but it was
+live in the thread the datum was produced for, and the correction is worth more than the datum. A
+cheap falsification on a 48-SM part is [HELP-WANTED](../HELP-WANTED.md) §8 and we have **not** run it
+`[not tested]`.
+
+**Two process corrections came out of the campaign and both cost more than the result.** The
+diagnostic image had been built with only the first of the production image's two stages, so the
+DFlash2 port's files were missing and a fail-closed anchor stopped the first dump boot — the build
+note recorded the single stage without recording what it cost. And the GB10 top-k overlay is
+bind-mounted **read-only** over the file two of these patches target, so those two had to be applied
+to a host-side copy of the overlay instead of by the prelude. That exception applies to any future
+patch that lands on an overlaid file.
+
 ---
 
 ## 3. Never run

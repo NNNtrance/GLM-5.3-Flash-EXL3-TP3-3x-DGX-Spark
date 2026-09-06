@@ -1093,6 +1093,18 @@ argued about (§5.2, [11](11-open-issues.md) §2.5) `[measured-here]`.
   no traffic to remove. Worth recording is that his *first* cut used a 200k-row pool that fitted the
   card's L2 and reported a bandwidth above the DRAM ruler — caught only because the number was
   impossible. Same class of error as §5.3.1, one level down.
+  **Closed a second time, from the other end, on 6 September** `[reported]`. We finally measured the
+  selection this kernel attends to — median 2,049 keys per query row, median adjacent-row overlap
+  **0.9258**, i.e. about 152 keys turning over per row
+  ([`../results/kernels/sm12-stack-patches-ab.md`](../results/kernels/sm12-stack-patches-ab.md) §8) —
+  which placed this configuration roughly 76× away from the low-turnover arm it had been compared
+  against rather than between his two arms. He built a third arm at that turnover and corrected his
+  own conclusion in `5fd7299`: at 262K context the production-pattern arm is within **1.6 %** of the
+  fully cache-resident arm (2,422.8 against 2,385.8 µs) where the independent arm needs 3,474 µs,
+  because the live key set is the ~4,096-key residence window rather than the chunk footprint. **MLA
+  prefill is compute-bound at production overlap and the "21–26 % overlap gap ≈ 2 % of a chunk" does
+  not exist**; the only lever left is less work, not less traffic. Not reproduced on a 48-SM part yet
+  — [HELP-WANTED](../HELP-WANTED.md) §8 `[not tested]`.
 - **KDA linear attention's efficiency** `[not tested]`. Now the largest class on the list with no
   denominator: 8.1 % of prefill and 8.0 % of a C8 step, triton chunked scans, never measured against a
   ruler. It inherits the slot MLA just vacated.

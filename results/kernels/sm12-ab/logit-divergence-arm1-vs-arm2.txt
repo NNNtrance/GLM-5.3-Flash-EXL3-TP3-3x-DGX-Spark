@@ -1,0 +1,72 @@
+wrote comparison JSON to <output-dir>/ld-arm1-vs-arm2.json
+==============================================================================
+LOGIT DIVERGENCE REPORT
+==============================================================================
+model glm-5.3-flash   transport chat_completions   temp 0   seed 0   max_tokens 128   top_logprobs 5
+prompt set sha256 89873fcb5ae99cf8   reasoning_effort low   concurrency 1
+  arm1-pdl-on  run 1  2026-09-06T06:48:37.439211+00:00  run-01.json
+  arm1-pdl-on  run 2  2026-09-06T06:49:12.512428+00:00  run-02.json
+  arm2-pdl-off run 1  2026-09-06T07:07:01.448591+00:00  run-01.json
+  arm2-pdl-off run 2  2026-09-06T07:07:36.221624+00:00  run-02.json
+
+Within-arm noise floor -- arm 'arm1-pdl-on' (run 1 vs run 2)
+prompt  cat    n_pos    cmp  first_div  median|dlp|  p95|dlp|   max|dlp|   top5 max   top5 set
+------  -----  -------  ---  ---------  -----------  ---------  ---------  ---------  --------
+code1   code   128/128  128  none       2.890e-05    6.254e-02  1.501e-01  1.750e+00  20      
+code2   code   128/128  120  120        1.609e-06    2.973e-02  1.580e-01  1.562e+00  24      
+code3   code   128/128  5    5          2.343e-02    3.169e-02  3.209e-02  4.051e-01  1       
+code4   code   128/128  26   26         2.426e-05    5.301e-02  9.440e-02  5.625e-01  2       
+prose1  prose  128/128  21   21         4.223e-04    2.801e-02  1.033e-01  7.717e-01  3       
+prose2  prose  128/128  128  none       8.891e-03    1.474e-01  3.211e-01  1.813e+00  27      
+prose3  prose  128/128  85   85         8.931e-03    1.947e-01  4.907e-01  2.125e+00  22      
+prose4  prose  128/128  56   56         1.971e-03    8.242e-02  1.527e-01  9.997e-01  14      
+math1   math   128/128  50   50         6.914e-06    3.647e-02  1.404e-01  1.062e+00  17      
+math2   math   128/128  59   59         9.325e-05    5.980e-02  1.461e-01  1.250e+00  6       
+json1   json   112/112  112  none       1.192e-06    4.556e-02  2.627e-01  1.125e+00  28      
+json2   json   128/128  3    3          1.195e-02    1.722e-02  1.781e-02  1.370e-01  1       
+  pooled: n=793  median=1.467e-04  p95=8.570e-02  max=4.907e-01   (top-5 pooled p95=5.456e-01)
+
+Within-arm noise floor -- arm 'arm2-pdl-off' (run 1 vs run 2)
+prompt  cat    n_pos    cmp  first_div  median|dlp|  p95|dlp|   max|dlp|   top5 max   top5 set
+------  -----  -------  ---  ---------  -----------  ---------  ---------  ---------  --------
+code1   code   128/128  28   28         2.325e-06    1.158e-02  3.327e-02  6.249e-01  2       
+code2   code   128/128  120  120        1.252e-06    6.110e-02  1.748e-01  1.250e+00  32      
+code3   code   128/128  80   80         9.466e-04    9.080e-02  1.469e-01  8.757e-01  10      
+code4   code   128/128  128  none       5.484e-06    5.579e-02  1.747e-01  1.562e+00  15      
+prose1  prose  128/128  29   29         7.686e-04    6.934e-02  9.218e-02  1.297e+00  6       
+prose2  prose  128/128  15   15         9.471e-03    1.133e-01  2.370e-01  1.113e+00  3       
+prose3  prose  128/128  37   37         3.283e-04    2.705e-02  1.942e-01  2.125e+00  8       
+prose4  prose  128/128  64   64         4.962e-03    1.285e-01  3.895e-01  2.183e+00  11      
+math1   math   128/128  95   95         6.317e-06    6.608e-02  1.388e-01  1.375e+00  19      
+math2   math   128/128  59   59         9.319e-05    5.299e-02  1.831e-01  8.125e-01  7       
+json1   json   112/112  112  none       9.537e-07    7.556e-02  3.150e-01  1.375e+00  25      
+json2   json   128/128  3    3          9.549e-03    1.229e-01  1.355e-01  2.395e-01  0       
+  pooled: n=770  median=1.728e-05  p95=7.842e-02  max=3.895e-01   (top-5 pooled p95=5.522e-01)
+
+Between-arm -- 'arm1-pdl-on' run 1 vs 'arm2-pdl-off' run 1
+prompt  cat    n_pos    cmp  first_div  median|dlp|  p95|dlp|   max|dlp|   top5 max   top5 set  K ratio  flag
+------  -----  -------  ---  ---------  -----------  ---------  ---------  ---------  --------  -------  ----
+code1   code   128/128  128  none       2.187e-05    4.687e-02  9.761e-02  1.625e+00  16        1.2x         
+code2   code   128/128  128  none       1.788e-06    4.248e-02  2.170e-01  1.125e+00  29        2.7x         
+code3   code   128/128  5    5          1.670e-02    6.980e-02  7.727e-02  4.833e-01  1         1.0x         
+code4   code   128/128  128  none       5.543e-06    4.611e-02  2.279e-01  1.125e+00  20        2.8x         
+prose1  prose  128/128  35   35         6.668e-04    1.040e-01  1.985e-01  1.966e+00  8         2.5x         
+prose2  prose  128/128  29   29         5.274e-03    6.785e-02  2.405e-01  1.062e+00  4         3.0x         
+prose3  prose  128/128  37   37         2.125e-04    7.573e-02  1.613e-01  2.875e+00  9         2.0x         
+prose4  prose  128/128  45   45         3.230e-03    1.176e-01  1.901e-01  9.759e-01  5         2.4x         
+math1   math   128/128  50   50         3.331e-06    6.149e-02  8.733e-02  8.750e-01  9         1.1x         
+math2   math   128/128  128  none       3.219e-06    4.395e-02  1.758e-01  4.125e+00  35        2.2x         
+json1   json   112/112  112  none       1.132e-06    3.460e-02  2.875e-01  1.500e+00  19        3.6x         
+json2   json   128/128  16   16         3.134e-03    7.337e-02  7.344e-02  7.707e-01  3         0.9x         
+  pooled: n=841  median=1.155e-05  p95=6.164e-02  max=2.875e-01   (top-5 pooled p95=5.000e-01)
+
+Summary
+comparison             positions  median|dlp|  p95|dlp|   max|dlp|   earliest token divergence
+---------------------  ---------  -----------  ---------  ---------  -------------------------
+within 'arm1-pdl-on'   793        1.467e-04    8.570e-02  4.907e-01  3                        
+within 'arm2-pdl-off'  770        1.728e-05    7.842e-02  3.895e-01  3                        
+within, pooled floor   1563       4.338e-05    8.005e-02  4.907e-01  3                        
+between arms           841        1.155e-05    6.164e-02  2.875e-01  5                        
+
+VERDICT: within-arm floor p95 = 8.005e-02; between-arm max = 2.875e-01; outlier prompts: none
+         (K = 4.0; no prompt exceeded 4.0 x the floor and none diverged earlier than the within-arm minimum. Not a clearance certificate -- see the module docstring.)

@@ -11,6 +11,78 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — four sm_12x patches, measured: no race, no cost, and no reason to ship them
+
+**A five-arm A/B on four reported sm_12x defects, and the answer is "nothing moved" in every
+direction we could measure.** Production configuration 10 was never modified: the patched arms ran
+in a separate image (`exl3-zeus:e7e345e-dflash`) and a separate in-container tree, and the patches
+were verified absent from the live container file by file when the campaign ended. Full tables:
+[`results/kernels/sm12-stack-patches-ab.md`](results/kernels/sm12-stack-patches-ab.md); the three
+adoptable patches are in
+[`tracks/tp3/patches-optional/sm12/`](tracks/tp3/patches-optional/sm12/), outside the tree the
+prelude applies; narrative in [docs/11](docs/11-open-issues.md) §2.27.
+
+**Byte identity was abandoned before it cost a boot, and that is the method half of this entry.** The
+kernel author ran that experiment on his own hardware first and got 24 distinct completions out of 24
+greedy runs **in both arms** — the fused MoE epilogue's bf16 `atomicAdd` alone puts a run-to-run
+varying 4.34e-3 per layer under everything, and a TP=3 all-reduce is not bit-exact either. The
+replacement, [`bench/logit-divergence/`](bench/logit-divergence/), measures the **within-arm** floor
+first and only then looks above it: 12 fixed prompts, temperature 0, `max_tokens` 128,
+`top_logprobs` 5, concurrency 1, a per-run `cache_salt` so run 2 recomputes its prefill, and a prompt
+is an outlier only if it clears K = 4 times the pooled floor **or** diverges earlier than any
+within-arm pair did.
+
+**The PDL gate: no race found.** vLLM's `is_arch_support_pdl()` returns `major >= 9`, so PDL is on
+for sm_121 across every KDA and mHC launch site, and 34 of this model's 45 layers are KDA. The
+between-arm p95 came out **below** the within-arm p95 — 6.2–6.5e-02 against 7.7–8.0e-02, i.e. two
+arms differ less than two runs of one arm — with no prompt above K = 4 and, in the first comparison,
+later token divergence between arms than within one. On speed it is a wash on 48 SMs: **C1 +0.8 %,
+C8 +0.7 %** pooled over six PDL-on and three PDL-off rounds. The one reading outside its band, C1
+per-stream decode at +5.4 %, was deleted by a repeat — one arm read 69.75 (a nominal +10.8 % for PDL
+off), the identical configuration repeated read 76.17, between the two PDL-off readings.
+
+**Items 2–4 are free, and one of them is smaller than it was reported to be.** The K-pool buffer's
+initialisation and its reader's missing upper bound cost nothing measurable, including the per-chunk
+int32 memset the preparation note had priced as "not free on this part". Item 4 is at most **one**
+cold Triton compile per engine process — triton 3.7.1 gives an int argument three specialisation
+classes, not one per value, and the tree's own warmup already covers most of them — and across cold,
+freshly booted processes it could not be seen from the client at all. Gates were 10/10 · 12/12 in
+every arm, with one warm single-question flake that did not reproduce in three immediate re-runs.
+
+**The decision, stated as a distinction rather than as a verdict.** Items 2 and 3 are
+correctness-class: their value rests on a mechanism, not on a measurement, and this A/B **did not
+show that mechanism firing** — it showed that fitting the insurance costs nothing. A configuration
+that passed a three-node reboot test is not changed without a reason, so the patches ride with the
+next production change or stay optional.
+
+**The larger result came from the instrument, not the patches.** The campaign's diagnostic hook
+produced the MLA-prefill datum `cuda-exl3` issue #5 had asked for: **median 2,049 selected keys per
+query row and a median adjacent-row top-k overlap of 0.9258** over 7,168 rows — about **152 keys
+turning over per row**, roughly **76×** the ~2 keys of the author's low-turnover arm, so production
+was never between his two arms. He built a third arm at that turnover, swept context, and corrected
+his own conclusion in `5fd7299`: at **262K context** the production-pattern arm is within **1.6 %**
+of the fully cache-resident arm (2,422.8 against 2,385.8 µs) where the independent arm needs
+3,474 µs, because the live key set is the **residence window** (~4,096 keys, ≈4.5 MiB) and not the
+chunk footprint. **MLA prefill is compute-bound at production overlap and the "21–26 % overlap gap,
+about 2 % of a prefill chunk" does not exist — the item closes at zero**, and the only lever left on
+that kernel is less work rather than less traffic. Recorded in [docs/10](docs/10-results-and-roofline.md)
+§7 and [CREDITS](CREDITS.md); the one-bench falsification on a 48-SM part is
+[HELP-WANTED](HELP-WANTED.md) §8 and we have not run it.
+
+**Two process corrections, both of which cost more than the result.** The diagnostic image had been
+built with only the first of the production image's two stages, so the DFlash2 port's thirteen files
+were missing and a fail-closed anchor stopped the first dump boot — the build note recorded the
+single stage without recording what it cost. And the GB10 top-k overlay is bind-mounted **read-only**
+over the file two of these patches target, so those two had to be applied to a host-side copy of the
+overlay rather than by the prelude; that exception applies to any future patch landing on an overlaid
+file.
+
+**Also recorded: the instrument's own defect.** Its derived `context`/`expected`/`deficit` columns mix
+pool-granular and token-granular units and are wrong; the two distributions published are counted
+straight off the selection buffer and are unaffected. The instrument is not shipped here.
+
+---
+
 ## 2026-09-06 — one repository, two tracks, and a front door in front of both
 
 **This repository had grown a second working node count without growing a way to tell which half a

@@ -4,7 +4,8 @@ Every number in [`../docs/10-results-and-roofline.md`](../docs/10-results-and-ro
 rest of `docs/` traces to a file in here, or carries `[measured-here, raw lost]`, `[reported]`,
 `[estimate]`, `[not tested]` or `[retracted]` in the document.
 
-All of it was produced on 4–5 September 2026 on three DGX Spark (GB10) nodes: TP=3 with expert
+All of it was produced on 4–6 September 2026 on three DGX Spark (GB10) nodes — except the two-node
+files, whose headers say so — at TP=3 with expert
 parallelism, KV `fp8`, DFlash2 draft at k=7, temperature 0, thinking on at `reasoning_effort: low`.
 **The checkpoint changed at production configuration 9:** everything up to and including production 8
 is `brandonmusic/GLM-5.3-Flash-tr3-4bpw` at revision `b20c49ba` (routed experts only); production 9
@@ -32,6 +33,8 @@ header.
 | `mesh/algo-sweep.md` | The `NCCL_ALGO` sweep: Ring against Ring,Tree against Tree, both repetitions printed, with the decode-step proxy, the RNR counters and the port deltas that show how a tree redistributes the traffic. |
 | `kernels/kda-gate-bench-gb10.md` | **The live ratios.** The same gate bench re-taken on the target GPU with both arms rotated over a bank ≥ 4× L2: the warm/cold tables at M=1/8/64, the production trace used as referee, the achieved-bandwidth cross-check that shows which readings are the cache, the 4- and 6-bit projections, and the gate. **This supersedes the ratios in the file below.** |
 | `kernels/gb10-coldbench/` | Its raw: the ruler, the full run with every round, the projection and bandwidth outputs, and a 531-row summary CSV (shape × M × arm × bit width × warm/cold). |
+| `kernels/sm12-stack-patches-ab.md` | **The four sm_12x stack patches, measured.** Five arms in one diagnostic image: the logit-divergence floors that answer the PDL race question, the pooled PDL on/off speed tables, what items 2-4 cost, the gates, the long-prefill probe for item 4, the indexer selection distributions the kernel author asked for, and the two instrument defects found on the way. Production was never modified. |
+| `kernels/sm12-ab/` | Its raw: both `logit-divergence compare` reports in full, per prompt and per pair of runs, and the two indexer histograms with their percentiles. |
 | `kernels/kda-gate-bench.md` | The first pass of the same bench, on a **workstation** GPU: bf16 against EXL3 4/6-bit at the TP=3 shapes, the ruler check that caught a 210 %-of-peak reading, the launch-cost table, the MLA fp32→bf16 lever, and the two `cuda-exl3` source facts behind the verdict. **Its ratios are `[retracted]`** — warm, on the wrong card — and the file is kept unedited as the record of what we published; the verdict it reached did not change. |
 | `mesh/rdma-write-sweep.md` | The six-arm sweep of the one-sided `RDMA_WRITE` transport: RNR and out-of-buffer to exactly zero, throughput unmoved, the engine arm, and why it was not adopted. |
 | `configs/production-configurations.csv` | One row per production configuration 1–9: what changed, C1/C8 aggregate and per-stream, prefill, TTFT, KV pool, acceptance, boot time, MMLU. The source for `charts/speed-by-configuration.svg`. |

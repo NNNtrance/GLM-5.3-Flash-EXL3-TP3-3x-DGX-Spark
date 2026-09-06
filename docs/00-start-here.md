@@ -72,7 +72,7 @@ checks: on this stack the expensive failures are the silent ones.
 The three pages that are TP=3's own are [03](03-tp3-padding-and-sidecars.md) (why an EXL3 tensor
 cannot be split three ways, and the shape surgery that makes it possible anyway),
 [13](13-full-scope-checkpoint.md) §7 (the padded-load port, which is the production recipe) and
-[`patches/tp3full/`](../patches/tp3full/README.md).
+[`tracks/tp3/patches/`](../tracks/tp3/patches/README.md).
 
 ---
 
@@ -119,13 +119,15 @@ And the directories:
 | Directory | Applies to | Note |
 |---|---|---|
 | [`bench/`](../bench/) | **both tracks** | Model-free, engine down. Most of it runs on one node |
-| [`scripts/`](../scripts/) | **both tracks** | The launcher hard-codes expert parallelism in three places; [15](15-tp2-track.md) §2.2 lists the three edits |
+| [`scripts/`](../scripts/) | **one launcher per track, both here** | `start-tp3.sh` + `tp3-prelude.sh` and `start-tp2full.sh` + `tp2-prelude.sh`. The benchmark harness, the probes and the prompt sets beside them are identical at either rank count |
 | [`patches/kernel/`](../patches/kernel/) | **both tracks** | The mesh plugin patches. `0005` is a no-op with one cable per pair |
 | [`patches/dflash2-port/`](../patches/dflash2-port/) | **both tracks** | The drafter port into the image |
 | [`patches/indexer-overlay/`](../patches/indexer-overlay/) | **both tracks** | The GB10 top-k overlay. Mandatory at any node count |
 | [`results/`](../results/README.md) | **both tracks** | Each file's header names its arm and its rank count |
 | [`charts/`](../charts/) | **TP=3** | Generated from the three-node CSVs |
 | [`audit/`](../audit/README.md) | **both tracks** | Compare your numbers against ours; the bands are three-node |
+| [`tracks/`](../tracks/README.md) | **one folder per track** | The only files that differ between the two node counts: the environment template, the patch tree, the autostart unit and its preflight. [`tracks/README.md`](../tracks/README.md) says what stays shared and why |
+| [`.github/`](../.github/) | **both tracks** | Three issue templates and a pull request template; the measurement one is [09](09-measurement-protocol.md) turned into a checklist |
 
 ---
 

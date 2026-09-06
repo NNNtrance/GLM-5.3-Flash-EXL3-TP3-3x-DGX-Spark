@@ -13,7 +13,7 @@ model is non-commercial.
 checkpoint since 5 September evening is the **full-scope** one (§1): it quantizes the dense path and
 the head as well as the routed experts, and it is worth **+21.7 % per stream** with the quality gate
 passed. It needs a `cuda-exl3` carrying the padded-load path (`f3e3090` + `754421f`) and the loader
-patch in `patches/tp3full/`. If your image predates either, the **routed-experts-only** checkpoint
+patch in `tracks/tp3/patches/`. If your image predates either, the **routed-experts-only** checkpoint
 (§1.1) is the fallback, and it is also our rollback: every configuration from 1 to 8 served it.
 
 ---

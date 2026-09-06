@@ -1,0 +1,95 @@
+# tracks/tp3 — three nodes, TP=3 with expert parallelism
+
+**This is the production track.** It is what our three nodes serve, start at boot, and were rebooted
+into as a whole cluster with the quality gates read afterwards.
+
+The recipe itself is the [README quick start](../../README.md) — eleven steps, each ending in a
+check. This page is the directory: what is in it, what stays outside it, and the numbers this
+arrangement produces.
+
+Two nodes instead of three: [tracks/tp2](../tp2/) and [docs/15](../../docs/15-tp2-track.md).
+
+---
+
+## What is here
+
+| File | What it is |
+|---|---|
+| [`env.tp3-full.example`](env.tp3-full.example) | **The production template.** Full-scope checkpoint, `gpu-memory-utilization` 0.83, fp8 KV and fp8 draft cache, `HAREM_SW_BLOCK_SIZE=256`, `NCCL_MAX_NCHANNELS=8`. Every variable carries a one-line reason and the ones with a real cost carry the measurement that decided them |
+| [`env.tp3.example`](env.tp3.example) | The routed-experts-only template — production configurations 1 to 8, and the rollback |
+| [`patches/`](patches/) | The in-container patch tree for the full-scope checkpoint: the ten-anchor loader patch, the image gate, the sidecar generator, the prelude. [`patches/README.md`](patches/README.md) is the inventory |
+| [`harem-exl3.service`](harem-exl3.service) | The autostart unit, installed and `enabled` on all three of our nodes |
+| [`motor-onkosul-exl3.sh`](motor-onkosul-exl3.sh) | Its preflight: seven checks, at most ten minutes of waiting |
+
+**Derive each node's environment file from the template with `sed`, on that node.** Never copy a
+finished env file between nodes — two lines differ per node and a copied file produces a cluster
+where two processes believe they are the same rank, with no error at all
+([envs/README.md](../../envs/README.md)).
+
+## What is not here, and where it is
+
+| | |
+|---|---|
+| The launcher and prelude | [`scripts/start-tp3.sh`](../../scripts/start-tp3.sh) and [`scripts/tp3-prelude.sh`](../../scripts/tp3-prelude.sh) — every launcher in this repository lives in `scripts/`, one per track |
+| The rollback patch tree | [`patches/tp3/`](../../patches/tp3/) — shared: it is production 1 to 8 here **and** the source of the `tp`-agnostic patches the two-node tree carries |
+| The mesh plugin patches | [`patches/kernel/`](../../patches/kernel/) |
+| The drafter port, the GB10 top-k overlay | [`patches/dflash2-port/`](../../patches/dflash2-port/), [`patches/indexer-overlay/`](../../patches/indexer-overlay/) |
+| Everything measured | [`results/`](../../results/README.md), [`charts/`](../../charts/), [`bench/`](../../bench/) |
+| The install commands and the reboot test | [`systemd/README.md`](../../systemd/README.md) |
+
+**The directory name here is not the directory name on your nodes.** On a node this tree lives at
+`~/exl3-zeus/tp3full/`, and that name is load-bearing three times over: the launcher mounts
+`$TP3_DIR/tp3-prelude.sh` at `/start.sh`, `tp3-prelude.sh` is a **hard link** to
+`tp3full-prelude.sh` rather than a copy, and the directory's file list and the full text of the
+prelude are hashed into the fast-load sidecar's identity
+([docs/08](../../docs/08-fast-boot.md) §4). See [tracks/README.md](../README.md) for the copy and the
+link.
+
+---
+
+## What this track measures
+
+**Production configuration 10** — three DGX Spark nodes, one 4-bit EXL3 checkpoint, realistic
+prompts, temperature 0, reasoning effort `low`, 5 September 2026 `[measured-here]`:
+
+| | |
+|---|---|
+| Single-stream decode (C1) | **70.5** tok/s aggregate (**76.9** per stream) |
+| Aggregate at 8 concurrent streams (C8) | **194.0** tok/s |
+| Prefill, fresh unseen ~8K prompts | **1,769** tok/s |
+| KV pool at `max_model_len` 1,000,000 | **5,619,834** tokens at `gpu-memory-utilization` 0.83 |
+| Quality | correctness probe **10/10**, code exam **12/12** cold and warm; MMLU sample (1,995 q) **86.47 ±0.74** |
+| Cold boot, `docker run` → API ready | **251 s** |
+| Boot from power-on, all three nodes together | `/health` 200 at **242 s** by the harness's counter, **315 s** by the wall clock in the same log. Both are printed because they disagree; **315 s is the one to plan with** |
+
+Settings for every row: image `exl3-zeus:754421f`, TP=3 + expert parallel, full-scope EXL3 weights
+(`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw), `kv-cache-dtype fp8` and an fp8 draft cache, DFlash2
+draft at k=7, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`, `--max-num-batched-tokens 2048`,
+`--max-num-seqs 8`, `NCCL_MAX_NCHANNELS=8`, per-rank pre-sliced sidecar, warm MLA tuner cache, mesh
+plugin with both links per peer and `NCCL_PTR_CUDA`, the launcher's memory settle gate. Speed is the
+median of three sweep rounds, which the persisted tuner cache is what earns
+([docs/09](../../docs/09-measurement-protocol.md), [docs/12](../../docs/12-tuner-cache.md)).
+
+**Before you read a few-percent difference here as a result:** on this stack C1 boot medians span
+1.1 %, C8 2.5 % and **C4 7.4 %**, and boot-to-boot on C8 has been measured at **15.9 % with nothing
+changed at all**. The full tables are [docs/10](../../docs/10-results-and-roofline.md); the
+configuration-by-configuration progression is
+[`results/configs/production-configurations.csv`](../../results/configs/production-configurations.csv).
+
+## What is TP=3's own, and why
+
+Three things in this repository exist only because three ranks is not two:
+
+1. **The padding.** Five shapes in GLM-5.3-Flash do not divide by three, and an EXL3 trellis cannot
+   be zero-extended, so the shapes are padded to whole 128-column Hadamard blocks: heads 64 → 66,
+   vocabulary `padding_size` 384 giving 155,136, shared expert 2,048 → 2,304, drafter GQA 32/8 →
+   36/9 ([docs/03](../../docs/03-tp3-padding-and-sidecars.md)).
+2. **Expert parallelism is mandatory**, not a tuning choice: 2,048/3 is not an integer, so the routed
+   experts cannot be tensor-sliced at all and each rank must hold 96 whole experts
+   ([docs/05](../../docs/05-expert-parallel-and-cuda-exl3-fixes.md)).
+3. **The padded-load path**, which is what puts a *fully quantized* checkpoint into dimensions vLLM
+   has padded. It needs `cuda-exl3` at `754421f` or later plus our A9 and A10 patches, and both are
+   provable no-ops at TP≤2 ([docs/13](../../docs/13-full-scope-checkpoint.md) §7).
+
+Everything else on this stack — the image, the kernels, the fabric work, the KV pool surgery, the
+fast boot, the measurement protocol — belongs to both tracks.

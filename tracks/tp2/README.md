@@ -1,0 +1,99 @@
+# tracks/tp2 — two nodes, TP=2, expert parallelism off
+
+At two ranks this stack is a **shorter** recipe rather than a cut-down one: all five shapes that do
+not divide by three do divide by two, and each leaves every rank a whole number of 128-column
+Hadamard blocks. Nothing needs padding, so the shape surgery in
+[docs/03](../../docs/03-tp3-padding-and-sidecars.md) and the padded-load path in
+[docs/13](../../docs/13-full-scope-checkpoint.md) §7 are not needed at all.
+
+**The track page is [docs/15](../../docs/15-tp2-track.md)** — why it works, the exact changes to the
+env file, the launcher, the patch tree and the autostart unit, every two-node arm we ran with its
+date and settings, and the honest list of what we never ran here. This page is the directory.
+
+Three nodes instead of two: [tracks/tp3](../tp3/) and the [README quick start](../../README.md).
+
+---
+
+## What is here
+
+| File | What it is |
+|---|---|
+| [`env.tp2-full.example`](env.tp2-full.example) | **The production-candidate template.** `NNODES=2`, `TP_SIZE=2`, `ENABLE_EP=0`, no padding sidecar, `gpu-memory-utilization` **0.85** rather than the three-node 0.83, and four settings that are not optional at two ranks |
+| [`patches/`](patches/) | The in-container patch tree — thirteen files against the three-node tree's twenty-two, because nothing here has to pad anything. [`patches/README.md`](patches/README.md) is the inventory |
+| [`harem-exl3-tp2.service`](harem-exl3-tp2.service) | The autostart unit. It is a unit **of its own** — you do not edit the three-node one. Installed, started, health-checked and stopped on both nodes on 6 September 2026, and left `disabled`, because exactly one of the two units may be enabled |
+| [`motor-onkosul-exl3-tp2.sh`](motor-onkosul-exl3-tp2.sh) | Its preflight — `FABRIC_PEERS` is **one** address per node rather than two; the ConnectX-7 check stays `4/4`, because it counts ports on the node, not peers |
+
+**Derive each node's environment file from the template with `sed`, on that node.** Never copy a
+finished env file between nodes ([envs/README.md](../../envs/README.md)).
+
+## What is not here, and where it is
+
+| | |
+|---|---|
+| The launcher and prelude | [`scripts/start-tp2full.sh`](../../scripts/start-tp2full.sh) and [`scripts/tp2-prelude.sh`](../../scripts/tp2-prelude.sh) — every launcher in this repository lives in `scripts/`, one per track, so the harness and the probes sit beside them |
+| The `tp`-agnostic patches | [`patches/tp3/`](../../patches/tp3/) — `patch-swblock-tp3.py`, `patch-kvdiag-tp3.py`, `patch-draftkv-tp3.py`, `patch-epfilter-tp3.py` and `patch-fastload-tp3.py` are all gated on their own environment knobs and are used unchanged at two ranks |
+| The mesh plugin patches | [`patches/kernel/`](../../patches/kernel/) — with one cable per pair set `NCCL_MESH_LINKS_PER_PEER=1`, which makes `0005` a no-op; `0006` is worth measuring either way |
+| The GB10 top-k overlay | [`patches/indexer-overlay/`](../../patches/indexer-overlay/) — **mandatory**, and the failure that stopped our very first TP=2 boot |
+| Everything measured | [`results/`](../../results/README.md), [`bench/`](../../bench/) |
+
+**Keep the tree in its own directory.** A patch directory's file list and the full text of its
+prelude are hashed into the fast-load sidecar's identity
+([docs/08](../../docs/08-fast-boot.md) §4), and adding one file to a tree — even a file that is never
+called — refuses the next boot on every node. That has happened to us twice, and once it was the
+TP=2 patch dropped into the TP=3 tree that did it
+([docs/13](../../docs/13-full-scope-checkpoint.md) §6.4).
+
+---
+
+## Four things that are mandatory here for reasons that have nothing to do with rank count
+
+| | |
+|---|---|
+| `HAREM_DISABLE_PERSISTENT_TOPK=1` | vLLM's sparse-attention indexer picks `persistent_topk`, which cannot run on a GB10: 85 CTAs against 48 SMs, and the fallback wants ≥128 KB of shared memory where the part has 101,376 bytes |
+| `--block-size 256` | With `index_kpool` 4 and fp8 KV, DeepGEMM's arch-12 path needs `block_kv` exactly 64 |
+| `--kv-cache-dtype fp8` | The same kernel constraint |
+| `HAREM_SW_BLOCK_SIZE=256` | **Mandatory in practice.** The drafter's KV group is allocated on a 16-token page, and at two ranks it takes 60.2 % of the blocks-per-request divisor against 53 % at three. Without the fix the pool is 601,562 tokens and **a 6,253-token prompt is never scheduled at all** ([docs/15](../../docs/15-tp2-track.md) §3.5) |
+
+## What TP=2 buys, and what it does not
+
+**It buys a node, and a shorter recipe.** No sidecar config, no image gate, no pad audit, no
+128-block arithmetic to get wrong, and an image requirement that drops from `754421f` to any image
+carrying the loader patch.
+
+**It does not buy lower latency.** On this stack three nodes are faster per stream as well as in
+aggregate, which is the opposite of what "fewer ranks, fewer collectives" predicts: a decode step
+here is weight-bandwidth bound, and adding a rank cuts each rank's weight traffic by a third
+([docs/15](../../docs/15-tp2-track.md) §4). Read that section before you plan around this track.
+
+## The numbers
+
+**The TP=2 production candidate, measured 6 September 2026** — two nodes, TP=2, EP off, image
+`exl3-zeus:754421f`, the full-scope checkpoint (`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw), KV fp8
+and an fp8 draft cache, DFlash2 k=7, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`,
+`--max-num-batched-tokens 2048`, `--max-num-seqs 8`, `--max-model-len 1000000`,
+`gpu-memory-utilization 0.85`, `NCCL_MAX_NCHANNELS=8`, per-rank fast-load sidecar, warm tuner cache,
+temperature 0, reasoning effort `low`, median of sweep rounds 2-4 `[measured-here]`:
+
+| | |
+|---|---|
+| Single-stream decode (C1) | **58.50** tok/s aggregate (**62.55** per stream) |
+| Aggregate at 8 concurrent streams (C8) | **155.75** tok/s |
+| Prefill, fresh unseen ~8.4K prompts | **1,400** tok/s |
+| KV pool at `max_model_len` 1,000,000 | **2,128,571** tokens — about 2.1 concurrent 1M-token requests |
+| TTFT, C1 / C8 | **0.407** / **1.077** s |
+| Quality | correctness probe **10/10**, code exam **12/12** cold and warm, tool-call **8/8**, needle-lite **6/6**; MMLU sample (1,995 q) **86.02 ±0.75** |
+| Cold boot, fast-load | **272 s** (the one-off dump boot that writes the sidecar is 998 s) |
+| Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes. **No reboot test yet** `[not tested]` |
+| Consumed memory per node | **84.8 GiB** |
+
+**There are two candidates and this is the recommended one.** Candidate A serves the
+routed-experts-only checkpoint and is kept for anyone who already has those 164 GB: it is slower on
+every concurrency and its pool is 1,500,000 rather than 2,128,571. The full-scope candidate B is
+**+20.0 % at C1, +13.3 % at C8, +41.9 % of pool and 4.5 GiB lighter per node**, with MMLU 0.35
+points apart — inside one error bar. The side-by-side table, every sweep round, the boot and sidecar
+figures and every gate are [docs/15](../../docs/15-tp2-track.md) §5, raw in
+[`results/speed/tp2-production-candidate.md`](../../results/speed/tp2-production-candidate.md).
+
+**The earlier arms are kept rather than deleted** and they are **not** interchangeable with the
+above — different images, different days, different stacks. They are [docs/15](../../docs/15-tp2-track.md)
+§3, with their dates.

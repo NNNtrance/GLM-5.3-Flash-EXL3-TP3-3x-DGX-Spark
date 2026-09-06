@@ -173,7 +173,7 @@ the mistakes is visible in one place `[retracted]`.
 | 5 | Expert-stationary scheduling is worth 14–27 % of MoE traffic | Doubling blocks per expert costs 1.11×, not 2×; the trellis stays L2-resident | §2.12 |
 | 6 | The KV-zeroing gate is worth −1.2…1.4 % of prefill | 85.5 % of those bytes are Mamba/KDA state; safe remainder **−0.19 %** | §2.13 |
 | 7 | NCCL picks `LL` at 16 MB and leaves half the link unused | Forcing LL there is **11× worse**; the tuner is not choosing it | §1.4 |
-| 8 | No CUDA graphs on this stack / the `22 % 4` head-count obstacle | That was a different image. Here graphs capture and run (PIECEWISE **and** FULL); the 36/9 drafter sidecar removed the obstacle | [envs/env.tp3.example](../envs/env.tp3.example) |
+| 8 | No CUDA graphs on this stack / the `22 % 4` head-count obstacle | That was a different image. Here graphs capture and run (PIECEWISE **and** FULL); the 36/9 drafter sidecar removed the obstacle | [tracks/tp3/env.tp3.example](../tracks/tp3/env.tp3.example) |
 | 9 | One upstream build is ~10 % slower end to end | Boot-to-boot variance is 15.9 % | §1.3 |
 | 10 | Build `1699c89` costs 16 % at C1 | Single round. Over five rounds there is no loss (+1.2 %) | §1.3 |
 | 11 | Disabling flashinfer autotune saves 34 s | ~3.5 s | §1.8 |
@@ -182,7 +182,7 @@ the mistakes is visible in one place `[retracted]`.
 | 14 | The existing fused HC kernel is the better route at small M | At M=8 the fused route is 1.6 % **worse**; at M=2048 it is +32 % worse | [10](10-results-and-roofline.md) §5.5 |
 | 15 | The MoE trellis GEMM is target number one | Against the corrected ruler it runs at 81–96 %. The two largest prefill items are **outside** the EXL3 kernel library | [10](10-results-and-roofline.md) §6 |
 | 16 | The quick-arm harness runs five rounds and discards two | Its body ran three. Applied literally the rule left a median of one | [09](09-measurement-protocol.md) §1.1 |
-| 17 | The chat template we serve comes from the base model | Its md5 matches **neither** checkpoint on disk. It has never been verified against a named source | [envs/env.tp3.example](../envs/env.tp3.example) |
+| 17 | The chat template we serve comes from the base model | Its md5 matches **neither** checkpoint on disk. It has never been verified against a named source | [tracks/tp3/env.tp3.example](../tracks/tp3/env.tp3.example) |
 | 18 | `NCCL_BUFFSIZE` is an open lever worth trying | It had already been measured and eliminated ("no difference"); `NCCL_P2P_NET_CHUNKSIZE` only affects point-to-point. We listed a closed item as open twelve hours later | [06](06-nccl-mesh.md) §12 |
 | 19 | `NCCL_MAX_NCHANNELS=8` had already been tried and eliminated | That arm set 8 channels **together with** `NCCL_PROTO=LL` and was never written up. Tried cleanly it is +13 % at C8 | [06](06-nccl-mesh.md) §8 |
 | 20 | The extra masking pass is under 1 % of the MoE layer | 2.9 % at M=8 rising to 15.8 % at M=2048 | §1.2 |
@@ -738,9 +738,9 @@ unit, that the template in [`systemd/`](../systemd/) had three things wrong with
 sibling NVFP4 unit would win a reboot. All three are now false, and the honest half of the closure is
 listed below with them.
 
-The unit is [`systemd/harem-exl3.service`](../systemd/harem-exl3.service), installed and `enabled` on
+The unit is [`tracks/tp3/harem-exl3.service`](../tracks/tp3/harem-exl3.service), installed and `enabled` on
 all three nodes, and the preflight it calls is
-[`systemd/motor-onkosul-exl3.sh`](../systemd/motor-onkosul-exl3.sh) — seven checks: docker answering,
+[`tracks/tp3/motor-onkosul-exl3.sh`](../tracks/tp3/motor-onkosul-exl3.sh) — seven checks: docker answering,
 `ibv_devinfo` 4/4, a ping to each fabric neighbour, `drop_caches`, then the env file, the image and
 this rank's fast-load sidecar manifest. `ExecStop` names `exl3-tp3` rather than the NVFP4 container the
 template named. `TimeoutStartSec` is **1200**, not 900, so a 620 s dump boot cannot time out mid-load.
@@ -884,7 +884,7 @@ time on this stack that a number has had to be read against the cost of the tool
 
 ### 2.24 Two patch trees and two fast-load sidecars, and the merge that is owed
 
-Production 9 runs from [`patches/tp3full/`](../patches/tp3full/) while production 8's tree,
+Production 9 runs from [`tracks/tp3/patches/`](../tracks/tp3/patches/) while production 8's tree,
 [`patches/tp3/`](../patches/tp3/), stays on every node as the rollback. **The code did not have to
 diverge** — the two constants that differ are `lcm(128, tp)` against `lcm(64, tp)` and are provably
 no-ops at TP≤2, so one tree could serve both — **the fast-load manifest identity did.** The
@@ -897,7 +897,7 @@ production 9 was built and measured beside it.
 The price, stated plainly: **a fix that lands in one tree does not reach the other**, and two files
 (`patch-vllm-tp3.py`, `preflight-tp3.py`) are deliberately divergent. The merge is technically
 possible today and was not done, because doing it would change production 8's identity and cost a
-dump boot on the arm we were keeping as the rollback. `patches/tp3full/README.md` carries a
+dump boot on the arm we were keeping as the rollback. `tracks/tp3/patches/README.md` carries a
 file-by-file `cmp` that turns "they have not drifted" from an assumption into a check; that is a
 mitigation, not the fix. **Not written** `[not tested]`.
 

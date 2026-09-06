@@ -29,7 +29,7 @@ minutes**. A one-off `FASTLOAD_MODE=dump` boot is about 11 minutes and only has 
 arm. **We own three nodes and cannot start it** `[not tested]`.
 
 We can hand you the arithmetic, and it is short, because **TP=4 needs almost none of the shape
-surgery TP=3 does.** Read off `config.json` and our own `patches/tp3full/preflight-tp3.py`, not
+surgery TP=3 does.** Read off `config.json` and our own `tracks/tp3/patches/preflight-tp3.py`, not
 measured:
 
 | Shape | Value | At TP=4 | At TP=3, for contrast |
@@ -76,7 +76,7 @@ three** in 150 minutes with 96K prompts in the mix. `docs/16-comparison-with-pub
 understood.
 
 **What to measure:** the eleven checks in the README quick start, in order; the boot gates as
-`patches/tp3full/README.md` lists them (including the `assert 5` pad-audit line and the
+`tracks/tp3/patches/README.md` lists them (including the `assert 5` pad-audit line and the
 `CUDA_EXL3_DEBUG_NAMES` tally); quality gates cold **and** warm; the KV pool from a settled load
 boot; C1-C8 on `scripts/hizset-v2.jsonl`; prefill on **fresh** prompts; TTFT; and EP on against EP
 off, which is the arrangement question only you can answer.
@@ -155,7 +155,7 @@ Four separate questions, in order of how cheap they are to answer:
    — 4-bit routed experts, 5-6 bit dense and attention, 6-bit head — so this is a refinement rather
    than an alternative, and nobody has run one `[not tested]`.
 4. **The class that actually breaks loaders: a checkpoint where a tensor we have to *pad* is itself
-   quantized.** That is the entire reason `patches/tp3full`'s A9 and A10 and the plugin's padded-load
+   quantized.** That is the entire reason `tracks/tp3/patches`'s A9 and A10 and the plugin's padded-load
    path exist (`docs/13-full-scope-checkpoint.md` §7). Our stack handles it for EXL3. The same class
    exists in other quantization formats — for example RadixArk-style NVFP4 packs, where the shared
    expert is quantized rather than BF16, so the pad needs packed-U8 columns **plus** an FP8 block

@@ -34,7 +34,7 @@ read-bandwidth ruler drifted 6.5 % between three runs on the same idle machine t
 
 **Production configuration 9**, since 5 September 18:40: production 8 with the **checkpoint** changed
 — `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw, full scope, on image `exl3-zeus:754421f` and the
-`patches/tp3full/` tree. It is the first entry on this page in which the model itself is different,
+`tracks/tp3/patches/` tree. It is the first entry on this page in which the model itself is different,
 and it is the largest single move the stack has made ([13](13-full-scope-checkpoint.md)).
 
 **Production configuration 10 is what actually ships**, and it is production 9 with one line changed:

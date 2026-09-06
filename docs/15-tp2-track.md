@@ -50,7 +50,7 @@ Two consequences follow, and they are the whole reason a two-node track is worth
 **First: expert parallelism is optional at TP=2.** At three ranks it is mandatory, because 2,048/3 is
 not an integer and a trellis cannot be zero-extended ([03](03-tp3-padding-and-sidecars.md) §1.1). At
 two ranks the routed experts tensor-slice cleanly to 1,024 = 8 × 128 per rank, so both arrangements
-are legal. `patches/tp2full/preflight-tp3.py` encodes exactly this rule and prints
+are legal. `tracks/tp2/patches/preflight-tp3.py` encodes exactly this rule and prints
 `preflight, tp=2, ep=OFF (experts tensor-sliced)` while refusing `--ep 0` at `tp=3`: it requires
 `moe_intermediate_size` to be a multiple of `128 × tp`, and 2,048 is a multiple of 256 but not of
 384 `[measured-here]`. **Every TP=2 arm we have run had EP off.** We have never measured EP on at two
@@ -120,7 +120,7 @@ measurement protocol ([09](09-measurement-protocol.md)) and the troubleshooting 
 
 ### 2.1 The env file
 
-Start from [`envs/env.tp2-full.example`](../envs/env.tp2-full.example) — that template *is* the
+Start from [`tracks/tp2/env.tp2-full.example`](../tracks/tp2/env.tp2-full.example) — that template *is* the
 production candidate of §5, and it already carries everything below. If you are converting a
 three-node file instead, the changes are:
 
@@ -172,12 +172,12 @@ three-node one that is not even mounted.
 
 ### 2.3 The patch tree
 
-Use [`patches/tp2full/`](../patches/tp2full/). It is the two-node tree, complete, and every file in
+Use [`tracks/tp2/patches/`](../tracks/tp2/patches/). It is the two-node tree, complete, and every file in
 it is documented here:
 
 | File | What it does at two ranks |
 |---|---|
-| `tp2full-prelude.sh` | the in-container prelude; applies the patches below, then `exec vllm serve`. **Install it under two names** — `tp2-prelude.sh`, which the launcher mounts at `/start.sh`, and `tp3-prelude.sh`, which is the name `harem_fastload_id.file_identity()` hashes. A **hard link**, not a copy, so the two cannot drift; without the second name the prelude's text silently falls out of the sidecar manifest, and `start-tp2full.sh` refuses to launch if either is missing. [`patches/tp2full/README.md`](../patches/tp2full/README.md) has the two-line install |
+| `tp2full-prelude.sh` | the in-container prelude; applies the patches below, then `exec vllm serve`. **Install it under two names** — `tp2-prelude.sh`, which the launcher mounts at `/start.sh`, and `tp3-prelude.sh`, which is the name `harem_fastload_id.file_identity()` hashes. A **hard link**, not a copy, so the two cannot drift; without the second name the prelude's text silently falls out of the sidecar manifest, and `start-tp2full.sh` refuses to launch if either is missing. [`tracks/tp2/patches/README.md`](../tracks/tp2/patches/README.md) has the two-line install |
 | `patch-kvdiag-tp3.py` | logging only: the per-group decomposition of the pool arithmetic. Every arm |
 | `patch-swblock-tp3.py` | the draft KV page, 16 → 256 tokens. **Mandatory in practice** (§4) |
 | `patch-draftkv-tp3.py` | the drafter's own cache at fp8. Gated on `HAREM_DRAFT_KV_DTYPE`; measured at two ranks in §5.3 |
@@ -234,8 +234,8 @@ padded-load capability, which two ranks do not use.
 
 ### 2.6 The autostart unit
 
-[`systemd/harem-exl3-tp2.service`](../systemd/harem-exl3-tp2.service) and its preflight
-[`systemd/motor-onkosul-exl3-tp2.sh`](../systemd/motor-onkosul-exl3-tp2.sh) are the two-node pair.
+[`tracks/tp2/harem-exl3-tp2.service`](../tracks/tp2/harem-exl3-tp2.service) and its preflight
+[`tracks/tp2/motor-onkosul-exl3-tp2.sh`](../tracks/tp2/motor-onkosul-exl3-tp2.sh) are the two-node pair.
 They differ from the three-node ones in four places and no more:
 
 - `WorkingDirectory` and `ExecStart` point at `tp2full/` and `start-tp2full.sh`.
@@ -472,7 +472,7 @@ routed-experts-only checkpoint and does not want to fetch the other one.
 ### 5.1 What both candidates are
 
 Two nodes — the head node at rank 0, worker-1 at rank 1 — TP=2, **EP off**, image `exl3-zeus:754421f`,
-`patches/tp2full/`, `scripts/start-tp2full.sh` with its settle gate, KV `fp8`, **fp8 draft cache**,
+`tracks/tp2/patches/`, `scripts/start-tp2full.sh` with its settle gate, KV `fp8`, **fp8 draft cache**,
 DFlash2 k=7, `--attention-backend CUSTOM`, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`,
 `--max-num-seqs 8`, `--max-num-batched-tokens 2048`, **`--max-model-len 1000000`**,
 `gpu-memory-utilization 0.85`, `HAREM_DISABLE_PERSISTENT_TOPK=1`, `NCCL_MAX_NCHANNELS=8`, mesh plugin
@@ -602,7 +602,7 @@ rule stands here as well.
 
 ### 5.7 The autostart unit, tested
 
-`systemd/harem-exl3-tp2.service` and `systemd/motor-onkosul-exl3-tp2.sh` installed on both nodes,
+`tracks/tp2/harem-exl3-tp2.service` and `tracks/tp2/motor-onkosul-exl3-tp2.sh` installed on both nodes,
 `daemon-reload`, then `systemctl start` (worker-1 first) → `/health` → gates → `systemctl stop`, with
 the three-node unit stopped throughout `[measured-here]`:
 
@@ -656,7 +656,7 @@ This list is much shorter than it was, and every row now carries a reason rather
 |---|---|
 | **The `gpu-memory-utilization` ladder.** Every TP=2 arm ran **0.85** | This is the one deliberate refusal. KV maximisation is the last step in this project's order of work and it needs the cluster's owner, not an agent. It also has a two-node-specific warning attached: arm A recorded **3.5 GB of swap on the head during weight load** at this rung (§3.1), and at three ranks 0.85 was *rejected* for swap growth while 0.83 was taken ([11](11-open-issues.md) §2.4). The three-node ladder must be **re-derived** at two ranks, not copied — the memory left after a fixed cost is not linear in the node count `[not tested]` |
 | **A two-node reboot test** | The unit is installed and start/stop-tested (§5.7), but a power-on trial takes the cluster down and the three-node unit is the enabled production autostart. Reboot **both** nodes or neither: the preflight passes on a single node whose peer is gone `[not tested]` |
-| **Expert parallelism at two ranks** | Legal (§1.1), never measured. It changes which kernel path the MoE stage takes ([05](05-expert-parallel-and-cuda-exl3-fixes.md)) and `patches/tp2full/` already carries `patch-epfilter-tp3.py` so that trying it needs no tree change — and therefore no new dump boot `[not tested]` |
+| **Expert parallelism at two ranks** | Legal (§1.1), never measured. It changes which kernel path the MoE stage takes ([05](05-expert-parallel-and-cuda-exl3-fixes.md)) and `tracks/tp2/patches/` already carries `patch-epfilter-tp3.py` so that trying it needs no tree change — and therefore no new dump boot `[not tested]` |
 | **A second boot of each candidate**, and a boot-to-boot spread | Every number in §5 is a median of three rounds on **one** boot per candidate. At three ranks the boot-median spread is C1 1.1 %, C8 2.5 %, **C4 7.4 %**. The pool, memory, boot-time and gate rows are far too large a difference to be boot noise; the speed rows carry that uncertainty and the B-over-A margins (+13 to +21 %) clear it comfortably `[not tested]` |
 | **`patch-vllm-tp3.py` at two ranks** | A no-op by arithmetic (§1.1), deliberately not shipped, therefore never measured. If you keep one tree for both rank counts you will run it; we do not expect a difference and we have not shown one `[not tested]` |
 | **Anything at one or four nodes** | Out of scope for this page; [00-start-here](00-start-here.md) says what we can and cannot say about other node counts |

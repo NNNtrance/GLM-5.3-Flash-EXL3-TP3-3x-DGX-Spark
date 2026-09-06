@@ -1,4 +1,4 @@
-# GLM-5.3-Flash (EXL3 4bpw) on 3× NVIDIA DGX Spark — vLLM, cuda-exl3, TP=3 + EP, DFlash2 — with a TP=2 track for two nodes
+# GLM-5.3-Flash (EXL3 4bpw) on NVIDIA DGX Spark — two- and three-node recipes (vLLM + cuda-exl3)
 
 > **Most recipes stop at the flags. This one goes below the engine.** When three nodes ran slower
 > than two, we did not swap a setting — we found the kernel dispatch bug behind it, together with the
@@ -19,6 +19,58 @@
 > what we know; [docs/11 §1](docs/11-open-issues.md) is what we published and then had to withdraw,
 > and [audit/](audit/README.md) §6 indexes it. **Read the retractions before you quote a number.**
 
+## How many nodes do you have?
+
+One question decides which half of this repository is yours, and
+**[docs/00 — Start here](docs/00-start-here.md)** answers it in a page. Every `docs/NN` page carries
+an **Applies to** badge on its first line, and [`tracks/`](tracks/README.md) holds the files that
+differ between the two arrangements — the environment templates, the patch trees and the autostart
+units — so they cannot be mixed by accident.
+
+| You have | What this repository gives you |
+|---|---|
+| **3 DGX Spark** | The **TP=3 track**: the production recipe, the quick start below, [`tracks/tp3`](tracks/tp3/README.md) |
+| **2 DGX Spark** | The **TP=2 track**: [docs/15](docs/15-tp2-track.md) and [`tracks/tp2`](tracks/tp2/README.md). At two ranks nothing needs padding, so it is a *shorter* recipe — thirteen patch files against twenty-two — rather than a cut-down one |
+| **1 DGX Spark** | No serving recipe: 153.8 GiB of weights against 121.6 GiB of unified memory. Still yours — the image build, the GB10 kernel fixes, the measurement protocol, the model-free benches and the failure index. [docs/00 §1](docs/00-start-here.md) |
+| **4 DGX Spark** | Nothing measured `[not tested]`. The padding and expert-parallel arithmetic, the cabling problem and what we would want reported are in [HELP-WANTED.md](HELP-WANTED.md) §1 |
+
+### Three nodes — production configuration 10
+
+Three DGX Spark nodes, one 4-bit EXL3 checkpoint, realistic prompts, temperature 0, reasoning effort
+`low`, 5 September 2026 `[measured-here]`:
+
+| | |
+|---|---|
+| Single-stream decode (C1) | **70.5** tok/s aggregate (**76.9** per stream) |
+| Aggregate at 8 concurrent streams (C8) | **194.0** tok/s (197.2 on production 9's promotion boot; C8's boot-median spread is 2.5 %) |
+| Prefill, fresh unseen ~8K prompts | **1,769** tok/s (median of three; the five-round arm read 1,747) |
+| KV pool at `max_model_len` 1,000,000 | **5,619,834** tokens at `gpu-memory-utilization 0.83` — about 5.6 concurrent 1M-token requests |
+| Quality | correctness probe **10/10**, code exam **12/12** cold and warm; MMLU sample (1,995 q) **86.47 ±0.74** |
+| Cold boot, `docker run` → API ready | **251 s** |
+| **Boot from power-on**, all three nodes rebooted together, autostart unit enabled | `/health` 200 at **242 s** by the harness's own counter — **315 s** by the wall clock in the same log, and that is the figure to plan with. Both are printed because they disagree ([systemd](systemd/README.md), [09](docs/09-measurement-protocol.md) §11.4) |
+
+### Two nodes — the TP=2 production candidate
+
+Two DGX Spark nodes, TP=2, **expert parallelism off**, the same full-scope checkpoint,
+`gpu-memory-utilization` **0.85** — the three-node 0.83 rung is not transferable and the two-node
+ladder has never been derived — same harness and same protocol, 6 September 2026 `[measured-here]`:
+
+| | |
+|---|---|
+| Single-stream decode (C1) | **58.50** tok/s aggregate (**62.55** per stream) |
+| Aggregate at 8 concurrent streams (C8) | **155.75** tok/s |
+| Prefill, fresh unseen ~8.4K prompts | **1,400** tok/s |
+| KV pool at `max_model_len` 1,000,000 | **2,128,571** tokens — about 2.1 concurrent 1M-token requests |
+| Quality | correctness probe **10/10**, code exam **12/12** cold and warm, tool-call **8/8**, needle-lite **6/6**; MMLU sample (1,995 q) **86.02 ±0.75** |
+| Cold boot, fast-load | **272 s** (the one-off dump boot that writes the sidecar is 998 s) |
+| Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes. **No reboot test yet** `[not tested]` |
+
+**Two ranks are 80–83 % of the speed on 38 % of the pool, at quality that is inside one error bar.**
+The side-by-side comparison, and why the third node wins on latency as well as on memory, is further
+down this page and in [docs/15](docs/15-tp2-track.md) §7. A second candidate, on the
+routed-experts-only checkpoint, is kept for anyone who already has those 164 GB: it is slower on every
+concurrency with a 1,500,000-token pool ([docs/15](docs/15-tp2-track.md) §5).
+
 A reproducible recipe for serving **`zai-org/GLM-5.3-Flash`** as an **EXL3 4-bit** checkpoint on three
 DGX Spark (GB10) nodes with vLLM and the `cuda-exl3` kernels: the two-layer image build, expert
 parallelism over 288 experts, the TP=3 shape padding, the DFlash2 speculative-decoding port, the
@@ -32,15 +84,16 @@ step.
 This is the EXL3 sibling of our NVFP4 recipe,
 [`NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark`](https://github.com/NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark),
 which serves the same model on the same three nodes through a different quantization path. The two
-share a cluster, a fabric and a set of memory rules, but **this repository is self-contained**:
-[docs/00](docs/00-hardware-and-os.md) is a complete environment record down to firmware, the hotplug
-fix, the PCIe ceiling and every OS-level setting we did and did not change, and
+share a cluster, a fabric and a set of memory rules, but **this repository is self-contained, at
+both node counts**: [docs/00](docs/00-hardware-and-os.md) is a complete environment record down to
+firmware, the hotplug fix, the PCIe ceiling and every OS-level setting we did and did not change, and
 [docs/14](docs/14-troubleshooting.md) indexes all 83 failures we hit by symptom with the exact log
-line. You do not need the sibling to follow this. And if you own **two** Sparks rather than three,
-[docs/15](docs/15-tp2-track.md) is the TP=2 track — a complete, measured two-node recipe with its own
-env template, launcher, patch tree, fast-load sidecar and autostart unit, not a cut-down of this one.
-At two ranks nothing needs padding, so it is *shorter*: the patch tree is thirteen files rather than
-twenty-two.
+line, each tagged with the node counts it can happen on. You do not need the sibling to follow
+either track. **Each track is complete on its own** — its own environment template, launcher, patch
+tree, fast-load sidecar and autostart unit, in [`tracks/`](tracks/README.md) — so the two-node recipe
+is not a cut-down of the three-node one and no page asks you to mentally subtract a rank. At two
+ranks nothing needs padding, so it is genuinely *shorter*: the patch tree is thirteen files rather
+than twenty-two.
 
 > **About the name "HAREM".** HAREM is simply the name we gave our three-node setup. It is hardcoded
 > in several places in the stack — patch markers (`HAREM-TP3`, `HAREM-GB10-TOPK`), environment
@@ -52,18 +105,9 @@ twenty-two.
 
 ## Headline results
 
-**Production configuration 10, at a glance** — three DGX Spark nodes, one 4-bit EXL3 checkpoint,
-realistic prompts, temperature 0, reasoning effort `low`, 5 September 2026 `[measured-here]`:
-
-| | |
-|---|---|
-| Single-stream decode (C1) | **70.5** tok/s aggregate (**76.9** per stream) |
-| Aggregate at 8 concurrent streams (C8) | **194.0** tok/s (197.2 on production 9's promotion boot; C8's boot-median spread is 2.5 %) |
-| Prefill, fresh unseen ~8K prompts | **1,769** tok/s (median of three; the five-round arm read 1,747) |
-| KV pool at `max_model_len` 1,000,000 | **5,619,834** tokens at `gpu-memory-utilization 0.83` — about 5.6 concurrent 1M-token requests |
-| Quality | correctness probe **10/10**, code exam **12/12** cold and warm; MMLU sample (1,995 q) **86.47 ±0.74** |
-| Cold boot, `docker run` → API ready | **251 s** |
-| **Boot from power-on**, all three nodes rebooted together, autostart unit enabled | `/health` 200 at **242 s** by the harness's own counter — **315 s** by the wall clock in the same log, and that is the figure to plan with. Both are printed because they disagree ([systemd](systemd/README.md), [09](docs/09-measurement-protocol.md) §11.4) |
+The two at-a-glance tables are above, under [How many nodes do you have?](#how-many-nodes-do-you-have)
+This section is the three-node track in full: what each configuration changed, what it cost, and the
+measurements that overturned four of our own targets.
 
 Production 10 is production 9 with `gpu-memory-utilization` 0.80 → **0.83**: **+8.7 % of KV pool**, no
 speed number outside its band, gates full, swap flat under load. Everything below and every analysis
@@ -277,6 +321,7 @@ sits at `Running: 0, Waiting: 1, GPU KV cache usage: 0.0 %` indefinitely, becaus
 
 ## Read in this order
 
+0. [**00 — Start here**](docs/00-start-here.md) — **one page, one question: how many nodes do you have.** What still applies at one node and what does not, which track two and three go to, what a fourth node would change, and the table of which of the eighteen documents belongs to which track. Read it first if you are not sure this repository is about your hardware.
 1. [00 — Hardware, firmware and OS](docs/00-hardware-and-os.md) — **the complete environment record.** Three Sparks and their firmware, the ring cabling and what the fabric ceiling really is, every version we ran, the hotplug fix that stops a single-node reboot killing the fabric, the six OS-level changes we made and the three we deliberately did not, and the memory rules. Read it even if you think you know this layer.
 2. [01 — Model and license](docs/01-model-and-license.md) — the two EXL3 checkpoints, their pinned revisions, and two licences, one of which is not one you have seen before.
 3. [02 — Image build](docs/02-image-build.md) — the two-layer Docker recipe, pinned to a `cuda-exl3` commit.
@@ -296,8 +341,10 @@ sits at `Running: 0, Waiting: 1, GPU KV cache usage: 0.0 %` indefinitely, becaus
 17. [16 — Comparison with other published recipes](docs/16-comparison-with-published-recipes.md) — a dozen other public GLM-5.3-Flash EXL3 DGX Spark recipes, quoted exactly as they publish them with their own stated conditions, beside our numbers at the matching node count. Read the conditions column before you read the numbers. It also contains the two most useful outside findings we know of: **two other people quantized this model's dense path independently, one at two nodes and one at three, and both measured a gain in the same band as ours** — and a four-node recipe's soak hang that we have never looked for on three.
 18. [audit/](audit/README.md) — a post-install self-check with our own numbers beside each step, the provenance table for every headline figure, and the retraction index. Run `audit/run-audit.sh` before you conclude anything about your install.
 19. [charts/](charts/) — four figures generated from the CSVs in [`results/`](results/README.md) by [`charts/make-charts.py`](charts/make-charts.py), standard library only, so you can regenerate them and check the bars against the rows.
-20. [systemd](systemd/README.md) — **the autostart unit and its preflight**, both real, installed and reboot-tested, plus the hazard that comes first: if you also run the NVFP4 sibling, its unit wins a reboot until you disable it. Read this before a reboot.
-21. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md)
+20. [systemd](systemd/README.md) — **the autostart units and their preflights**, real, installed and — at three nodes — reboot-tested, plus the hazard that comes first: if you also run the NVFP4 sibling, or the other track's unit, whichever is enabled wins a reboot. Exactly one may be enabled. Read this before a reboot.
+21. [tracks/](tracks/README.md) — **the files that differ between the two node counts**, one folder each: the environment template, the patch tree and the autostart unit. Everything else in this repository is shared, and this page says why each shared thing is shared. It also carries the one trap the move introduces: the directory name here is not the directory name on your nodes.
+22. [**HELP-WANTED.md**](HELP-WANTED.md) — **what a second cluster could settle, ranked, with the expected effort on every item.** Four nodes, a two-node reboot test, the memory ladder at two ranks, other checkpoints, the mesh plugin's small-message latency floor, the KDA state slots, the KDA GEMM gap, and the four largest items from docs/11. It also says, per item, what a contributor with fewer nodes can and cannot check.
+23. [CREDITS](CREDITS.md) · [LICENSES](LICENSES.md) · [CHANGELOG](CHANGELOG.md) · [CONTRIBUTING](CONTRIBUTING.md) · [STYLE-GUIDE](STYLE-GUIDE.md) · [`.github/`](.github/) — three issue templates and a pull request template, all of them the measurement protocol in [docs/09](docs/09-measurement-protocol.md) turned into checklists
 
 ## The four figures
 
@@ -353,7 +400,7 @@ the silent ones, and every check below exists because something got past us once
            44 passed / 41 skipped, exit 0. Binary hashes differ between identical builds on
            this toolchain (docs/14 section 7.10).
 
- 7. SIDECARS.  patches/tp3full/pad-tp3full.py for the model -- it writes the padded config.json
+ 7. SIDECARS.  tracks/tp3/patches/pad-tp3full.py for the model -- it writes the padded config.json
     AND the rewritten quantization_config.json carrying the packed mapping; patches/tp3/pad-tp3.py
     does not write the second one and the load then fails. patches/tp3/pad-tp3.py --draft for
     the drafter. They are symlink trees, not copies (docs/03).
@@ -361,9 +408,9 @@ the silent ones, and every check below exists because something got past us once
            anywhere else and the relative symlinks dangle, reported as "no safetensors found"
            rather than as a mount error (docs/14 section 2.11).
 
- 8. CONFIGURE.  Copy scripts/ and patches/tp3full/ to ~/exl3-zeus/ on every node; hard-link
+ 8. CONFIGURE.  Copy scripts/ and tracks/tp3/patches/ to ~/exl3-zeus/ on every node; hard-link
     tp3full-prelude.sh to the name tp3-prelude.sh inside that directory. Derive each node's
-    env from envs/env.tp3-full.example WITH SED, per node -- never copy the file between
+    env from tracks/tp3/env.tp3-full.example WITH SED, per node -- never copy the file between
     nodes. Point CUDA_EXL3_TUNE_CACHE at a directory under the /cache mount BEFORE the first
     boot, or every benchmark you run measures the tuner rather than your change (docs/12).
     CHECK: MASTER_ADDR is rank 0's MANAGEMENT address, never a fabric one. A fabric address
@@ -384,8 +431,8 @@ the silent ones, and every check below exists because something got past us once
     CHECK: the audit's numbers land in the bands in audit/README.md. Where they do not,
            docs/14-troubleshooting.md indexes every failure we hit by symptom.
 
-11. AUTOSTART, ONLY ONCE STEPS 1-10 PASS.  Install systemd/harem-exl3.service and
-    systemd/motor-onkosul-exl3.sh on every node (systemd/README.md has the four commands).
+11. AUTOSTART, ONLY ONCE STEPS 1-10 PASS.  Install tracks/tp3/harem-exl3.service and
+    tracks/tp3/motor-onkosul-exl3.sh on every node (systemd/README.md has the four commands).
     Edit the FABRIC_PEERS case in the preflight to YOUR addresses first. If you also run the
     NVFP4 sibling recipe, `systemctl disable --now harem-motor.service` in the SAME change --
     its unit wins a reboot and brings up the other engine on the same memory, healthily and

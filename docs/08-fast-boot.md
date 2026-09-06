@@ -420,9 +420,9 @@ line in the env file, and it is the difference between an experiment and an outa
 the patch directory and the full text of the prelude (§4), so writing the full-scope patch into
 `patches/tp3/` would have refused the next production boot — which is exactly what happened twice on
 5 September before the second tree existed ([09](09-measurement-protocol.md) §11.2). The full-scope
-arm was built in `patches/tp3full/` instead, and **production 8 stayed up, untouched, throughout**.
+arm was built in `tracks/tp3/patches/` instead, and **production 8 stayed up, untouched, throughout**.
 The trees' relationship, the file-by-file check that they have not drifted, and the merge that is
-still owed are in [`patches/tp3full/README.md`](../patches/tp3full/README.md).
+still owed are in [`tracks/tp3/patches/README.md`](../tracks/tp3/patches/README.md).
 
 The boot ledger for the new arm, both boots, all three ranks `[measured-here]`:
 
@@ -524,7 +524,7 @@ has the full description of each patch's env knob and default; this table is onl
 gate.
 
 This table is `patches/tp3/`'s prelude, which is production configurations 1–8 and the rollback path.
-Production 9 runs `patches/tp3full/tp3full-prelude.sh`, which is this list plus two steps at the end
+Production 9 runs `tracks/tp3/patches/tp3full-prelude.sh`, which is this list plus two steps at the end
 of it — `patch-fullscope-tp3.py` and `check-padload-tp3.py`, both behind `HAREM_EXL3_FULLSCOPE`
 ([13](13-full-scope-checkpoint.md) §7). Everything below applies to both.
 

@@ -1,12 +1,12 @@
-# patches/tp2full — the two-node patch tree (TP=2 production candidate)
+# tracks/tp2/patches — the two-node patch tree (TP=2 production candidate)
 
 **Applies to: TP=2 only.** This is the tree the two-node production candidate of
-[docs/15](../../docs/15-tp2-track.md) §5 runs. It is [`patches/tp3full/`](../tp3full/) with every
+[docs/15](../../../docs/15-tp2-track.md) §5 runs. It is [`tracks/tp3/patches/`](../../tp3/patches/) with every
 file that exists only to serve a pad removed, plus the two-node full-scope loader patch. Thirteen
 files against twenty-two.
 
 **Why a tree of its own and not a flag.** The directory's **file list and content are the fast-load
-manifest identity** ([docs/08](../../docs/08-fast-boot.md) §4): every `patch-*.py` in it and the full
+manifest identity** ([docs/08](../../../docs/08-fast-boot.md) §4): every `patch-*.py` in it and the full
 text of the prelude are hashed into the sidecar, and adding one file to a tree — even a file that is
 never called — refuses the next boot on every node. That has happened to us twice, and **once it was
 a TP=2 patch dropped into the TP=3 tree** that did it. Finish this tree before the dump boot and add
@@ -14,16 +14,16 @@ nothing between dump and load.
 
 The cost is the same one the three-node trees pay and it is written down rather than hidden: **the
 trees have to be kept in step by hand.** Every shared file here is byte-identical with its
-`patches/tp3full/` copy today, and nothing enforces that tomorrow.
+`tracks/tp3/patches/` copy today, and nothing enforces that tomorrow.
 
 ## What is in here
 
-| File | Same as `patches/tp3full/`? | What it does at two ranks |
+| File | Same as `tracks/tp3/patches/`? | What it does at two ranks |
 |---|---|---|
 | `tp2full-prelude.sh` | **new** | the in-container prelude: applies the patches below, then `exec vllm serve`. Install it under **two names** — see below |
-| `patch-fullscope-tp2.py` | **new** (it is `patches/tp2/`'s) | S1 packed mapping, S2 stop hard-wiring MLA+KDA to bf16, S3 KDA refactorisation. Gated on `HAREM_EXL3_FULLSCOPE`. **The recommended candidate runs this** |
+| `patch-fullscope-tp2.py` | **new** (it is `tracks/tp2/patches/`'s) | S1 packed mapping, S2 stop hard-wiring MLA+KDA to bf16, S3 KDA refactorisation. Gated on `HAREM_EXL3_FULLSCOPE`. **The recommended candidate runs this** |
 | `patch-kvdiag-tp3.py` | byte-identical | logging only: the per-group decomposition of the KV pool arithmetic. Every arm |
-| `patch-swblock-tp3.py` | byte-identical | the draft KV page, 16 → 256 tokens. **Mandatory in practice** at two ranks ([docs/15](../../docs/15-tp2-track.md) §4) |
+| `patch-swblock-tp3.py` | byte-identical | the draft KV page, 16 → 256 tokens. **Mandatory in practice** at two ranks ([docs/15](../../../docs/15-tp2-track.md) §4) |
 | `patch-draftkv-tp3.py` | byte-identical | the drafter's own cache at fp8: **+15.1 % of pool** at two ranks |
 | `patch-tilelang-failloud-tp3.py` | byte-identical | a silent `contextlib.suppress` becomes a named error. Gated |
 | `patch-epfilter-tp3.py` | byte-identical | EP weight filter for `.trellis`. **Inert here** — it needs `--enable-ep-weight-filter`, which needs EP, and EP is off. Kept anyway, so that trying EP at two ranks needs no tree change and therefore no new dump boot |
@@ -37,7 +37,7 @@ trees have to be kept in step by hand.** Every shared file here is byte-identica
 ## Install the prelude under two names
 
 ```
-install -m 0755 patches/tp2full/tp2full-prelude.sh "$TREE/tp2-prelude.sh"
+install -m 0755 tracks/tp2/tracks/tp2/patchesfull-prelude.sh "$TREE/tp2-prelude.sh"
 ln -f "$TREE/tp2-prelude.sh" "$TREE/tp3-prelude.sh"
 ```
 
@@ -54,7 +54,7 @@ hash.
 ## What is deliberately **not** here
 
 All of it exists to serve a pad, and at two ranks there is no pad: all five awkward shapes divide by
-two and leave whole 128-column Hadamard blocks ([docs/15](../../docs/15-tp2-track.md) §1.1).
+two and leave whole 128-column Hadamard blocks ([docs/15](../../../docs/15-tp2-track.md) §1.1).
 
 | Not shipped | Why |
 |---|---|

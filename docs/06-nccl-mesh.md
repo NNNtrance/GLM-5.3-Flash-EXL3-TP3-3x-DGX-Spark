@@ -171,7 +171,7 @@ whole 5.7 ms.
 ## 4. The cure we ship: `NCCL_MAX_NCHANNELS=8`
 
 Environment only — no binary change, no rebuild, reversible by deleting one token. `NCCL_MAX_NCHANNELS=8` goes in
-each node's own env file (`envs/env.tp3.example`), derived per node with `sed`, never copied between nodes.
+each node's own env file (`tracks/tp3/env.tp3.example`), derived per node with `sed`, never copied between nodes.
 
 Capping the channel count shortens the proxy's round-robin lap, so the receiver is usually already armed and the miss
 mostly stops happening. Dose-response, median of three runs each `[measured-here]`:

@@ -5,7 +5,7 @@
 # NCCL_MESH_PLUGIN_DIR and CHAT_TEMPLATE_HOST are per-node, and a copied file
 # points the launcher at another machine's paths. Run this on head, worker-1 and
 # worker-2 separately. It only writes .env.tp3-full; .env.tp3 is not touched.
-# The published template of the file it produces is envs/env.tp3-full.example.
+# The published template of the file it produces is tracks/tp3/env.tp3-full.example.
 set -euo pipefail
 Z="$HOME/exl3-zeus"
 SRC="$Z/.env.tp3"

@@ -5,7 +5,7 @@ The raw record behind [docs/15](../../docs/15-tp2-track.md) §5. Two candidates,
 protocol in [docs/09](../../docs/09-measurement-protocol.md) `[measured-here]`.
 
 **Settings, identical in both candidates.** TP=2, **expert parallelism off**, image
-`exl3-zeus:754421f`, patch tree [`patches/tp2full/`](../../patches/tp2full/), launcher
+`exl3-zeus:754421f`, patch tree [`tracks/tp2/patches/`](../../tracks/tp2/patches/), launcher
 [`scripts/start-tp2full.sh`](../../scripts/start-tp2full.sh) with its `MemAvailable ≥ 112 GiB` settle
 gate, KV `fp8`, **fp8 draft cache** (`HAREM_DRAFT_KV_DTYPE=fp8`), DFlash2 draft at k=7,
 `--attention-backend CUSTOM`, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`, `--max-num-seqs 8`,
@@ -229,7 +229,7 @@ derived at two nodes — see [docs/15](../../docs/15-tp2-track.md) §6.
 
 ## 8. The autostart unit
 
-`systemd/harem-exl3-tp2.service` + `systemd/motor-onkosul-exl3-tp2.sh`, installed on both nodes with
+`tracks/tp2/harem-exl3-tp2.service` + `tracks/tp2/motor-onkosul-exl3-tp2.sh`, installed on both nodes with
 `@USER@`/`@HOME@` substituted per node (never copied between them), `daemon-reload`, left
 **`disabled`**:
 
@@ -248,7 +248,7 @@ derived at two nodes — see [docs/15](../../docs/15-tp2-track.md) §6.
 before its `ENV_FILE` was pointed at the full-scope environment file, so the preflight looked for the
 *other* candidate's sidecar — which had been deleted to make disk room — and refused in one second
 with `fast-load sidecar missing: …-r0`, before docker was touched. That is check 7 of
-[`motor-onkosul-exl3-tp2.sh`](../../systemd/motor-onkosul-exl3-tp2.sh) doing exactly the job it
+[`motor-onkosul-exl3-tp2.sh`](../../tracks/tp2/motor-onkosul-exl3-tp2.sh) doing exactly the job it
 exists for: the alternative is a 620-second boot, or the fast-load refusal four minutes in
 ([docs/14](../../docs/14-troubleshooting.md) §3.1).
 

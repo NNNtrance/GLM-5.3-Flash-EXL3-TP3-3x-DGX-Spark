@@ -427,7 +427,7 @@ The rule around that file is four lines:
    this way in this repository ran in a throwaway container (`--rm`) with a memory cap
    (`--memory=8g`), on a **cpuset disjoint from the engine's**, and with its own JIT cache
    directories so it could not warm or poison the engine's. The engine is pinned to `CPUSET=5-9,15-19`
-   ([envs/env.tp3.example](../envs/env.tp3.example)), so the bench gets `--cpuset-cpus 0-4,10-14` and
+   ([tracks/tp3/env.tp3.example](../tracks/tp3/env.tp3.example)), so the bench gets `--cpuset-cpus 0-4,10-14` and
    the two do not share a core. Write both sets down in the report. This is only defensible while the
    engine is idle, and it is still not free: the GPU and its memory bandwidth are shared no matter how
    the cores are split, which is why §10 exists at all.

@@ -238,7 +238,7 @@ unset it is exactly upstream behaviour; set, it validates the value against the 
 block and raises if it does not divide. It does not rewrite a spec after the layers were built; it
 chooses the value at the point the spec is created.
 
-Set `HAREM_SW_BLOCK_SIZE=256` in `EXTRA_ENV` ([envs/env.tp3.example](../envs/env.tp3.example)).
+Set `HAREM_SW_BLOCK_SIZE=256` in `EXTRA_ENV` ([tracks/tp3/env.tp3.example](../tracks/tp3/env.tp3.example)).
 
 ### Result
 

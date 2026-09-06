@@ -106,7 +106,7 @@ kernels for Blackwell plus a fused sparse-MLA attention backend, with a vLLM plu
 - **Production commit:** `754421fc99919317b9a4cf2928797bae8f870040` — "Fill a prefix in the vocab
   loaders when the rank is padded", carrying `f3e3090` beneath it, since 5 September evening
   (production configuration 9). **That pair is not an optimisation, it is a prerequisite:** without
-  it the full-scope checkpoint cannot be loaded at TP=3 at all, and `patches/tp3full/check-padload-tp3.py`
+  it the full-scope checkpoint cannot be loaded at TP=3 at all, and `tracks/tp3/patches/check-padload-tp3.py`
   refuses the boot rather than letting it fail half way. The previous production commits were
   `62f53e676d3e416401c3a0716558e1454affa8ad`, "Bound what is left in `exl3_moe_had_in`", carrying
   `a47da6e` (production 8), `9bf594cd8b43a2a53db9c7d1d629794aa9365f1a`, "Persist the MLA tuner cache
@@ -434,10 +434,10 @@ Use them freely under Apache-2.0; a credit is appreciated and not required. Wher
 someone else's idea, the header says whose.
 
 Two directories were added on 5 September evening with production configuration 9.
-[`patches/tp3full/`](patches/tp3full/) is the production patch tree for the full-scope checkpoint —
+[`tracks/tp3/patches/`](tracks/tp3/patches/) is the production patch tree for the full-scope checkpoint —
 `patches/tp3/` with two constants changed and `patch-fullscope-tp3.py` added. Why it is a second
 directory rather than two more files in the first one is the fast-load manifest identity, and it is
-explained in its own README. [`patches/tp2/patch-fullscope-tp2.py`](patches/tp2/patch-fullscope-tp2.py)
+explained in its own README. [`tracks/tp2/patches/patch-fullscope-tp2.py`](tracks/tp2/patches/patch-fullscope-tp2.py)
 is the eight-anchor TP=2 form of the same patch, which [docs/13](docs/13-full-scope-checkpoint.md)
 referenced as "not yet in repo" for a day; it is here now, and it is kept rather than superseded
 because it is the smaller, more readable statement of the same three loader layers.

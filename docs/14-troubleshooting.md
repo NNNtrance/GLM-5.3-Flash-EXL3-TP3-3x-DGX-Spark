@@ -326,7 +326,7 @@ tensors**:
 **The second `KeyError` is the informative one:** `conv1d` is a **BF16** tensor, so a BF16 copy of the
 same checkpoint dies in the same place. **None of this is about quantization.**
 
-**Fix.** `patches/tp3full/patch-fullscope-tp3.py`, ten anchors, all gated on
+**Fix.** `tracks/tp3/patches/patch-fullscope-tp3.py`, ten anchors, all gated on
 `HAREM_EXL3_FULLSCOPE=1`; plus a rewritten `quantization_config.json` in the sidecar, or
 `CUDA_EXL3_PACKED_MAPPING` from `fba9f27` onwards — **write the JSON with no spaces**, because the
 launcher word-splits `EXTRA_ENV`.
@@ -1435,12 +1435,12 @@ you were expecting this one. No error anywhere; `/health` on port 8001 simply ne
 different, healthy engine holds the machine.
 
 **Fix, and it is now done on our nodes.** `harem-motor.service` is `disabled` on all three, and
-[`systemd/harem-exl3.service`](../systemd/harem-exl3.service) carries `Conflicts=harem-motor.service`
+[`tracks/tp3/harem-exl3.service`](../tracks/tp3/harem-exl3.service) carries `Conflicts=harem-motor.service`
 besides. Whichever unit you install, disable the other **in the same change** — installing one without
 disabling the other is not a partial fix, it is a worse state than having no unit at all.
 
 The rest of the old entry is closed: the preflight
-[`systemd/motor-onkosul-exl3.sh`](../systemd/motor-onkosul-exl3.sh) exists, `ExecStop` names
+[`tracks/tp3/motor-onkosul-exl3.sh`](../tracks/tp3/motor-onkosul-exl3.sh) exists, `ExecStop` names
 `exl3-tp3` rather than the NVFP4 container, and `TimeoutStartSec` is **1200** — enough for a 620 s dump
 boot with the preflight and the settle gate in front of it. See §10.1a for what is still not solved.
 
@@ -1498,13 +1498,13 @@ running dump. This has happened once and it cost the boot.
 
 **Track:** both, measured at TP=3 only — the divergence is forced by the fast-load manifest, never built at TP=2.
 
-`patches/tp3/` and `patches/tp3full/` diverge in exactly two constants plus one patch. **The code did
+`patches/tp3/` and `tracks/tp3/patches/` diverge in exactly two constants plus one patch. **The code did
 not have to diverge** — the two constants are provable no-ops at TP≤2, so one tree could serve both.
 **The fast-load manifest identity did.** Adding the full-scope patch to `patches/tp3/` would have
 refused the next production boot on all three nodes, which is exactly what happened twice.
 
 The merge is technically possible and was not done, because it would change production 8's identity
-and cost a dump boot on the arm being kept as the rollback. `patches/tp3full/README.md` carries a
+and cost a dump boot on the arm being kept as the rollback. `tracks/tp3/patches/README.md` carries a
 file-by-file `cmp` — a mitigation, not the fix.
 
 **The disk half:** 53 GB × 3 for production 9's sidecar on top of production 8's ~63 GB × 3, on top of

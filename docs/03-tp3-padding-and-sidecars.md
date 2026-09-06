@@ -13,12 +13,12 @@ execs the server. **A patch whose anchor no longer matches stops the rank.** Tha
 half-patched stack is exactly the failure mode that serves confident, wrong answers.
 
 **Two patch trees.** Production 9 serves the full-scope checkpoint from
-[`patches/tp3full/`](../patches/tp3full/) with `patches/tp3full/tp3full-prelude.sh`;
+[`tracks/tp3/patches/`](../tracks/tp3/patches/) with `tracks/tp3/patches/tp3full-prelude.sh`;
 [`patches/tp3/`](../patches/tp3/) with `scripts/tp3-prelude.sh` is the routed-experts-only tree that
 production 1–8 used and is the rollback. They differ in exactly two constants (§1.1) plus one extra
 patch. Where this page names a file, it names the production one; the same file exists in `tp3/` with
 the older constants. Why the two are not one file is
-[`patches/tp3full/README.md`](../patches/tp3full/README.md) — it is about the fast-load manifest
+[`tracks/tp3/patches/README.md`](../tracks/tp3/patches/README.md) — it is about the fast-load manifest
 identity, not about the code.
 
 > **At TP=2, none of this page applies.** All five shapes divide by two *and* leave every rank a whole
@@ -36,8 +36,8 @@ identity, not about the code.
 | `num_attention_heads` | 64 | 32 per rank | **padded to 66** → 22 per rank | sidecar `config.json` |
 | `num_key_value_heads` | 64 | 32 | **66** → 22 | sidecar `config.json` |
 | KDA `linear_attn_config.num_heads` (and its flat mirror `linear_num_heads`) | 64 | 32 | **66** → 22 | sidecar `config.json`, **both** places |
-| `vocab_size` | 154,880 | pads to 154,880, /2 = 77,440 | `padding_size` 64 → **384**, giving 155,136, /3 = **51,712 = 404 × 128** | `patches/tp3full/patch-vllm-tp3.py` |
-| shared expert (`moe_intermediate_size × n_shared_experts`) | 2,048 | 1,024 per rank | **padded to 2,304** → **768 = 6 × 128** per rank | `patches/tp3full/patch-vllm-tp3.py` |
+| `vocab_size` | 154,880 | pads to 154,880, /2 = 77,440 | `padding_size` 64 → **384**, giving 155,136, /3 = **51,712 = 404 × 128** | `tracks/tp3/patches/patch-vllm-tp3.py` |
+| shared expert (`moe_intermediate_size × n_shared_experts`) | 2,048 | 1,024 per rank | **padded to 2,304** → **768 = 6 × 128** per rank | `tracks/tp3/patches/patch-vllm-tp3.py` |
 | routed experts `moe_intermediate_size` | 2,048 | tensor-sliced to 1,024 | **not sliced at all** — 96 whole experts of 288 per rank | `--enable-expert-parallel` |
 
 Two things that need no work: `intermediate_size` 12,288 (the three dense layers) divides by 3
@@ -72,7 +72,7 @@ So a padded width has to satisfy two conditions at once — divisible by `tp`, a
 Today's 2,112 failed in **two different ways at once**, which is why one line fixes both: `down_proj`
 at k=704 hits the plugin's explicit refusal (loud), while `gate_up_proj` gets a half-block output pad
 where there is only a warning (**silent**). Both constants are `lcm(128, tp)` in
-`patches/tp3full/`, and at TP≤2 they are provably no-ops: `lcm(128, 2) = 128`, 154,880 is already a
+`tracks/tp3/patches/`, and at TP≤2 they are provably no-ops: `lcm(128, 2) = 128`, 154,880 is already a
 multiple of 128, and 2048/2 = 1024 = 8 × 128.
 
 **Every head pad was already legal, and that was checked rather than assumed** `[measured-here]`. MLA
@@ -128,7 +128,7 @@ over the flat keyword; and `SpeculativeConfig` builds the drafter from its own c
 `--hf-overrides` never touches at all. Three override paths that all have to agree is worse than one
 file that is right in every process.
 
-So `patches/tp3full/pad-tp3full.py` writes a **sidecar directory**: relative symlinks to every file
+So `tracks/tp3/patches/pad-tp3full.py` writes a **sidecar directory**: relative symlinks to every file
 of the downloaded checkpoint, plus one rewritten `config.json` — and, for the full-scope checkpoint,
 one rewritten `quantization_config.json`.
 
@@ -155,7 +155,7 @@ checkpoint and fails to load the production one.
 Build both sidecars. The model one, on the production checkpoint:
 
 ```
-patches/tp3full/pad-tp3full.py /var/tmp/glm-5.3-flash-turboderp-4.05bpw /var/tmp/glm-5.3-flash-turboderp-4.05bpw-tp3 --tp 3
+tracks/tp3/patches/pad-tp3full.py /var/tmp/glm-5.3-flash-turboderp-4.05bpw /var/tmp/glm-5.3-flash-turboderp-4.05bpw-tp3 --tp 3
 ```
 
 The drafter one, unchanged between the two arms:
@@ -269,7 +269,7 @@ backwards. The logger is now created under the `vllm.` prefix.
 
 ## 5. Proving the arithmetic instead of assuming it
 
-`patches/tp3full/preflight-tp3.py` runs inside the container, against **whatever the launcher
+`tracks/tp3/patches/preflight-tp3.py` runs inside the container, against **whatever the launcher
 actually mounted** rather than against what the environment file says it mounted, and it owns the
 EP-versus-tensor-sliced decision:
 
@@ -284,7 +284,7 @@ EP-versus-tensor-sliced decision:
 Run it standalone against a sidecar before your first boot:
 
 ```
-patches/tp3full/preflight-tp3.py --model /var/tmp/glm-5.3-flash-turboderp-4.05bpw-tp3 --tp 3 --ep 1
+tracks/tp3/patches/preflight-tp3.py --model /var/tmp/glm-5.3-flash-turboderp-4.05bpw-tp3 --tp 3 --ep 1
 ```
 
 Expected, and this is the whole of §1 in five lines:

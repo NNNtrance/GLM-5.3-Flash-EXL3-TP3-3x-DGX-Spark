@@ -11,12 +11,132 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — one repository, two tracks, and a front door in front of both
+
+**This repository had grown a second working node count without growing a way to tell which half a
+reader was in.** Nothing measured changed today. What changed is the shape: one folder per track for
+the files that actually differ, a badge on every page saying which track it belongs to, a router that
+asks how many nodes you have, and a ranked list of what a second cluster could settle.
+
+**`tracks/`, and the rule for what goes in it.** A file belongs to a track only if it cannot be
+shared: the environment template, the in-container patch tree, the autostart unit and its preflight.
+`patches/tp3full/` is now [`tracks/tp3/patches/`](tracks/tp3/patches/) and `patches/tp2full/` is
+[`tracks/tp2/patches/`](tracks/tp2/patches/), file for file, with the two units, the two preflights
+and the three environment templates beside them. Everything else stays where it is and
+[`tracks/README.md`](tracks/README.md) says why each shared thing is shared — `docs/`, `bench/`,
+`scripts/` (both launchers, because the harness and the probes they sit beside are identical at
+either rank count), `patches/kernel/`, `patches/dflash2-port/`, `patches/indexer-overlay/`,
+`results/`, `charts/`, `audit/`, and the two directory pages `envs/README.md` and
+`systemd/README.md`, which are rules rather than artefacts.
+
+**One file was deleted and it was a duplicate.** `patches/tp2/patch-fullscope-tp2.py` was
+**byte-identical** to the copy inside the two-node tree. This repository's own rule is that two
+copies of a file are a coin flip unless something checks ([docs/08](docs/08-fast-boot.md) §12), so
+the duplicate is gone and its five references now point at
+[`tracks/tp2/patches/patch-fullscope-tp2.py`](tracks/tp2/patches/patch-fullscope-tp2.py). Nothing
+else moved content; every other change in the move is a path.
+
+**The trap the move introduces, said once and loudly.** The directory name in this repository is not
+the directory name on your nodes. On a node the three-node tree is `~/exl3-zeus/tp3full/`, and that
+name is load-bearing three times over: the launcher mounts `$TP3_DIR/tp3-prelude.sh` at `/start.sh`,
+`tp3-prelude.sh` inside the directory is a **hard link** rather than a copy, and the directory's file
+list and the full text of the prelude are hashed into the fast-load sidecar's identity
+([docs/08](docs/08-fast-boot.md) §4). Renaming the tree on a node invalidates every sidecar and costs
+a dump boot each. Renaming it here costs nothing, because the manifest hashes the directory you serve
+from, not the one you cloned from.
+
+**Every `docs/NN` page now opens with an "Applies to" line.** Three are not "both":
+[03](docs/03-tp3-padding-and-sidecars.md) is TP=3 only, because all five shapes that do not divide by
+three do divide by two; [10](docs/10-results-and-roofline.md) is TP=3, because its tables are the
+three-node arms, though the two rulers it measured rather than quoted apply anywhere; and
+[15](docs/15-tp2-track.md) is TP=2 only. The qualifiers on the "both" pages are the point of the
+exercise — 05 applies to both but expert parallelism is mandatory at three ranks and optional at two,
+08 applies to both but the sidecar is per rank, 13 applies to both but only its §7 is three ranks.
+
+**[14](docs/14-troubleshooting.md) goes further: all 86 entries carry a track tag**, and the
+distribution is the finding. 45 are plain **both**, 26 more are **both, measured at TP=3 only** —
+the mechanism is rank-independent but every reading came from a three-node arm — so **71 of 86 are
+things a two-node owner will meet**. Thirteen are TP=3 only and they cluster exactly where they
+should: the four hard asserts, the 2,112/192 constants, padding heads to 96 instead of 66, the
+sidecar mount trap, expert parallelism not on every rank, the tuple-shard loader, the three upstream
+commits a padded load needs, the `n_rows` dispatch bug and its micro-benchmark, the 22-head guard,
+and three silent-correctness entries that are all about a pad holding something it should not. Two
+are TP=2 only — KV sizing refusing at `max_model_len` 1,000,000, and long prompts never being
+scheduled — and at three ranks the pool was never small enough for either.
+
+**New: [docs/00-start-here.md](docs/00-start-here.md)**, which asks how many nodes you have and
+answers for all four cases. At **one** node there is no serving recipe and the page says so in
+arithmetic rather than by implication — 153.8 GiB of weights against 121.6 GiB of unified memory —
+and then lists what a single node still gets: the image build, the GB10 top-k overlay, the
+measurement protocol, the model-free benches, the failure index, and the two `HELP-WANTED` items that
+need one GPU and no fabric.
+
+**New: [HELP-WANTED.md](HELP-WANTED.md)**, the ranked list, with the expected wall-clock effort on
+every item and — where it matters — a line on what a contributor with fewer nodes than the item needs
+can and cannot check. Eight items: four nodes at TP=4; a two-node reboot test, which is an hour and
+closes a `[not tested]` a two-node owner meets on their first power cut; the memory ladder at two
+ranks; other checkpoints, including the class where a tensor we have to pad is itself quantized; the
+mesh plugin's small-message latency floor; the ReplaySSM compact rollback of the KDA state slots; the
+KDA GEMM engine-against-standalone gap; and the four largest items already in
+[11](docs/11-open-issues.md).
+
+**Two of those items carry numbers that were not on any page here, and both say so.** The plugin's
+small-message floor reads **74.7 µs at 8 KB** on the production build and is flat at 72–85 µs from
+8 B to 32 KiB — pure latency, no bytes in it — while [06](docs/06-nccl-mesh.md) §5, taken with a
+different harness on the pre-multilink configuration, reads **38.6 µs** for the same operation. A
+factor of two between two of our own benches is not something to publish past, so the item asks for
+both harnesses in one session before any conclusion is drawn. And the KDA state slots:
+`MambaSpec.max_memory_usage_bytes = page × (2 + num_speculative_blocks)`, so at k=7 every KDA layer
+holds **nine** state slots per request, seven of them purely for speculation — **9.9 % of the block
+counter at TP=3 and 12.9 % at TP=2**. A pool model that reproduces four measured arms exactly
+projects **+8.0 %** and **+9.6 %** from taking that to two. We have not run it and the reason is
+written down: the replay loop triples the sequential work, KDA is about 8 % of a C8 step, and the
+ring holds `d` and `k` in fp16 with no baseline comparison we could find in the upstream harness.
+
+**A defect in one of our own gates, found while writing the TP=4 arithmetic and fixed here.**
+`preflight-tp3.py`'s vocabulary check had three conditions and only tested two. 154,880 already
+divides 4 and is already 1,210 × 128, so at `tp=4` the first branch returned "no patch needed" — but
+**per rank** it is 38,720 = **302.5 × 128**, half a Hadamard block, which is exactly the defect
+`lcm(64, 3) = 192` produces at three ranks and which [03](docs/03-tp3-padding-and-sidecars.md) §1.1
+calls silently wrong. `lcm(128, tp)` is right at `tp=3` (384), right **by luck** at `tp=2` (154,880/2
+is already 605 × 128) and wrong at `tp=4`, where the unit that works is `128 × tp` = 512, giving
+155,136 and 303 × 128 per rank. The per-rank condition is now tested and a `tp=4` run is told what to
+pad and why. **Repository copies only** — `tracks/tp3/patches/preflight-tp3.py` and
+`tracks/tp2/patches/preflight-tp3.py`, which stay byte-identical to each other; the live trees on our
+nodes were not touched. It is sidecar-safe by construction: `harem_fastload_id.py` hashes
+`patch-*.py`, the prelude and the EP overlay, and `preflight-tp3.py` is none of those. Behaviour at
+`tp=2` and `tp=3` is unchanged, verified by arithmetic; **`tp=4` is `[not tested]`** — we own three
+nodes.
+
+**Contributing, and four templates.** [CONTRIBUTING.md](CONTRIBUTING.md) gains a "how to contribute a
+measurement" section naming three routes and what each becomes, and [`.github/`](.github/) gains
+three issue templates and a pull request template that are [09](docs/09-measurement-protocol.md)
+turned into checklists: rounds and which were discarded, the per-metric noise band a difference has
+to clear, the prompt set named and labelled, the KV pool read from a load boot on a settled host, the
+gates cold **and** warm, an evidence tier, the full settings block, and what the gain cost. Two
+things are now said in the open rather than implied — a step that did **not** reproduce is as welcome
+as a measurement, and a silent failure is worth more than a loud one; and a pull request that
+withdraws one of our numbers is worth more than one that adds a number.
+
+**Older entries on this page were rewritten in one respect and one only:** paths that moved now name
+where the file actually is. The dates, the numbers and the reasoning are untouched.
+
+**The repository was renamed** from `GLM-5.3-Flash-EXL3-TP3-3x-DGX-Spark` to
+`GLM-5.3-Flash-EXL3-DGX-Spark`, because `TP3-3x` in the name was telling two-node owners this was not
+for them. GitHub redirects the old URL; a clone with the old remote keeps working, and
+`git remote set-url` is the tidy fix.
+
+**No measurement changed today. Nothing was re-run and nothing is claimed that was not claimed
+yesterday**, apart from the two `HELP-WANTED` figures above, which are labelled, and the preflight
+gate, which is arithmetic.
+
+
 ## 2026-09-06 — a TP=2 production candidate, and the two-node page's second retraction
 
 **The two-node track is now a complete recipe with a named production candidate, not a set of
-bring-up arms.** A patch tree (`patches/tp2full/`, thirteen files), an environment template
-(`envs/env.tp2-full.example`), a launcher (`scripts/start-tp2full.sh`), a per-rank fast-load sidecar
-and an autostart unit (`systemd/harem-exl3-tp2.service`), all measured end to end on two nodes with
+bring-up arms.** A patch tree (`tracks/tp2/patches/`, thirteen files), an environment template
+(`tracks/tp2/env.tp2-full.example`), a launcher (`scripts/start-tp2full.sh`), a per-rank fast-load sidecar
+and an autostart unit (`tracks/tp2/harem-exl3-tp2.service`), all measured end to end on two nodes with
 the protocol in [docs/09](docs/09-measurement-protocol.md) `[measured-here]`. Rewritten:
 [docs/15](docs/15-tp2-track.md). Raw record:
 [`results/speed/tp2-production-candidate.md`](results/speed/tp2-production-candidate.md).
@@ -66,8 +186,8 @@ patch** on a *single* peer pair: both devices per node moved ~90 GB across a swe
 ±3 % of the median of rounds 2–4 at two ranks as well, so three rounds is enough here too.
 
 **The autostart unit, installed and tested but left disabled.**
-[`systemd/harem-exl3-tp2.service`](systemd/harem-exl3-tp2.service) with
-[`motor-onkosul-exl3-tp2.sh`](systemd/motor-onkosul-exl3-tp2.sh) (one fabric peer per node instead of
+[`tracks/tp2/harem-exl3-tp2.service`](tracks/tp2/harem-exl3-tp2.service) with
+[`motor-onkosul-exl3-tp2.sh`](tracks/tp2/motor-onkosul-exl3-tp2.sh) (one fabric peer per node instead of
 two; the ConnectX-7 check stays 4/4 because it counts ports, not peers; `Conflicts=` **both** sibling
 units). `systemctl start` on both nodes → `/health` 200 at **+261 s** → gates 10/10 · 12/12 →
 `systemctl stop` clean. Its first attempt **failed correctly**: the preflight refused in one second
@@ -153,7 +273,7 @@ leave every rank a whole number of 128-column Hadamard blocks, so the whole of
 [docs/13](docs/13-full-scope-checkpoint.md) §7 fall away. Expert parallelism becomes **optional** —
 2,048/2 = 8 × 128 — and `preflight-tp3.py` already accepts `--ep 0` at two ranks while refusing it at
 three. The page lists the exact nine changes (three env lines, three launcher edits, the
-`patches/tp2/` tree, the image, the autostart unit), the four two-node arms we ran with their dates
+`tracks/tp2/patches/` tree, the image, the autostart unit), the four two-node arms we ran with their dates
 and settings, and the eleven-row table of production features we have **never** run at two ranks:
 `HAREM_SW_BLOCK_SIZE=256`, the fp8 draft cache, the fast-load sidecar, the memory ladder, expert
 parallelism on, a two-node reboot test and a second boot among them `[not tested]`.
@@ -275,8 +395,8 @@ workstation file is kept exactly as published, with a banner.
 **Status moves from release candidate to release**, on production configuration 10.
 
 **Autostart, and it has been through a reboot** `[measured-here]`. The `systemd/` directory stops
-being a template with three things wrong with it: `systemd/harem-exl3.service` and
-`systemd/motor-onkosul-exl3.sh` are the real unit and the real preflight, installed and `enabled` on
+being a template with three things wrong with it: `tracks/tp3/harem-exl3.service` and
+`tracks/tp3/motor-onkosul-exl3.sh` are the real unit and the real preflight, installed and `enabled` on
 all three nodes. The preflight runs seven checks — docker answering, `ibv_devinfo` 4/4, a ping to each
 fabric neighbour, `drop_caches`, then the env file, the image and this rank's fast-load sidecar
 manifest, the last three each having cost us a silent boot. `ExecStop` names `exl3-tp3` rather than
@@ -433,7 +553,7 @@ TP=2 arm that proved it was worth taking.
 
 - **Production configuration 9** `[measured-here]`. `turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw
   (`2a30229e`, MIT), full scope, at TP=3 with expert parallelism, on image `exl3-zeus:754421f` and the
-  new `patches/tp3full/` tree. Control is production 8 — the **pool of two runs of the same script on
+  new `tracks/tp3/patches/` tree. Control is production 8 — the **pool of two runs of the same script on
   the same day**, because that arm's documented run-to-run spread is about 7 %. Medians of three
   rounds, everything else identical:
 
@@ -516,9 +636,9 @@ TP=2 arm that proved it was worth taking.
   and dies on a `copy_` shape mismatch in `_vocab_loaders`; on anything older it raises "EXL3 weights
   cannot be zero-extended". [CREDITS](CREDITS.md).
 
-- **In the repository.** `patches/tp3full/` (the whole production tree, with its own README),
-  `patches/tp2/patch-fullscope-tp2.py` (the eight-anchor TP=2 patch, which had been referenced as
-  "not yet in repo"), `envs/env.tp3-full.example`, and `scripts/ab-quick2-full.sh` +
+- **In the repository.** `tracks/tp3/patches/` (the whole production tree, with its own README),
+  `tracks/tp2/patches/patch-fullscope-tp2.py` (the eight-anchor TP=2 patch, which had been referenced as
+  "not yet in repo"), `tracks/tp3/env.tp3-full.example`, and `scripts/ab-quick2-full.sh` +
   `scripts/boot-only-full.sh` — the tier-B harness for the full-scope tree, which differs from the
   production one in a single line and was added rather than edited, for the same reason the patch
   tree was ([docs/09](docs/09-measurement-protocol.md) §11.2).

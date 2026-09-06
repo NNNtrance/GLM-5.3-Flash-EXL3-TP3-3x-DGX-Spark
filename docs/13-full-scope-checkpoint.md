@@ -228,10 +228,10 @@ a hard exit if anything does not match. Two target files at TP=2:
 
 There are two copies of it, and the difference is exactly A9 and A10:
 
-- [`patches/tp2/patch-fullscope-tp2.py`](../patches/tp2/patch-fullscope-tp2.py) — eight anchors,
+- [`tracks/tp2/patches/patch-fullscope-tp2.py`](../tracks/tp2/patches/patch-fullscope-tp2.py) — eight anchors,
   A1–A8. This is the file the TP=2 measurement in §4 ran on. It is kept because it is the smaller,
   more readable statement of the same three layers, and because at TP≤2 nothing needs padding.
-- [`patches/tp3full/patch-fullscope-tp3.py`](../patches/tp3full/patch-fullscope-tp3.py) — ten
+- [`tracks/tp3/patches/patch-fullscope-tp3.py`](../tracks/tp3/patches/patch-fullscope-tp3.py) — ten
   anchors, A1–A10, and the one production runs (§7).
 
 | # | file | layer | what it does |
@@ -769,7 +769,7 @@ be a whole number of 128-column Hadamard blocks. Vocab `padding_size` 192 → **
 155,136 = 3 × 404 × 128) and shared-expert intermediate 2,112 → **2,304** (768 = 6 × 128 per rank).
 The arithmetic, including why 2,176 looks right and is not, is
 [03](03-tp3-padding-and-sidecars.md) §1.1. Both are no-ops at TP≤2 and both live in
-`patches/tp3full/patch-vllm-tp3.py`, with matching gates in `preflight-tp3.py`.
+`tracks/tp3/patches/patch-vllm-tp3.py`, with matching gates in `preflight-tp3.py`.
 
 **A9 — one patch, and it is TP=3 only.** vLLM's tuple-shard path (`(0, 1, 2)`) slices the
 checkpoint's single 24,576-wide `qkv_proj` using offsets built from the module's `output_sizes` —
@@ -824,7 +824,7 @@ ranks 1 and 2. Rank 0 passed — **a single-rank test could not have seen it**
 **And two things that were not code at all:** the sidecar generator had to grow a rewritten
 `quantization_config.json` (the packed mapping travelling with the checkpoint — a 48 MB copy, because
 `cuda-exl3` needs `tensor_storage` out of the same dict; [03](03-tp3-padding-and-sidecars.md) §2),
-and the whole tree had to move into `patches/tp3full/` rather than into the production patch
+and the whole tree had to move into `tracks/tp3/patches/` rather than into the production patch
 directory, because that directory's file list is the fast-load manifest identity and adding one file
 to it refuses the next production boot (§6.4, [09](09-measurement-protocol.md) §11.2).
 
@@ -847,7 +847,7 @@ bounded ranges (`3inst` [−3.9570, +3.9727], `mcg` [−3.9492, +3.9492], `mul1`
 is the right standard underneath a padded-load path.
 
 Both failure modes above are loud, and both leave a **half-loaded stack**, so the gate goes in front
-of them rather than behind. `patches/tp3full/check-padload-tp3.py` runs in the prelude, reads all
+of them rather than behind. `tracks/tp3/patches/check-padload-tp3.py` runs in the prelude, reads all
 three capabilities out of the installed source by inspection (there is no version string to trust,
 because the image is built from a git checkout), prints one line and exits **23** if any is missing —
 before a byte of weight is read:
@@ -941,7 +941,7 @@ The four costs that remain are the four that were never about the drafter.
 | draft acceptance | **none** `[retracted]` | we published −2.4 points here and it was our harness. See below |
 | accepted tokens per step | **none** `[retracted]` | never a second cost: `accept_len = 1 + k × acceptance` holds on all 90 rows, so this was the same number written twice |
 | prefill, fresh | −2.2 % | inside the ±3 % equality band; not a real loss, and prefill-7k moved +2.5 % the other way |
-| maintenance | **a second patch tree**, `patches/tp3full/`, whose `patch-vllm-tp3.py` and `preflight-tp3.py` diverge from `patches/tp3/` on purpose | a fix in one does not reach the other. Merging them is technically possible today — the constants derive from `tp` and 128 and are no-ops at TP≤2 — and was not done, so production 8's fast-load identity would keep working. [11](11-open-issues.md) §2.24 |
+| maintenance | **a second patch tree**, `tracks/tp3/patches/`, whose `patch-vllm-tp3.py` and `preflight-tp3.py` diverge from `patches/tp3/` on purpose | a fix in one does not reach the other. Merging them is technically possible today — the constants derive from `tp` and 128 and are no-ops at TP≤2 — and was not done, so production 8's fast-load identity would keep working. [11](11-open-issues.md) §2.24 |
 | disk | **53 GB × 3** for the second fast-load sidecar, on top of a second 154 GiB checkpoint × 3 | one node had 51 G free before this and needed the old sidecars cleared first |
 | quality | **none found, and it was looked for** | MMLU 86.47 ±0.74 against 86.4 ±0.7 — 0.07 points, a tenth of either bar — plus both gates cold and warm on the same engine instance in one session |
 
@@ -1027,4 +1027,4 @@ Three levels, none of which needs an image rebuild:
 [10 — Results and roofline](10-results-and-roofline.md) §1 for production 9 in the results
 progression, [11 — Open issues](11-open-issues.md) §2.22 and §2.24–§2.25 for what this opened,
 [03](03-tp3-padding-and-sidecars.md) §1.1 for the padding arithmetic, and
-[`patches/tp3full/README.md`](../patches/tp3full/README.md) for the directory itself.
+[`tracks/tp3/patches/README.md`](../tracks/tp3/patches/README.md) for the directory itself.

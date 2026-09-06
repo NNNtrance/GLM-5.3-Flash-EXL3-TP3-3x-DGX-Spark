@@ -1,12 +1,14 @@
 # envs — one environment file per node, derived, never copied
 
-[`env.tp3.example`](env.tp3.example) is the template. Every variable in it carries a one-line reason,
-and the ones with a real cost carry the measurement that decided them.
+**The templates themselves live under [`tracks/`](../tracks/README.md), one folder per node count,
+because they are the files that differ between the two arrangements. This page is the rule that
+governs all of them**, and every variable in each template carries a one-line reason, with the ones
+that have a real cost carrying the measurement that decided them.
 
 **Three templates, and the third is a different node count.**
-[`env.tp3.example`](env.tp3.example) is the routed-experts-only three-node file;
-[`env.tp3-full.example`](env.tp3-full.example) is production configuration 9/10;
-[`env.tp2-full.example`](env.tp2-full.example) is the **two-node production candidate**
+[`env.tp3.example`](../tracks/tp3/env.tp3.example) is the routed-experts-only three-node file;
+[`env.tp3-full.example`](../tracks/tp3/env.tp3-full.example) is production configuration 9/10;
+[`env.tp2-full.example`](../tracks/tp2/env.tp2-full.example) is the **two-node production candidate**
 ([docs/15](../docs/15-tp2-track.md) §5) — `NNODES=2`, `TP_SIZE=2`, `ENABLE_EP=0`, no padding
 sidecar, `gpu-memory-utilization` **0.85** rather than 0.83, and four settings that are not
 optional at two ranks. The rule below applies to all three.
@@ -25,19 +27,19 @@ Derive each node's copy from the template instead, on that node, with `sed`.
 On the head node (rank 0):
 
 ```
-sed -e 's/@NODE_RANK@/0/' -e 's/@HOST_IP@/192.0.2.10/' -e 's/@HEAD_IP@/192.0.2.10/' -e 's/@IFACE@/eth0/' -e "s|@HOME@|$HOME|g" envs/env.tp3.example > ~/exl3-zeus/.env.tp3
+sed -e 's/@NODE_RANK@/0/' -e 's/@HOST_IP@/192.0.2.10/' -e 's/@HEAD_IP@/192.0.2.10/' -e 's/@IFACE@/eth0/' -e "s|@HOME@|$HOME|g" tracks/tp3/env.tp3.example > ~/exl3-zeus/.env.tp3
 ```
 
 On worker-1 (rank 1):
 
 ```
-sed -e 's/@NODE_RANK@/1/' -e 's/@HOST_IP@/192.0.2.11/' -e 's/@HEAD_IP@/192.0.2.10/' -e 's/@IFACE@/eth0/' -e "s|@HOME@|$HOME|g" envs/env.tp3.example > ~/exl3-zeus/.env.tp3
+sed -e 's/@NODE_RANK@/1/' -e 's/@HOST_IP@/192.0.2.11/' -e 's/@HEAD_IP@/192.0.2.10/' -e 's/@IFACE@/eth0/' -e "s|@HOME@|$HOME|g" tracks/tp3/env.tp3.example > ~/exl3-zeus/.env.tp3
 ```
 
 On worker-2 (rank 2):
 
 ```
-sed -e 's/@NODE_RANK@/2/' -e 's/@HOST_IP@/192.0.2.12/' -e 's/@HEAD_IP@/192.0.2.10/' -e 's/@IFACE@/eth0/' -e "s|@HOME@|$HOME|g" envs/env.tp3.example > ~/exl3-zeus/.env.tp3
+sed -e 's/@NODE_RANK@/2/' -e 's/@HOST_IP@/192.0.2.12/' -e 's/@HEAD_IP@/192.0.2.10/' -e 's/@IFACE@/eth0/' -e "s|@HOME@|$HOME|g" tracks/tp3/env.tp3.example > ~/exl3-zeus/.env.tp3
 ```
 
 Replace the addresses with your own management addresses and `eth0` with your own management

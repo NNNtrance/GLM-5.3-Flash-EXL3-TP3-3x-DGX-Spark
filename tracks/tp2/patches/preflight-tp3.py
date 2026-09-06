@@ -185,11 +185,25 @@ def check_vocab(t: dict, tp: int) -> None:
     # the padded total must be whole blocks, because the block mixes across its
     # columns before svh is applied. lcm(64, 3) = 192 -> 154944 -> 51648/rank =
     # 403.5 blocks: refused. lcm(128, 3) = 384 -> 155136 -> 51712 = 404 x 128.
-    if padded_default % tp == 0 and padded_default % HAD_BLOCK == 0:
+    # The per-rank condition is a THIRD one and it is not implied by the other
+    # two. At tp=4, 154880 already divides 4 and is already 1210 x 128, so the
+    # two checks below pass -- but 154880/4 = 38720 = 302.5 x 128, half a
+    # Hadamard block per rank, which is exactly the defect lcm(64, 3) = 192
+    # produces at tp=3. It happens to be harmless at tp=2 (77440 = 605 x 128)
+    # and that is luck, not a rule. The unit that always works is HAD_BLOCK * tp
+    # (512 at tp=4 -> 155136 -> 38784 = 303 x 128), not lcm(HAD_BLOCK, tp),
+    # which is 128 at tp=4. Not exercised on hardware: we own three nodes.
+    if (padded_default % tp == 0 and padded_default % HAD_BLOCK == 0
+            and (padded_default // tp) % HAD_BLOCK == 0):
         ok(f"vocab {v} pads to {padded_default} at the stock padding_size=64, "
-           f"divides tp={tp} and is a whole number of {HAD_BLOCK}-blocks; "
-           f"no patch needed")
+           f"divides tp={tp} and gives {padded_default // tp} rows per rank = "
+           f"{padded_default // tp // HAD_BLOCK} x {HAD_BLOCK}; no patch needed")
         return
+    if padded_default % tp == 0 and padded_default % HAD_BLOCK == 0:
+        note(f"vocab {v} divides tp={tp} and is whole {HAD_BLOCK}-blocks, but "
+             f"per rank it is {padded_default / tp / HAD_BLOCK:g} x {HAD_BLOCK}: "
+             f"a 6-bit EXL3 lm_head pad may not share a Hadamard block with real "
+             f"output, so the vocabulary still has to be padded")
     bad_default = (f"vocab {v} with the stock padding_size=64 stays {padded_default}, "
                    f"and divide({padded_default}, {tp}) asserts inside "
                    f"VocabParallelEmbedding")

@@ -85,7 +85,7 @@ Tick what applies. Every one of these has been the answer at least once:
 - [ ] All nodes rebooted together, never one alone (`docs/00` §3.4)
 - [ ] The quality gates run cold **and** warm (`scripts/correctness-probe.py`, `scripts/code-exam.py`)
 - [ ] `audit/run-audit.sh` run, and its output compared against `audit/README.md`
-- [ ] The boot gates in the log read as `patches/tp3full/README.md` says they should
+- [ ] The boot gates in the log read as `tracks/tp3/patches/README.md` says they should
 - [ ] Env file derived per node with `sed`, never copied between nodes (`envs/README.md`)
 
 ## 8. Anything you would rather we did not publish

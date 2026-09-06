@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """In-container vLLM patches for GLM-5.3-Flash at TP=3 (Zeus/cuda-exl3 stack).
 
-FULL-SCOPE COPY (``patches/tp3full/``). Identical to ``patches/tp3/`` except for
+FULL-SCOPE COPY (``tracks/tp3/patches/``). Identical to ``patches/tp3/`` except for
 two constants, both raised from a 64-based unit to a 128-based one because a
 full-scope EXL3 checkpoint quantizes the head and the shared expert, and every
 EXL3 pad has to be a whole number of 128-element Hadamard blocks:

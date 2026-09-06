@@ -3,9 +3,15 @@
 > **This directory used to hold a template with three things wrong with it, and nothing installed
 > anywhere.** All three are fixed, the unit is installed and `enabled` on all three of our nodes, and
 > it has been through a **simultaneous reboot of the whole cluster with a live health check at the
-> other end** `[measured-here]`. The unit is [`harem-exl3.service`](harem-exl3.service); the
-> preflight it calls is [`motor-onkosul-exl3.sh`](motor-onkosul-exl3.sh) and is now a real script
-> rather than a name. Read this page before you install either.
+> other end** `[measured-here]`. The unit is
+> [`harem-exl3.service`](../tracks/tp3/harem-exl3.service); the preflight it calls is
+> [`motor-onkosul-exl3.sh`](../tracks/tp3/motor-onkosul-exl3.sh) and is now a real script rather than
+> a name. Read this page before you install either.
+>
+> **The units themselves live with their tracks**, in [`tracks/tp3`](../tracks/tp3/) and
+> [`tracks/tp2`](../tracks/tp2/), because there is one per node count and mixing them is the failure
+> this page exists to prevent. This page is the shared part: the hazard, the install, what was wrong
+> with the original template, and the reboot test.
 
 The container still runs with `--restart no` and nothing retries it. That has not changed and is not
 an oversight: a half-started rank quietly retrying on its own is exactly the "fluent and wrong"
@@ -37,8 +43,8 @@ disable it in the same change. On our nodes `harem-motor.service` is now `disabl
 ## Install
 
 > **At TP=2 there is a unit of its own — you do not edit this one.**
-> [`harem-exl3-tp2.service`](harem-exl3-tp2.service) with
-> [`motor-onkosul-exl3-tp2.sh`](motor-onkosul-exl3-tp2.sh). Four differences and no more:
+> [`harem-exl3-tp2.service`](../tracks/tp2/harem-exl3-tp2.service) with
+> [`motor-onkosul-exl3-tp2.sh`](../tracks/tp2/motor-onkosul-exl3-tp2.sh). Four differences and no more:
 > `WorkingDirectory`/`ExecStart` point at the two-node tree and `start-tp2full.sh`; `ExecStop` names
 > `exl3-tp2`; `Conflicts=` lists **both** sibling units, because the three-node engine is the second
 > engine on those nodes; and `FABRIC_PEERS` becomes **one** address per node rather than two (the
@@ -54,7 +60,7 @@ disable it in the same change. On our nodes `harem-motor.service` is now `disabl
 > "reboot **both** together, never one" — we have **not** run a two-node reboot test `[not tested]`.
 > [docs/15](../docs/15-tp2-track.md) §2.6 and §5.7.
 
-On **every** node, with `scripts/`, `patches/tp3full/` and the env file already in place per
+On **every** node, with `scripts/`, `tracks/tp3/patches/` and the env file already in place per
 [docs/03](../docs/03-tp3-padding-and-sidecars.md) and the README quick start:
 
 ```
@@ -62,11 +68,11 @@ sudo systemctl disable --now harem-motor.service
 ```
 
 ```
-install -m 0755 systemd/motor-onkosul-exl3.sh "$HOME/exl3-zeus/motor-onkosul-exl3.sh"
+install -m 0755 tracks/tp3/motor-onkosul-exl3.sh "$HOME/exl3-zeus/motor-onkosul-exl3.sh"
 ```
 
 ```
-sed "s#@USER@#$USER#g; s#@HOME@#$HOME#g" systemd/harem-exl3.service | sudo tee /etc/systemd/system/harem-exl3.service >/dev/null
+sed "s#@USER@#$USER#g; s#@HOME@#$HOME#g" tracks/tp3/harem-exl3.service | sudo tee /etc/systemd/system/harem-exl3.service >/dev/null
 ```
 
 ```
@@ -92,7 +98,7 @@ sudo systemctl stop harem-exl3
 ## The three things that were wrong with the template, and what each became
 
 **1. The preflight script did not exist.** It does now:
-[`motor-onkosul-exl3.sh`](motor-onkosul-exl3.sh), seven checks, at most ten minutes of waiting.
+[`motor-onkosul-exl3.sh`](../tracks/tp3/motor-onkosul-exl3.sh), seven checks, at most ten minutes of waiting.
 Four are the fabric ones the NVFP4 sibling also runs — `docker` answering, `ibv_devinfo` showing
 **4/4** `PORT_ACTIVE`, a ping to each fabric neighbour, then `sync` and `drop_caches` because the
 loader is sensitive to page-cache pressure ([docs/08](../docs/08-fast-boot.md) §5). Three are this

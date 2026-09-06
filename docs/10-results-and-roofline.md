@@ -392,6 +392,33 @@ checkpoint-level rather than format-level**: an NVFP4 checkpoint that quantized 
 would collect the same ~18 ms per decode step, and none is known to exist `[not tested]`. Read this
 table as "this is what the EXL3 stack does today", not as "EXL3 beats NVFP4".
 
+### 3.1 Quality, on the same comparison: three benchmarks, two won and one lost
+
+The row above says "gates 10/10 · 12/12" on both stacks, which is true and thin. On 6–7 September
+production 12 ran three of the sibling's benchmarks against its 3 September battery — same harness
+version, same flags, same three nodes, temperature 0, effort `low` `[measured-here]`:
+
+| | **EXL3 TP=3, production 12** | NVFP4 TP=3, 3 Sep |
+|---|---|---|
+| GSM8K, 200 questions, 8-shot CoT | **97.5 %** (195/200) | 94.0 % (188/200) |
+| IFEval, 541 prompts | prompt **80.0 %**, instruction **86.0 %** | prompt 78.9 %, instruction 85.1 % |
+| tool-eval-bench, hardmode, 88 × 8 trials | **85.5 ±1.3** (`final_score` 86) | **87.8 ±0.9** |
+| MMLU | 86.47 ±0.74 (1,995-question sample, TP=3) | 85.9 ±0.3 (full, 14,042 questions) |
+| needle at 1M | **deferred** — needle-lite 6/6 at 64K/128K, one 969,468-token request correct | 20/20 |
+
+**The tool-eval line is the one to read properly, and it is not a quality collapse.** The −2.3 points
+is real (permutation p = 0.0048) and it is **four scenarios out of 88** — on the other 84 this stack
+is 0.2 ahead, nine of fourteen categories are identical digit for digit, and malformed calls,
+timeouts, empty content and refusals are zero on both sides. TC-51 alone is 47 % of it and is a
+**grader ordering rule**, not a wrong answer: this stack issues the calendar event and its
+notification in the *same* turn, which the harness's own `parallel_tool_calls: true` invites and that
+scenario's Python fails outright. The chat-template explanation was tested with the old template as
+the single variable and **refuted**. What is still confounded is the checkpoint against the vLLM
+build, which changed together; the next step is a build A/B.
+[`../results/gates/quality-battery-production-12.md`](../results/gates/quality-battery-production-12.md)
+has the scenario table, the statistics and the template arm; [11](11-open-issues.md) §2.30 keeps it
+open.
+
 ---
 
 ## 4. Roofline
@@ -1098,10 +1125,11 @@ argued about (§5.2, [11](11-open-issues.md) §2.5) `[measured-here]`.
 
 - **Anything at max reasoning effort** `[not tested]`. See [09](09-measurement-protocol.md) §7.
 - **MMLU at TP=3** `[not tested]` — the sample was run at TP=2.
-- **IFEval, GSM8K, needle-in-a-haystack, tool-eval-bench, ExtractBench** on this stack
-  `[not tested]`. All of them exist for the NVFP4 sibling; none has been re-run here. Anyone
-  comparing the two on quality should treat this repository as having only the gates and one MMLU
-  sample.
+- ~~**IFEval, GSM8K, tool-eval-bench**~~ **Done on 6–7 September** `[measured-here]` — §3.1 and
+  [`../results/gates/quality-battery-production-12.md`](../results/gates/quality-battery-production-12.md).
+  Still missing: **needle-in-a-haystack at 1M** and the **full MMLU**, both staged in that battery and
+  deferred on time before they started, and **ExtractBench Short**, which neither this stack nor the
+  NVFP4 sibling's shipped build has ever run `[not tested]`.
 - **Prefix caching.** With a 3,328-token attention block, our benchmark prompts never fill one, so
   the prefix-cache hit rate is 0 % throughout and the benchmark says nothing about it
   `[measured-here]`.

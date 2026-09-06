@@ -47,7 +47,8 @@ this configuration:
 | Aggregate at 8 concurrent streams (C8) | **196.1** tok/s |
 | Prefill, fresh unseen ~8K prompts | **1,744** tok/s |
 | KV pool at `max_model_len` 1,000,000 | **7,041,322** tokens at `gpu-memory-utilization 0.88` — about 7.0 concurrent 1M-token requests |
-| Quality | correctness probe **10/10**, code exam **12/12** cold and warm; tool-call gate **8/8**; needle-lite **6/6** at 64K and 128K; MMLU sample (1,995 q) **86.47 ±0.74**, carried from production 9 `[not tested]` on this configuration |
+| Quality gates | correctness probe **10/10**, code exam **12/12** cold and warm; tool-call gate **8/8**; needle-lite **6/6** at 64K and 128K; MMLU sample (1,995 q) **86.47 ±0.74**, carried from production 9 `[not tested]` on this configuration |
+| Quality benchmarks, against the NVFP4 sibling recipe | GSM8K **97.5 %** (sibling 94.0), IFEval **80.0 % prompt / 86.0 % instruction** (78.9 / 85.1), tool-eval-bench **85.5 ±1.3** (**87.8 ±0.9** — behind, and it is four scenarios out of 88; the largest is a grader ordering rule, the template explanation was tested and refuted, and the build/checkpoint confound is still open). The 1M needle and the full MMLU were **deferred on time** and are not run `[not tested]`. [`results/gates/quality-battery-production-12.md`](results/gates/quality-battery-production-12.md) |
 | Long-context stress | one **969,468-token** request correct in 569.6 s; **eight concurrent ~128K lanes** 8/8, 640,904 prompt tokens in 227.5 s |
 | Cold boot, `docker run` → API ready | **272 s** (the one-off dump boot that writes the sidecar is 590 s) |
 | **Boot from power-on**, all three nodes rebooted together, autostart unit enabled | `/health` 200 at **311 s** by the wall clock, timed from the reboot command ([systemd](systemd/README.md), [`results/boot/boot-ledger.md`](results/boot/boot-ledger.md)) |

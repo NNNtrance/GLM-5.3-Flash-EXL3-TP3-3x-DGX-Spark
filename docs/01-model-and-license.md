@@ -194,6 +194,7 @@ Five things worth holding on to, three of which are still true whichever checkpo
 | | |
 |---|---|
 | Repository | `incoai/GLM-5.3-Flash-DFlash2` |
+| Revision we run | **`dc77ff1c`**, 28 August. The newer `bf582e4e` (31 August) was measured on 7 September and is **equal on acceptance at every concurrency with mixed signs**, so the pin did not move — [docs/04](04-dflash2-port.md) §8.1 `[measured-here]` |
 | Size | 2.3 GB, BF16, 5 draft layers over 45 target layers |
 | Depth we run | `k = 7` — see the A/B in [docs/04](04-dflash2-port.md) |
 | Licence | **CC BY-NC-ND 4.0** — non-commercial, no derivatives, attribution required |

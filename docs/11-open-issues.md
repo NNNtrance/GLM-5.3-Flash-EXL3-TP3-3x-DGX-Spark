@@ -1470,6 +1470,53 @@ changed on this page besides the result: §1.9 row 8's "the sidecar removed the 
 and is retracted in §1.12, and the graph-pool price above is corrected downward in
 [17](17-memory-ledger.md) §2.3.
 
+### 2.30 The tool-eval gap against the NVFP4 sibling — the template is eliminated, the build and the weights are still varying together
+
+**The measurement.** On production 12, tool-eval-bench (hardmode, 88 scenarios, 8 trials, seed 42,
+temperature 0, effort `low`) scores **85.5 ±1.3** against the NVFP4 sibling recipe's **87.8 ±0.9** on
+the same harness version and the same flags, 6 September `[measured-here]`. It is not trial noise —
+Welch t = 4.02, exact permutation p = 0.0048 — and it is **four scenarios out of 88**: with TC-51,
+TC-21, TC-74 and TC-87 removed, this stack is **+0.22 ahead** on the other 84. Nine of fourteen
+categories are identical digit for digit; the only failure codes recorded on either side are
+`wrong_args` and `missing_step`; malformed calls, timeouts, empty content, refusals and schema
+violations are **zero in 1,408 scenario-runs on both stacks**. The same engine the same night scored
+97.5 % on GSM8K against the sibling's 94.0 and beat it on both IFEval axes. Full breakdown:
+[`../results/gates/quality-battery-production-12.md`](../results/gates/quality-battery-production-12.md).
+
+**What is already settled, and it is most of the item.** TC-51 alone is 47 % of the gap and it is a
+**grading rule, proven from the grader's source**: `call.turn <= valid_event.turn` fails a
+notification issued in the *same* turn as the event it announces, and this stack batches those two
+dependent calls into one turn with the plan, the arguments, the recipients and the date all correct.
+The harness invites the batching — it sends `parallel_tool_calls: true` on every request. And the
+**chat template hypothesis was tested and refuted the same night**: production 12 was rebooted with
+the 27 August template (`04c4e9e9`) as the single changed line and TC-51 and TC-21 — 72 % of the gap
+between them — stayed **0/8**, with the same trace and the same `parallel tool turns: 2` diagnostic.
+The remaining block favours the old template by +1.12 points per trial at **p = 0.20**, CI
+[−0.45, +2.70]; as a share of the gap that is a point estimate of **28 % with a 95 % interval of
+[−11 %, +68 %]**, which contains zero. **The new template stays in production**: the gain is
+unmeasurable and the old template carries three real rendering defects, all on an agent's hot path.
+
+**What is open.** At least 72 %, and possibly all, of the −2.3 points sits with two variables that
+changed together and have not been separated: the **checkpoint** and the **vLLM build**
+(`0.1.dev20051+g487ecf187` against `0.1.dev0+lil.jovian.9c4dd0548`), the second of which carries a
+different speculative-decoding implementation with it. Confidence that this stack's agentic quality is
+not meaningfully below the sibling's is **high**; confidence about where the residual ~1.6 points
+lives is **low**, and saying otherwise would be inventing a result.
+
+**Next step — the build, not the weights.** Same checkpoint, same template, this cluster, the vLLM
+build as the only variable, run on the eight scenarios of the template arm rather than the full 88:
+about 12 minutes of engine time per arm plus two boots. A same-session NVFP4 control is **not**
+available — that line is closed and its stack no longer stands on these nodes — so the split has to be
+made from this side. Until it is, no line in this repository should attribute the gap to the
+quantization, and none does.
+
+**One behavioural note for agent users, because it reproduced under every arm.** This stack will batch
+two *dependent* tool calls into a single turn — create the record and announce it, without waiting to
+see whether the first call succeeded. It is efficient and usually right, and it is wrong wherever the
+second call must not happen if the first one failed, or wherever a framework grades on turn ordering.
+Constrain it in the system prompt or send `parallel_tool_calls: false`; that setting has never been
+measured here `[not tested]`.
+
 ---
 
 ## 3. Never run
@@ -1478,7 +1525,9 @@ and is retracted in §1.12, and the graph-pool price above is corrected downward
 |---|---|
 | Anything at **max reasoning effort** | Days of cluster time. Everything published here is at `low`. |
 | **MMLU at TP=3 on the fallback checkpoint** | Now run on the *production* checkpoint at TP=3 (86.47 ±0.74). The 86.4 ±0.7 the fallback carries is still a TP=2 figure, so the two are not a like-for-like pair; the gates are identical between arrangements, so there is no signal that justifies the hours — but it is an absence. **6 September: the fallback checkpoint and its image (`62f53e6`) were removed from our cluster to make room; we will not run this.** |
-| **IFEval, GSM8K, needle-in-a-haystack, tool-eval-bench, ExtractBench** | All exist for the NVFP4 sibling recipe; none re-run on this stack. Anyone comparing the two on quality should treat this repository as having the gates and one MMLU sample. |
+| ~~**IFEval, GSM8K, tool-eval-bench**~~ — **run on 6–7 September** | No longer an absence. All three ran on production 12 against the NVFP4 sibling's 3 September battery at the same harness settings: GSM8K **97.5 %** against 94.0, IFEval **80.0 / 86.0 %** against 78.9 / 85.1, tool-eval-bench **85.5 ±1.3** against 87.8 ±0.9. The tool-eval gap is four scenarios out of 88 and is open as §2.30. [`../results/gates/quality-battery-production-12.md`](../results/gates/quality-battery-production-12.md). |
+| **Needle-in-a-haystack at 1M, and the full 14,042-question MMLU** | Staged in the same battery and **deferred on time** before either started — the two long tests against a session that had already run 3 h 24 min. Not started, not failed, not abandoned mid-run. The sibling has 20/20 and 85.9 ±0.3. What exists here instead: the **1,995-question MMLU sample at TP=3 on this checkpoint, 86.47 ±0.74**, plus needle-lite 6/6 at 64K and 128K, one 969,468-token request and eight concurrent ~128K lanes `[not tested]`. |
+| **ExtractBench Short** | Never run on this stack `[not tested]` — and, checking the claim this row used to make, **never run on the NVFP4 sibling's shipped build either**: what that recipe carries is a 94.51 against an H100 FP8 reference's 96.46 on the 215-document set from an **earlier, different** build, which it says explicitly must not be quoted as a figure for the build it ships `[reported]`. So this is a dimension neither line has measured, not one where we are behind. |
 | **The newer checkpoint revision** (`aba59d21`, four days newer than the one we pinned) | Not tested. |
 | **`NCCL_MAX_NCHANNELS=8` on the NVFP4 stack** | Same plugin, same fabric, same TP=3, so it should transfer — one line per node, reversible. Not applied there. |
 | **The mesh plugin patches on the NVFP4 stack** | The idle second cable and the host bounce buffer are properties of the fabric and the plugin, not of the quantization, so both should transfer and are worth more there than the channel cap. Not applied. |

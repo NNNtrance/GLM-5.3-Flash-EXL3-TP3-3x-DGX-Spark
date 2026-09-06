@@ -11,6 +11,99 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-07 — The newer DFlash2 drafter revision, measured: acceptance does not move, and the pin does not either
+
+**The one instrument a drafter swap actually moves is acceptance, and it did not move.**
+`incoai/GLM-5.3-Flash-DFlash2` at **`bf582e4e`** (31 August, *"Checkpoint update"*) against the pinned
+**`dc77ff1c`** — identical file size to the byte, byte-identical raw config, only the trained weights
+differing — in one 23-minute engine window against the production-12 arm of the previous night's
+CUDA-graph A/B, three sweep rounds each: **acceptance 61.32 / 61.61 % at C1 / C8 against 62.08 /
+60.53**, under 1.1 points at all five concurrency levels **with mixed signs**, accepted tokens per step
+level (5.29 / 5.31 against 5.35 / 5.24), gates **10/10 and 12/12 cold and warm on the first attempt**,
+tool-call 8/8, KV pool −0.39 % `[measured-here]`. **No measurable difference; `dc77ff1c` stays** — and
+this is the second negative trial of that checkpoint, on two stacks with two engines.
+
+**Aggregate speed read ~5 % low, and it is written up as a boot rather than as a result.**
+`prefill-fresh` fell by the same **5.04 %**, and the drafter's weight values cannot change prefill at
+identical shapes, so the whole boot was uniformly slow. The reference arm's own round-to-round spread
+was ±4.9 % at C1, as large as the difference, and the two arms are different boot regimes — a warm
+sidecar-loaded engine against a fresh sidecar-less one — on a stack that spreads 15.9 % boot to boot.
+Thermals level, no throttle bit on any node. The raw reading is left in the table rather than adjusted
+away.
+
+**Two by-products worth more than the arm.** A **sidecar-less TP=3 boot was timed for the first time —
+275 s**, against an internal 8–10 minute estimate that was simply wrong. And the drafter zero-pad proof
+in `patch-dflash-tp3.py` ran against an **independent** checkpoint for the first time and held:
+26,214,400 padded elements verified zero on the rank that owns all of the padding.
+[docs/04](docs/04-dflash2-port.md) §8.1 has the table and what promotion would have cost — two
+environment lines *and* a mandatory sidecar re-dump under a new directory name, because the sidecar
+stores the draft tensors and the draft path is part of the sidecar identity, so `preflight-fastload`
+refuses rather than silently restoring the old drafter. [docs/01](docs/01-model-and-license.md) §4 now
+names the revision we run.
+
+---
+
+## 2026-09-07 — The quality battery: two benchmarks won, one lost by four scenarios out of 88, and the explanation we liked was refuted the same night
+
+**This repository had two cheap gates and one MMLU sample; it now has three benchmarks.** IFEval,
+GSM8K and tool-eval-bench ran on production 12 on 6–7 September against the NVFP4 sibling recipe's
+3 September battery — same harness build (`2.6.1.dev39`), same seed, same temperature, same effort
+`low`, one engine, no restart between tests. **GSM8K 97.5 % against 94.0**, **IFEval 80.0 % prompt and
+86.0 % instruction against 78.9 / 85.1**, and **tool-eval-bench 85.5 ±1.3 against 87.8 ±0.9**
+`[measured-here]`. Two of the three rows in [docs/11](docs/11-open-issues.md) §3 that said "exists for
+the sibling, never run here" close. New page:
+[`results/gates/quality-battery-production-12.md`](results/gates/quality-battery-production-12.md).
+
+**The number that moved the wrong way is the one worth the page, and it is four scenarios.** The
+−2.3 points on tool-eval is not trial noise (Welch t = 4.02, exact permutation p = 0.0048) and it is
+**not spread**: remove TC-51, TC-21, TC-74 and TC-87 and this stack is **+0.22 ahead on the other 84
+scenarios**. Nine of fourteen categories are identical digit for digit. Across 1,408 scenario-runs on
+both stacks, the only failure codes recorded are `wrong_args` and `missing_step` — **malformed tool
+calls, timeouts, empty content, refusals and schema violations are all zero**, and `max_points` is 176
+in both files, which is the direct proof that no scenario was dropped for an infrastructure failure.
+The same engine the same night won GSM8K by 3.5 points.
+
+**TC-51 is 47 % of the gap and it is a grading rule, read out of the grader's source.** The scenario
+wants a calendar event created and the invitation sent; this stack does both correctly and issues them
+**in the same assistant turn**, which `call.turn <= valid_event.turn` fails outright. The harness's own
+request body sends `parallel_tool_calls: true` on every call, so the API layer invites exactly what
+that scenario's Python forbids. Two of the other three are real and are written up as real — an
+instruction violation on TC-74 and a filter inconsistency mid-pagination on TC-87.
+
+**The explanation this repository preferred was tested as its own engine arm and refuted.** The two
+batteries were served with different chat templates — the sibling's checkpoint ships `zai-org`'s
+27 August template (`04c4e9e9`), this stack mounts the 4 September one (`690b7052`) — and every item in
+the diff is in tool-call rendering. Production 12 was rebooted with the old template as the **single**
+changed line (verified by hashing the file inside the container, not by reading a mount) and
+**TC-51 and TC-21, 72 % of the gap between them, stayed 0/8** with the same trace and the same
+`parallel tool turns: 2` diagnostic. The remaining block favours the old template by +1.12 points per
+trial at **p = 0.20**, CI [−0.45, +2.70] — a template share of **28 %, 95 % CI [−11 %, +68 %]**, an
+interval containing zero. **The new template stays in production**: the gain is unmeasurable and the
+old one carries three real rendering defects, all on an agent's hot path. Boot, KV pool and gates were
+unaffected on both arms and production was restored and re-verified.
+
+**What stays open is the build against the weights, and it is filed rather than guessed at.** The
+checkpoint and the vLLM build (with its different speculative-decoding implementation) changed
+together and no measurement here separates them; the next step is a build A/B on the same eight
+scenarios, about 12 minutes of engine time per arm. A same-session sibling control is not available.
+[docs/11](docs/11-open-issues.md) §2.30, which also carries the behavioural note for agent users: this
+stack batches two *dependent* tool calls into one turn, which is efficient and is wrong wherever the
+second must not fire if the first failed.
+
+**Two of the five staged tests did not run, and that is in the tables rather than in a footnote.** The
+1M needle and the full 14,042-question MMLU were **deferred on time** after 3 h 24 min of engine
+window, before either started. The 1,995-question MMLU sample at TP=3 on this checkpoint,
+**86.47 ±0.74**, is unaffected and remains the only MMLU this stack has. Throttle mask was `0x0` on
+every telemetry sample of every node in every test, so nothing on that page is thermal.
+
+**And one row of ours was wrong in a way checking it fixed.** [docs/11](docs/11-open-issues.md) §3 said
+ExtractBench "exists for the NVFP4 sibling recipe"; it does not. That recipe never ran it on the build
+it ships either — the 94.51 it carries is from an earlier, different build, with its own note saying it
+must not be quoted as one. ExtractBench is a dimension **neither** line has measured, which is not what
+we had published.
+
+---
+
 ## 2026-09-06 — Retracted: the indexer workspace does not fail loudly. The issue author corrected us, and checking it corrected one thing back
 
 **We published a failure mode we had not read carefully, and the person we published it to caught

@@ -84,8 +84,17 @@ was rejected on, which is the point of measuring swap traffic instead.
 
 ## Broader quality
 
+**The three-benchmark battery of 6–7 September is its own page**:
+[`quality-battery-production-12.md`](quality-battery-production-12.md) — GSM8K, IFEval and
+tool-eval-bench on production 12 against the NVFP4 sibling recipe, with the scenario breakdown behind
+the tool-eval number, the chat-template hypothesis tested and refuted, and what was deferred. This
+page stays what it has always been: the per-arm gate ledger.
+
 | Test | Result | Where |
 |---|---|---|
+| GSM8K, 200 questions, 8-shot CoT | **97.5 %** (195/200) | **production 12**, 6 September; the sibling recipe reads 94.0 % `[measured-here]` |
+| IFEval, 541 prompts, 25 constraint types | **80.0 %** prompt · **86.0 %** instruction | **production 12**, 6–7 September; the sibling reads 78.9 / 85.1 `[measured-here]` |
+| tool-eval-bench, hardmode, 88 scenarios × 8 trials | **85.5 ±1.3** (`final_score` 86) | **production 12**, 6 September; the sibling reads 87.8 ±0.9. Four scenarios out of 88 carry the whole difference `[measured-here]` |
 | MMLU sample, 35 questions per subject (1,995 questions) | **86.47 ±0.74** | **production 9, TP=3, on the production full-scope checkpoint** `[measured-here]` |
 | MMLU sample, same protocol | 86.4 ±0.7 | the earlier figure, measured at **TP=2** on the experts-only checkpoint, 22 minutes `[measured-here]` |
 | Long-form generation | 190 words, 62 % lexical variety, no repetition lock | TP=3 + EP `[measured-here]` |
@@ -97,6 +106,9 @@ configurations 7 and 8 carry is the TP=2 number **carried forward**, not re-meas
 `[not tested]`. Production 10 was not re-measured either, because it differs from production 9 by a
 memory fraction. Production 11 was not re-measured either, for the same reason plus one more: the two
 sm_12x patches it adds are a buffer initialisation and a bounds check, neither of which touches the
-arithmetic of a correct row `[not tested]`.
+arithmetic of a correct row `[not tested]`. **Production 12 was not re-measured on MMLU either**, for
+the same reason again — it differs from 11 by one buffer size — and the full 14,042-question MMLU was
+staged in the 6 September battery and deferred before it started, so the sample above is still the
+only MMLU this stack has `[not tested]`.
 
 Nothing on this page was measured at max reasoning effort.

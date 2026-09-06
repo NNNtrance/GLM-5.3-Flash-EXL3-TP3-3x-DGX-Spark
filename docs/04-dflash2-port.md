@@ -326,6 +326,48 @@ It is absent from the fork's HEAD and the known-good comparison configuration pr
 place to look if sampling-mode acceptance ever looks strange**: temperature 0 does not exercise that path, so
 nothing here would have caught it `[not tested]`.
 
+### 8.1 The newer drafter revision, measured — and it changes nothing
+
+`incoai/GLM-5.3-Flash-DFlash2` has a second revision, **`bf582e4e`** (31 August, *"Checkpoint update"*), three
+days newer than the **`dc77ff1c`** this recipe pins. It is the same file size to the byte (2,342,169,800 B) with
+a byte-identical raw config (32 query heads / 8 KV) — **only the trained weights differ** — so it drops into the
+TP=3 padded form unchanged, and the padded config it produces is byte-identical to production's. It was run on
+7 September in one 23-minute engine window against the production-12 arm of the previous night's CUDA-graph A/B,
+three sweep rounds each, everything else equal `[measured-here]`:
+
+| | pinned `dc77ff1c` | `bf582e4e` | reading |
+|---|---:|---:|---|
+| draft acceptance, C1 / C8 | 62.08 / 60.53 % | 61.32 / **61.61** % | **equal** — under 1.1 points at every one of the five concurrency levels, **with mixed signs**, all inside the 60–65 % band |
+| accepted tokens per step, C1 / C8 | 5.35 / 5.24 | 5.29 / **5.31** | equal |
+| gates cold · warm · tool-call | 10/10 · 12/12 (warm code needed one re-run) · 8/8 | **10/10 · 12/12 first attempt** · 8/8 | no regression |
+| KV pool | 7,077,134 | 7,049,586 | −0.39 % |
+| C1 / C8 aggregate tok/s | 69.90 / 195.78 | 66.44 / 187.47 | −4.95 / −4.24 % — **not the drafter, §below** |
+
+**The speed column reads ~5 % low and it is not attributable to the draft.** `prefill-fresh` fell by the same
+amount, **−5.04 %**, and prefill is the *target* model's work: with identical shapes and identical size, the
+drafter's weight *values* cannot change a dense GEMM's duration. The whole boot was about 5 % slow. Two
+independent reasons to expect that and neither is a result: the reference arm's own round-to-round spread was
+±4.9 % at C1 and ±4.2 % at C8 — as large as the difference — and the two arms are separate boots in **different
+regimes** (the reference live on a warm engine from its fast-load sidecar, this one a fresh sidecar-less boot),
+where this stack spreads 15.9 % ([09](09-measurement-protocol.md) §2). Thermals were level and no throttle bit
+was set on any node. The raw reading is left in the table rather than adjusted away; the rule against judging
+without measuring forbids judging *against* something too.
+
+**Verdict: no measurable difference, and the pin stays at `dc77ff1c`.** Acceptance is the instrument that a
+drafter swap actually moves, and it did not move. This is the **second** negative trial of this same checkpoint
+on two different stacks with two different engines. Two things came out of the window anyway. A **sidecar-less
+TP=3 boot was timed for the first time: 275 s**, against an internal 8–10 minute estimate that was simply wrong.
+And the drafter zero-pad proof in `patch-dflash-tp3.py` ran against an independent checkpoint for the first time
+and held — 26,214,400 padded elements verified zero on rank 2, which owns all of the padding.
+
+**What promotion would have cost, recorded because it is not two lines.** Two environment lines
+(`DRAFT_HOST_PATH` *and* `DRAFT_LINK_TARGET` — the padded tree's relative symlinks dangle if the second is left
+behind) **plus a mandatory sidecar re-dump under a new `FASTLOAD_DIR` name**, ~53 GB per rank. The fast-load
+sidecar stores the draft tensors as well as the target's, and the draft directory's `path`/`realpath` are part of
+the sidecar identity, so the old sidecar can never be reused with a new drafter — `preflight-fastload` refuses
+with exit 31 rather than silently restoring the old draft. That is the fail-closed design working, and it was
+confirmed in the field on the way back to production ([08](08-fast-boot.md), [03](03-tp3-padding-and-sidecars.md)).
+
 ## 9. Settings that matter
 
 - **`--block-size 256` is kept, on a rule that was read rather than guessed.** The open question was whether the

@@ -4,7 +4,7 @@ Every number in [`../docs/10-results-and-roofline.md`](../docs/10-results-and-ro
 rest of `docs/` traces to a file in here, or carries `[measured-here, raw lost]`, `[reported]`,
 `[estimate]`, `[not tested]` or `[retracted]` in the document.
 
-All of it was produced on 4–6 September 2026 on three DGX Spark (GB10) nodes — except the two-node
+All of it was produced on 4–7 September 2026 on three DGX Spark (GB10) nodes — except the two-node
 files, whose headers say so — at TP=3 with expert
 parallelism, KV `fp8`, DFlash2 draft at k=7, temperature 0, thinking on at `reasoning_effort: low`.
 **The checkpoint changed at production configuration 9:** everything up to and including production 8
@@ -25,6 +25,7 @@ header.
 | `speed/tp2-production-candidate.md` | **The TP=2 production candidate**, two complete configurations measured end to end on 6 September 2026: the pool arithmetic from each boot, four sweep rounds each, boot and sidecar figures, the per-port cable counters, every quality gate, and the autostart unit trial. The recommended candidate is the full-scope one. |
 | `speed/category-prefill-and-mixed-load.md` | Decode rate by content type (prose / code / math / JSON) at C1 and C4; prefill, warm and fresh; the mixed-load probe; cold versus warm single stream. |
 | `gates/quality-gates.md` | The correctness probe and code exam for every arm, cold and after the benchmark; the MMLU sample; long-form generation. |
+| `gates/quality-battery-production-12.md` | **The three-benchmark quality battery on production 12**, 6–7 September, against the NVFP4 sibling recipe at the same harness settings: GSM8K, IFEval and tool-eval-bench with durations and telemetry; the per-scenario breakdown that puts the whole tool-eval difference in four scenarios out of 88; the grader ordering rule behind the largest of them; the chat-template hypothesis tested as a separate engine arm and **refuted**; what was deferred and why; and what the −2.3 points is and is not. |
 | `boot/boot-ledger.md` | Boot time per phase across the four arms, the bit-identity evidence, the block-layer forensics, memory and swap. |
 | `boot/tuner-cache.md` | The persisted MLA tuner cache: tune events per boot, round-1 against round-3, and why the sweep protocol got shorter. |
 | `mesh/all-reduce-sweep.md` | The mesh all-reduce cliff: bandwidth by message size against point-to-point, the hardware counters, the channel-count dose–response, the protocol sweep, and the engine A/B. |

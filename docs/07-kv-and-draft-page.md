@@ -9,6 +9,10 @@ precision. This page is why the pool was small, why the obvious
 explanation was wrong twice, and what the memory ladder above `gpu-memory-utilization 0.80` actually
 looks like on this hardware.
 
+**For the other half of the arithmetic — where the rest of the node's 121.6 GiB goes, what a KV block
+is made of component by component, and the KDA state slots that are the largest remaining item in the
+divisor — see [17](17-memory-ledger.md).**
+
 ---
 
 ## 1. `GPU KV cache size: N tokens` is not a memory figure

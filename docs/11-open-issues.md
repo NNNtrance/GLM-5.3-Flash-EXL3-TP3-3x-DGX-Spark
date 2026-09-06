@@ -374,6 +374,10 @@ Sub-items left open by the closure, both small `[not tested]`:
 
 ### 2.4 The memory ladder above 0.80 — 0.83 was approved, run, and is production 10
 
+**The full per-node accounting this rung is spent against is [17](17-memory-ledger.md)**: what fills
+the 121.6 GiB, what the fraction is a fraction *of* (the total, not the free), and the six give-back
+candidates that measure zero.
+
 **CLOSED, and taken** `[measured-here]`. The rung below was designed and costed here and then run on
 the evening of 5 September as **production configuration 10** — production 9 with a single line
 changed, `GPU_MEMORY_UTILIZATION` 0.80 → 0.83:

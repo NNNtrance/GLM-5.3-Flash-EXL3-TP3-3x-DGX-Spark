@@ -239,11 +239,16 @@ which of `patches/kernel/0004-0007` are applied, and which harness took each row
 ## 6. ReplaySSM: the KDA state slots, 9 down to 2
 
 **Effort: about 8 hours to port, then one A/B boot per arm. The first thing to run is not the port,
-it is the speed measurement.** We have done the code reading and not the boot.
+it is the speed measurement.** We have done the code reading and not the boot. The full working —
+where the slots come from, what the ring costs, the four-arm validated pool model and the port
+budget — is [docs/17](docs/17-memory-ledger.md) §5.3, inside the memory ledger it belongs to.
 
 **The finding.** In the align path, `MambaSpec.max_memory_usage_bytes = page × (2 +
 num_speculative_blocks)`, so with DFlash2 at k=7 **every KDA layer holds 9 state slots per request,
-7 of them purely for speculation**. That is 36 blocks per request — **9.9 % of the block counter at
+7 of them purely for speculation**. The engine prints it —
+`MambaSpec: 9 layer(s), page 1,703,936 B, max/req 15,335,424 B -> 9 block(s)` — and the slot count
+multiplies the **block count**, not the page, which is why a compact ring does not shrink the
+3,328-token attention block ([docs/17](docs/17-memory-ledger.md) §4). That is 36 blocks per request — **9.9 % of the block counter at
 TP=3** (4.25 GiB per rank) and **12.9 % at TP=2** `[measured-here]`. It is the largest single
 give-back left in the pool, and it is the same class of defect as the draft KV page in
 `docs/07-kv-and-draft-page.md` §3: a **counter**, not memory.

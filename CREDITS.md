@@ -425,7 +425,7 @@ We vendor no files from either of these. What we took is practice and arithmetic
   to run ReplaySSM alongside drafting and would take this stack's KDA state slots from 9 to 2. It
   applies 127/127 clean to our image and is pure Python and Triton. It is not adopted, the reasons
   are speed and an unproven fp16 replay rather than the code, and both are written down in
-  [HELP-WANTED](HELP-WANTED.md) §6.
+  [docs/17](docs/17-memory-ledger.md) §5.3 and [HELP-WANTED](HELP-WANTED.md) §6.
 
 ### `NNNtrance/GLM-5.3-Flash-NVFP4-TP3-3x-DGX-Spark` — our own sibling recipe
 

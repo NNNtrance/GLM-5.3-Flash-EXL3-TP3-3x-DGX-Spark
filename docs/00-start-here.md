@@ -113,6 +113,7 @@ Every `docs/NN-*.md` page carries an **Applies to** badge on its first line. Thi
 | [14 — Troubleshooting](14-troubleshooting.md) | **both tracks** | Entries carry their own track tag where we know it |
 | [15 — Running this recipe at TP=2](15-tp2-track.md) | **TP=2 only** | The two-node track |
 | [16 — Comparison with other published recipes](16-comparison-with-published-recipes.md) | **both tracks** | §3 is two nodes, §4 is three, §4.4 is four |
+| [17 — The memory ledger](17-memory-ledger.md) | **both tracks** | The ledger is the three-node arrangement; §6 is the two-node column, and the KDA state finding is worse at two ranks than at three |
 
 And the directories:
 

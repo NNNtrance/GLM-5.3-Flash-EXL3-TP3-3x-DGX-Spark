@@ -11,6 +11,78 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — the memory ledger: where 121.6 GiB per node goes, and the six give-backs that measure zero
+
+**A read-only accounting of every gigabyte on a node, with the engine left running.** No boot, no
+container `exec`, no configuration change, no lock: `docker inspect`/`logs`/`stats`, `/proc/meminfo`,
+`ps`, `nvidia-smi` and the image's own source. New page: [docs/17](docs/17-memory-ledger.md), the
+nineteenth document and both tracks'.
+
+**The ledger.** Engine CUDA allocation **99.06 GiB** = weights 51.62 + KV pool 40.12 + non-torch 7.28
++ CUDA graph **0.00**; host anonymous 5.60; page cache 5.80; free 5.08; slab 2.36; and a **3.49 GiB**
+residual that appears again at **3.12 GiB** with the engine down, which is what makes it the driver's
+fixed reservation rather than a rounding error. Total genuinely unavailable at idle: **4.84 GiB**.
+
+**"The driver takes 14.2 GiB" is stale by about 10 GiB.** That figure came from an NVFP4-era ceiling
+scan whose best observed free was 107.43 of 121.63. Today the three ranks start at 112.01 / 112.97 /
+113.15 and an idle node offers 116.79. What limits `gpu-memory-utilization` now is **the host's share
+at run time** — worker RSS 4.71 GiB per rank plus API server 1.81 and EngineCore 1.56, plus page
+cache — not the driver. This is a ruler correction, not a lever.
+
+**What a KV block is.** 3,328 tokens, **20,934,400 B**: MLA latent fp8 **89.53 %**, indexer k fp8
+5.77 %, DFlash2 draft 4.70 %. 40.12 GiB over that gives the 2,058 blocks the log prints. A 1M-token
+request costs **363 blocks = 7.078 GiB on every node**, and the pool holds **5.67** of them — so at
+three nodes the pool is not the binding constraint. At two it was.
+
+**The largest avoidable line is a counter, not memory.** In the align path
+`MambaSpec.max_memory_usage_bytes = page × (2 + num_speculative_blocks)`, so with DFlash2 at k=7
+**every KDA layer holds 9 state slots per request, seven of them purely so a rejected speculative step
+can be rolled back**: 36 blocks per request, **9.9 % of the divisor at TP=3 and 12.9 % at TP=2**, and
+**5.61 GiB — 14 % of the pool — at 8-way concurrency**. The slot count multiplies the *block count*,
+not the page, which is why the forced 3,328-token attention block (4,608 at TP=2, and it is
+`platforms/interface.py` that forces it, silently overriding our `--block-size 256`) would not shrink
+if the slots did.
+
+**Six candidates are closed at zero, by arithmetic and reading rather than by boots.** The draft page
+of 256 is the optimum — 384 is flat, 512 loses. The CUDA-graph estimator charges **0.00 GiB** here
+where it was a 3.9 GiB item on the NVFP4 sibling, so that lever does not exist. The unused MTP layer
+is not in the safetensors index and is never read. Rank duplication is ≈ 0. The fast-load path already
+drops the checkpoint's page cache. `/dev/shm` holds 67 MiB of a 61 GiB tmpfs. **Shrinking the
+attention block also closes**: it adds +0.2 % on top of a slot fix, because both dilute the same 62
+fixed blocks.
+
+**ReplaySSM, read in full and not adopted.** A third-party patch lifts upstream vLLM's own refusal to
+run ReplaySSM alongside drafting and takes the slots from 9 to 2. It applies **127/127 hunks clean**
+to our image, is pure Python and Triton with **zero CUDA**, touches nothing in `cuda-exl3`, EXL3, the
+GEMM path or MLA, and needs about **8 hours** to port. A pool model that reproduces **four**
+independent measured arms to the token projects **5,619,834 → 6,071,684, +8.0 % at TP=3** and
+**1,303,571 → 1,429,245, +9.6 % at TP=2** — lower than the slot arithmetic suggests, because the ring
+lives inside the mamba page and pushes the forced block from 3,328 to 4,096. Against that: the replay
+loop is `tl.static_range` and runs its full length every step, taking the sequential work from 8 to
+**24 — three times** — in a class that is 8.67 % of a C8 step, so the arithmetic worst case is
+**C8 197 → about 168 tok/s**; and the ring holds its inputs in **fp16** where the baseline state is
+fp32, with no test in the upstream harness that compares the ring against a baseline that we could
+find. **Not now**, and if it is ever taken the first thing to run is one A/B boot at B=8 for speed
+and gates only: if C8 loses more than 5 % the item closes there.
+
+**One pair of our own boots does not reconcile, and it is written down rather than smoothed.** The
+ledger boot logs 40.12 GiB over 20,934,400 B per block; the model that reproduces production 10's
+pool uses 42.89 GiB over 22,572,800 B. Each is exact against its own boot and neither can be checked
+against the other, **because the production-10 arm script grepped the pool figure out of the
+container log and discarded the log**. The fix is ours: the three-node arm scripts must keep
+`docker logs` as `kv.txt`, the way the two-node harness already does.
+
+**And a correction to our own working note, kept because it changes what a fix looks like.** The nine
+slots can be read as `1 + 8` off the non-align branch of that `if`, and our first pass did read it
+that way. Align is the branch we run, so it is `2 + 7`. No total on the page moves — nine either way —
+but it is why the compact-rollback alternative goes to **two** slots and not to one.
+
+**The two-node column is published with its own warning.** It comes from the experts-only stack and
+was read while the two-node full-scope candidate was taking a **dump** boot, whose pool figure reads
+about 6.7 % low and must never be quoted as a result. Re-take it from that candidate's load boot.
+
+---
+
 ## 2026-09-06 — the all-reduce latency floor, measured byte by byte, and three of our own rulers disagreeing
 
 **The decode collective has no bandwidth term in it, and now there is a curve that says so.** A

@@ -251,9 +251,12 @@ container:
 **+17 % on a C8 step**: 197 tok/s down to about 168 `[estimate]`. The author's own note says the
 baseline is faster at a single stream and gives no figure.
 
-**And correctness is unproven.** The ring holds `d` and `k` in **fp16**, error accumulates across the
-replay, and the author's harness contains **no test that compares against a baseline** — its
-materializer test reads the same fp16 ring twice.
+**And correctness is unproven, which is the part that would have to be settled first.** The ring
+holds `d` and `k` in **fp16** and the error accumulates across the replay, so the question is not
+whether the mechanism works but how far the state drifts. Reading the upstream harness we could not
+find a test that compares the ring against a baseline — the materializer test we did find reads the
+same fp16 ring twice, so it would pass whether the ring is right or wrong. If such a test exists and
+we missed it, we would rather be corrected than write our own.
 
 **The A/B we would run, and would take from anyone.** One boot per arm, same image, the only
 difference the patch. Then, in order: a logit-divergence probe that establishes the **within-arm**

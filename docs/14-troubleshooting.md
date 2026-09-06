@@ -1,5 +1,8 @@
 # 14 — Troubleshooting: every failure we hit, by symptom
 
+**Applies to: both tracks.** Every entry carries its own **Track** line — see the third convention
+below.
+
 Eighty-three failures, with the exact text where one exists. This page is the reason the rest of the
 repository can be short: if you are stuck, the answer is probably here, and if it is not, the shape of
 the answer probably is.
@@ -7,10 +10,25 @@ the answer probably is.
 **Read §0 first if something is wrong right now.** Everything after it is organised by subsystem, and
 §1 indexes it by what you actually see on your screen.
 
-Two conventions carried from the rest of the repository. Nodes are `head` (rank 0, serves the API),
-`worker-1` and `worker-2`; addresses are documentation addresses. And **`no log line — silent`** means
-exactly that: the failure produced no message at all. Those are marked **[SILENT]** and collected in
-§9, because they are the expensive ones.
+Three conventions. Nodes are `head` (rank 0, serves the API), `worker-1` and `worker-2`; addresses
+are documentation addresses. **`no log line — silent`** means exactly that: the failure produced no
+message at all — those are marked **[SILENT]** and collected in §9, because they are the expensive
+ones.
+
+And every entry opens with a **Track** line, because this repository documents two node counts
+([docs/00 — Start here](00-start-here.md)). It reads one of four ways, and the third is the one worth
+understanding:
+
+| Track line | What it means |
+|---|---|
+| **both** | The failure is a property of the image, the part, the fabric, the checkpoint, the model or the harness. Nothing in it depends on how many ranks are running |
+| **both, measured at TP=3 only** | The mechanism is rank-independent, but every reading behind the entry came from a three-node arm. Expect it at two ranks; do not expect our numbers |
+| **TP=3 only** | It cannot happen at two ranks: it is about the padding, the padded load, or expert parallelism being mandatory |
+| **TP=2 only** | We only ever hit it at two ranks, and the entry says why three did not |
+
+Across the page, **45** entries are plain **both** and another **26** are both-but-measured-at-three
+ranks. That is a useful finding on its own: most of what goes wrong on this stack does not care how
+many nodes you have. Thirteen are TP=3 only and two are TP=2 only.
 
 ---
 
@@ -81,6 +99,8 @@ that mean nothing.** That is why correctness and memory come before timing.
 
 ### 2.1 First EXL3 boot dies in the sparse-attention indexer's persistent top-k
 
+**Track:** both — vLLM's own kernel against 48 SMs; a property of the part.
+
 **Symptom.** The engine never reaches serving; engine core init fails on all ranks.
 
 ```
@@ -107,6 +127,8 @@ persistent path only wins above ~16K candidate pools ≈ 64K tokens of context.
 
 ### 2.2 MTP with fp8 KV dies in DeepGEMM unless `--block-size 256`
 
+**Track:** both — the DeepGEMM arch-12 `block_kv` constraint, mandatory at two ranks too.
+
 ```
 RuntimeError: Worker failed with error 'Assertion error (/workspace/.deps/deepgemm-src/csrc/apis/attention.hpp:320): (arch_major == 10 and (block_kv == 32 or block_kv == 64 or block_kv == 128)) or (a
 ```
@@ -118,16 +140,22 @@ RuntimeError: Worker failed with error 'Assertion error (/workspace/.deps/deepge
 
 ### 2.3 `--block-size 256` is load-bearing for the multi-group prefix cache
 
+**Track:** both — the prefix-cache hash-block rule plus the drafter's second KV group.
+
 Not a failure we hit — a rule found by reading. `v1/core/kv_cache_coordinator.py` asserts that every
 KV cache group in prefix caching satisfies `block_size % hash_block_size == 0`, and a DFlash drafter
 adds a **second** group (sliding window, 2048). Keep 256; an incompatible value fails loudly.
 
 ### 2.4 The base image cannot run DFlash2 — the drafter is not in the registry
 
+**Track:** both — the image ships DFlash v1; a registry property.
+
 **Cause.** The base image ships DFlash **v1**; `DFlash2DraftModel` exists only in the fork.
 **Fix.** The port layer, `patches/dflash2-port/`. See [04](04-dflash2-port.md).
 
 ### 2.5 Target side has no EAGLE3 interface
+
+**Track:** both — the model file lacks `SupportsEagle3`; no rank term in it.
 
 ```
 RuntimeError: Model does not support EAGLE3 interface
@@ -148,6 +176,8 @@ Using Eagle3 auxiliary layers from config: (6, 15, 25, 34, 43)
 
 ### 2.6 KV cache grouping — the indexer page cannot be padded
 
+**Track:** both — the draft's sliding-window layers break the MLA-only grouping path.
+
 ```
 NotImplementedError: Layer language_model.model.layers.3.self_attn.indexer.k_cache: page size is not divisible by the maximum page size and cannot be padded.
 ```
@@ -167,6 +197,8 @@ DFlash draft: 5 KV layers kept in 1 independent cache group(s)
 **This is also what later capped the KV pool** — see §5.1.
 
 ### 2.7 The vision tower ignores `--language-model-only` **[SILENT at TP=2]**
+
+**Track:** both — this entry documents both: a silent 1.05 GiB at TP=2, an assert at TP=3.
 
 ```
 AssertionError: 16 is not divisible by 3
@@ -190,6 +222,8 @@ carrying the 1.05 GiB.
 
 ### 2.8 The four hard asserts at TP=3
 
+**Track:** **TP=3 only** — the four asserts are the 64 -> 66 and 154,880/3 divisibility failures.
+
 GLM-5.3-Flash has 64 attention heads, 64 KDA heads, a 154,880-token vocabulary and a 2,048-wide
 shared expert. **None divides by three.**
 
@@ -205,6 +239,8 @@ shared expert 2,048 → **2,304**.
 
 ### 2.9 The 2,112 / 192 constants are silently wrong for a quantized checkpoint **[SILENT, half]**
 
+**Track:** **TP=3 only** — `lcm(64, tp)` half-block pads; both constants are provable no-ops at TP<=2.
+
 At production 9's checkpoint one path refuses loudly (the plugin's k-alignment refusal on `down_proj`
 at k=704) and the other **corrupts quietly**: `gate_up_proj` gets a half-block output pad with only a
 warning.
@@ -219,6 +255,8 @@ it is 17 × 128, but 2176/3 is not an integer. Both changes are provable no-ops 
 
 ### 2.10 Padding heads to 96 instead of 66 — starts, serves, answers confidently wrong
 
+**Track:** **TP=3 only** — padding heads to a multiple of the rank count exists only at three ranks.
+
 ```
 ValueError: HAREM-TP3: refusing to zero-extend … the entire shard would be padding
 ```
@@ -229,6 +267,8 @@ rank still owns at least one real head.** 64 → 96 gives rank 2 heads 64–95, 
 **Fix.** Pad to 66. `pad-tp3.py` refuses the 96 case by name. **[SILENT] without the check.**
 
 ### 2.11 The sidecar mount trap
+
+**Track:** **TP=3 only** — the padding sidecar and the identity-mount check exist only at TP=3.
 
 **Symptom.** Every weight link dangles, and the failure surfaces as a confusing `"no safetensors
 found"` — **not as a mount error.**
@@ -241,6 +281,8 @@ obvious `/models/...` is the natural mistake — and `..` resolves to the sideca
 reason. `pad-tp3.py --hardlink` is the alternative.
 
 ### 2.12 Expert parallelism not on every rank
+
+**Track:** **TP=3 only** — expert parallelism is mandatory only at three ranks, because 2,048/3 is not an integer.
 
 ```
 EXL3 <prefix>: tensor parallelism would slice the routed-expert trellis to 682 columns per rank…
@@ -257,6 +299,8 @@ sidecar/original mismatch.
 before relaunching any of them.** The prelude refuses the first case up front.
 
 ### 2.13 The full-scope checkpoint's loader `KeyError`s
+
+**Track:** both — S1-S3 are A1-A8, identical text in the TP=2 patch tree.
 
 ```
 KeyError: layers.2.self_attn.o_proj.mul1
@@ -289,6 +333,8 @@ launcher word-splits `EXTRA_ENV`.
 
 ### 2.14 `ReplicatedLinear` has no `weight_loader_v2` — a vLLM bug found on the meta device
 
+**Track:** both — a vLLM replicated-linear bug, caught on a two-rank meta-device run.
+
 ```
 AssertionError: Tried to load weights of size torch.Size([1536])
                 to a parameter of size torch.Size([1, 1536])
@@ -309,6 +355,8 @@ into row 0 when the shapes say that is what happened.
 
 ### 2.15 The tuple-shard loader splits by the module's *padded* widths
 
+**Track:** **TP=3 only** — A9: the padded `output_sizes` of 3 x 8,448 exist only at three ranks.
+
 ```
 segment 0: narrow(start=0,     len=8448) -> 8448    correct
 segment 1: narrow(start=8448,  len=8448) -> 16896   wrong (true start 8192)
@@ -327,6 +375,8 @@ and add it; do not widen the pad heuristic blindly.**
 
 ### 2.16 Padded EXL3 load needs three upstream commits
 
+**Track:** **TP=3 only** — the padded load; the TP=2 full-scope arm ran on `62f53e6` without it.
+
 - On anything older than `f3e3090`: `EXL3 weights cannot be zero-extended` (a hard refusal).
 - On `f3e3090` alone: the boot passes `create_weights` and then **dies on a `copy_` shape mismatch in
   `_vocab_loaders`** — rank 2, 3,232 against 3,216 tiles.
@@ -344,6 +394,8 @@ is read**:
 
 ### 2.17 `Exl3Config` needs `_model_path_hint`
 
+**Track:** both — explicitly not about padding; TP=2 needs the same `--hf-overrides`.
+
 ```
 ValueError: could not find tensor_storage
 ```
@@ -353,11 +405,15 @@ cleanly — which is what proved the plugin side was sound and the problem was o
 
 ### 2.18 `--safetensors-load-strategy prefetch` is refused
 
+**Track:** both — the refusal keys on filesystem type and RAM fraction, not on rank.
+
 The engine refuses it because the filesystem is not a recognised network FS and the checkpoint
 exceeds 90 % of available RAM. **Fix.** Use `eager` (426.3 s → 189.7 s), then the fast-load sidecar
 (→ 67.2 s). Note that `eager` has a memory cost — §5.7.
 
 ### 2.19 `git archive` silently drops the build recipe **[SILENT]**
+
+**Track:** both — an untracked Dockerfile lost from the source tarball.
 
 The upstream Dockerfile lives in the checkout's `docker/` directory and is **not tracked by git**.
 `git archive` drops it silently and the build then fails on a missing file. **Fix.** Make the source
@@ -365,12 +421,16 @@ tarball with `tar`, excluding `.git`, `build/`, `__pycache__`, `*.egg-info`.
 
 ### 2.20 Upstream's `MAX_JOBS=12` does not fit under the build memory cap
 
+**Track:** both — a build memory cap against a hardcoded `MAX_JOBS`.
+
 Twelve parallel `nvcc` jobs do not fit under `--memory=4g`, and `MAX_JOBS=12` is hardcoded inside the
 Dockerfile's `RUN` line — not an `ARG`, so it cannot be overridden. **Fix.** `sed` it to 3 **in the
 extracted copy only**; editing the checkout makes every future build change silently while the
 tarball sha stops describing what was compiled. Gate on ≥6 GiB free before starting.
 
 ### 2.21 The `cuda-exl3` build fails on a missing CUDA header
+
+**Track:** both — a build-time CUDA include probe.
 
 ```
 ATen/cuda/CUDAContextLight.h:16: fatal error: cusolverDn.h: No such file or directory
@@ -391,6 +451,8 @@ then `RuntimeError: Error compiling objects for extension`.
 ## 3. The fast-load sidecar
 
 ### 3.1 The sidecar refuses the boot — and both times it was right
+
+**Track:** both, measured at TP=3 only — the fast-load sidecar is per rank and was never built at TP=2.
 
 **Symptom.** The container exits immediately on all three nodes; `docker ps -a` shows `Exited (21)`.
 
@@ -428,6 +490,8 @@ from both sides of the comparison.
 
 ### 3.2 The identity gate is stricter than it needs to be, and it cost an hour
 
+**Track:** both, measured at TP=3 only — the same manifest identity, never exercised at two ranks.
+
 Three patches that touch no weight byte — a KV-page knob, a fail-loud import guard, a draft-dtype
 override — refused a boot, because **the gate hashes the directory, not the call graph.**
 Cost: **one hour** of downtime and a **682-second** dump boot per node. The fix (an explicit
@@ -435,6 +499,8 @@ allow-list plus the prelude contributing its ordered list of patch invocations r
 text) is designed and **not written**.
 
 ### 3.3 Any image change invalidates the sidecar
+
+**Track:** both, measured at TP=3 only — the manifest records the image tag; no sidecar was ever built at TP=2.
 
 The manifest records the image tag, so **every kernel-image change carries an 11-minute dump boot per
 node.** Put it in the plan, not in the surprise column.
@@ -444,6 +510,8 @@ because writing 56 GiB per node goes out through the page cache. On production 9
 4,840,220 (dump) against 5,165,289 (load), 6.3 %. **Never record a dump boot's pool as a result.**
 
 ### 3.4 Reusing the sidecar directory name in dump mode destroys the rollback **[SILENT]**
+
+**Track:** both, measured at TP=3 only — dump mode against an existing sidecar; none was ever built at TP=2.
 
 `FASTLOAD_DIR` is mounted **read-write** in dump mode. Give a new arm's sidecar its own directory
 name: one line in the env file, and it is the difference between an experiment and an outage.
@@ -458,6 +526,8 @@ in the wrong order becomes an outage.
 
 ### 4.1 A single-node reboot kills the far end of its links
 
+**Track:** both — the hotplug handler is per node, and the two-node reboot rule is identical.
+
 Covered in full in [00](00-hardware-and-os.md) §3: the `dgx-spark-mlnx-hotplug` handler pulls the
 ConnectX-7 off the PCI bus when a peer goes down. Symptom is `NCCL error: unhandled system error` and
 `PORT_ACTIVE` reading 2 instead of 4 **on a node you did not reboot**. Remove
@@ -465,10 +535,14 @@ ConnectX-7 off the PCI bus when a peer goes down. Symptom is `NCCL error: unhand
 
 ### 4.2 `ip link` says UP and ping works, and RDMA is still dead
 
+**Track:** both — IP-layer health never proves RDMA health, at any node count.
+
 `ip -br link` can read `UP`, and ping can pass, on a link where `ibv_devinfo` says the port is not
 `PORT_ACTIVE`. **IP-layer health does not prove RDMA health.** Always check `ibv_devinfo`.
 
 ### 4.3 Half the fabric had never carried a packet **[SILENT]**
+
+**Track:** both, measured at TP=3 only — the counter table is three nodes; the defect is per peer pair.
 
 **Symptom.** None. Every link `ACTIVE`, every subnet configured, every benchmark ran.
 
@@ -492,6 +566,8 @@ channel to a peer lands on the same link, every time.
 
 ### 4.4 The second link had no ARP neighbour — configuration is not a delivered packet
 
+**Track:** both, measured at TP=3 only — the triangle ping and the four-neighbour rule are the three-node arrangement.
+
 Before enabling the second link, there was **no ARP neighbour at all** on the second-link subnets on
 any node, and `port_xmit_data = 0` on those ports. The netdevs had moved a few thousand packets each —
 multicast and neighbour discovery only. **Unicast IP had never crossed those links.**
@@ -507,6 +583,8 @@ boot. Set `NCCL_MESH_LINKS_PER_PEER=1`, keep only `0006`, and take it to whoever
 ## 5. Memory and the KV pool
 
 ### 5.1 The pool was halved by a page-size counter, not by memory **[SILENT]**
+
+**Track:** both — measured at both rank counts, and worse at two: 60.2 % of the divisor.
 
 **Symptom.** `GPU KV cache size: 2,428,769 tokens` where the memory said far more should fit.
 
@@ -537,6 +615,8 @@ visible.
 
 ### 5.2 `--block-size 256` is silently raised to 3,328 (or 4,608)
 
+**Track:** both — the entry names both blocks: 3,328 tokens at TP=3, 4,608 at TP=2.
+
 ```
 Setting attention block size to 3328 tokens to ensure that attention page size is >= mamba page size.
 Padding mamba page size by 5.79% to ensure that mamba page size and attention page size are exactly equal.
@@ -552,6 +632,8 @@ about prefix caching.
 
 ### 5.3 KV sizing refuses at `max_model_len 1000000`
 
+**Track:** **TP=2 only** — at three ranks `max_model_len` 1,000,000 was never threatened.
+
 ```
 ValueError: 6.6 GiB KV needed for max seq len 1,000,000, available 0.73 GiB
 ```
@@ -564,6 +646,8 @@ KV memory from 0.73 to **5.41 GiB**. That buffer is paid in production too.
 production. At TP=3 `max_model_len 1,000,000` was never threatened.
 
 ### 5.4 Long prompts are never scheduled — no error, no timeout **[SILENT]**
+
+**Track:** **TP=2 only** — a pool small enough to starve the scheduler only ever occurred at two ranks.
 
 **Symptom.** A request is accepted and then sits there. The engine reports `Running: 0, Waiting: 1`
 with KV usage 0 %.
@@ -584,6 +668,8 @@ have produced nothing at all.
 
 ### 5.5 `gpu-memory-utilization 0.85` starves the head node and swaps **[SILENT]**
 
+**Track:** both, measured at TP=3 only — the memory ladder and its swap reading were derived at three ranks.
+
 +19 % pool, no speed change, and the head node at **1.9 GiB free with 1.6 GB of swap** in use. Read
 from `free` and `/proc/meminfo`, never from the engine.
 
@@ -597,6 +683,8 @@ at 11–12 GiB free with zero swap, and the 0.83 rung has since been measured an
 [00](00-hardware-and-os.md) §11).
 
 ### 5.6 Do not take vLLM's own "to fully utilize gpu memory" hint
+
+**Track:** both — vLLM's own hint arithmetic on a unified-memory part.
 
 ```
 [gpu_worker.py:790] Free memory on device (104.1/121.63 GiB) on startup.
@@ -617,6 +705,8 @@ here.
 
 ### 5.7 `eager` loading billed 4.1 % of the KV pool to page cache
 
+**Track:** both, measured at TP=3 only — the page-cache mechanism is general; the pool figures are three-node.
+
 A boot-time change that should not touch memory cost **4,413,223 → 4,231,404** tokens.
 `Available KV cache memory` 35.4 → 33.39 GiB, `consumed memory` 60.07 → **62.22 GiB**, with
 `Model loading took` unchanged at 54.86 GiB.
@@ -630,6 +720,8 @@ return the loader's arenas (RSS 7.95 → 5.20 GiB on the dump boot). Result **4,
 *above* the pre-change reference.
 
 ### 5.8 The pool number is a delta between two `/proc/meminfo` readings, and it runs backwards **[SILENT]**
+
+**Track:** both, measured at TP=3 only — the per-rank spread and the settle gate are all three-node readings.
 
 **The highest-value silent failure on this stack: an engine log line about the engine's own memory
 that is not a measurement of memory.**
@@ -666,6 +758,8 @@ docker logs <container> 2>&1 | grep 'gpu_worker.py' | grep 'Free memory on devic
 
 ### 5.9 `--max-num-batched-tokens 4096` costs 28.5 % of the KV pool **[SILENT]**
 
+**Track:** both, measured at TP=3 only — the batched-token budget never varied at two ranks; the divisor mechanism is general.
+
 Visible only as `GPU KV cache size:` moving 2,427,385 → 1,736,465, because
 `max_in_flight_tokens = max_concurrent_batches × max_num_batched_tokens` doubles and the draft group's
 blocks-per-request term doubles with it (§5.1).
@@ -679,6 +773,8 @@ slots. Cosmetic.
 
 ### 5.10 The profiler's kineto buffers take 7–8 GiB per node and do not come back **[SILENT]**
 
+**Track:** both, measured at TP=3 only — profiling was only ever run on the three-node production arms.
+
 Free RAM drops sharply after a profiling window and stays down until the container restarts. On
 production 9's profile it drove host RAM to 2/4/4 GiB and the engine had to be restarted. **On a
 stack whose rule is never to go below 4 GiB free, this is a real constraint.** Plan the run when the
@@ -689,6 +785,8 @@ host has room. Whole-run cost: ~6 min of GPU time, ~120 MB of trace per node.
 ## 6. NCCL and the mesh plugin
 
 ### 6.1 The all-reduce cliff — 0.6–1.9 GB/s in the middle of the size range
+
+**Track:** both, measured at TP=3 only — the channel cap applies at any peer count; the cliff was measured on three nodes.
 
 **Symptom.** The all-reduce column collapses between ~200 KB and ~12 MB while point-to-point over the
 **same queue pairs** stays healthy — 11 GB/s at 3.6 MB where the all-reduce manages 0.83.
@@ -726,6 +824,8 @@ happening.
 
 ### 6.2 Sixteen channels is 2.5× worse on the message the engine decodes with **[SILENT]**
 
+**Track:** both, measured at TP=3 only — the 16-channel arm is a three-node decode-step measurement.
+
 A reasonable-looking change — 8 channels over 2 links → 16 to restore 8 per link — makes decode 2.5×
 slower. One C8 decode step (90 × 512 KB): 8 channels **9.27 ms**, 16 channels **26.18 ms**.
 
@@ -739,6 +839,8 @@ with 8 was established on **one** link and the arithmetic has changed.
 
 ### 6.3 DMA-BUF registration works and is slower
 
+**Track:** both, measured at TP=3 only — the DMA-BUF sweep was run on the three-node mesh only.
+
 `NCCL_MESH_DMABUF=1` succeeds — answering the open question of whether `ibv_reg_dmabuf_mr` accepts
 these buffers on this platform — and is slower across the range (64 MB all-reduce **18.08** against
 20.84 GB/s). On a part where one physical memory is shared and `ibv_reg_mr` takes a device pointer
@@ -750,6 +852,8 @@ observed log line.**
 
 ### 6.4 An old env file carrying 8 channels *and* `NCCL_PROTO=LL` is not evidence **[SILENT]**
 
+**Track:** both, measured at TP=3 only — the confounded env file and its protocol numbers are three-node sweeps.
+
 `NCCL_PROTO=LL` costs **11×** at 16 MB (20,113.6 µs against auto's 1,787.3) and buries the channel
 gain. That combination made `NCCL_MAX_NCHANNELS=8` look "already tried and rejected"; tried cleanly it
 is +13 % at C8. **Leave `NCCL_PROTO` unset** — `Simple` is 2.8× worse at the C1 decode message and
@@ -758,6 +862,8 @@ is +13 % at C8. **Leave `NCCL_PROTO` unset** — `Simple` is 2.8× worse at the 
 **Re-run an arm one variable at a time.**
 
 ### 6.5 `NCCL_ALGO=Tree` is dead on this fabric **[SILENT]**
+
+**Track:** both, measured at TP=3 only — the entry's own reasoning is "three nodes"; the five-round arm was TP=3.
 
 4–6× slower than Ring at the two message sizes the engine uses in bulk; RNR retries an order of
 magnitude higher; 23–96 % worse on the decode-step proxy. A tree wants a bandwidth-shaped topology to
@@ -771,6 +877,8 @@ real difference ([06](06-nccl-mesh.md) §12.3). Do not chase it.
 
 ### 6.6 The one-sided `RDMA_WRITE` transport works perfectly and buys nothing
 
+**Track:** both, measured at TP=3 only — the RDMA_WRITE transport was measured on the three-node fabric only.
+
 RNR and out-of-buffer go to **exactly zero** at every size, in both repetitions, and throughput does
 not move at any FIFO depth. At ~20 GB/s the transfer is against a **PCIe** wall, not a flow-control
 stall. `patches/kernel/0007` is kept as an option and **deliberately not offered upstream** —
@@ -781,12 +889,16 @@ the maintainer's time.
 
 ### 6.7 A fabric sweep beside a running engine kills its next collective
 
+**Track:** both, measured at TP=3 only — the sweep that killed the engine's next collective was the three-node one.
+
 Not "slows" — **kills**. A three-node NCCL sweep competes for RDMA queue-pair resources and can
 exhaust them. **Three-node NCCL work needs the engine down, not idle.** One measurement holds the
 cluster at a time, and it says so in a file. A model-free container beside an *idle* engine is allowed
 with `--rm`, a memory cap, a cpuset disjoint from the engine's, and its own JIT cache directories.
 
 ### 6.8 The plugin's own test target does not link on a clean tree
+
+**Track:** both — the plugin Makefile omits `IBVERBS_LIBS`; a pre-existing build issue.
 
 ```
 undefined reference to ibv_event_type_str
@@ -801,6 +913,8 @@ pre-existing string checks. `make test-unit` gives `test_routing` **13/13**.
 ## 7. Kernels and build
 
 ### 7.1 `n_rows` is not passed on the unsplit MoE launch — TP=3 was 8–29 % slower than TP=2 **[SILENT]**
+
+**Track:** **TP=3 only** — the `expert_map` path needs expert parallelism, mandatory only at three ranks.
 
 **Symptom.** Three nodes slower than two. C1 −7.8 %, C2 −16.5 %, **C4 −29.3 %**, C6 −25.2 %, C8
 −19.7 %, prefill −5.0 %. Worst in the middle. Not memory, not the drafter, not correctness —
@@ -830,6 +944,8 @@ No error, no wrong output; **a rank quietly doing 1.2–2.0× the work.**
 
 ### 7.2 The micro-benchmark's tensor-parallel arm fails on a shape mismatch
 
+**Track:** **TP=3 only** — 2 x 682 comes from 2,048/3; at two ranks 2 x 1,024 divides 16.
+
 ```
 exl3_moe_gemm: svh n mismatch
 ```
@@ -838,6 +954,8 @@ The bench needs `2 × inter / tp` to be a multiple of 16 for the TP arm, and 2·
 `--inter 2304` for that arm, and read the **expert-parallel** rows as the ones describing production.
 
 ### 7.3 A GPU-free compile check reported a pass; 6 of 18 configurations failed at launch
+
+**Track:** both — the launch-time shared-memory limit of the part.
 
 ```
 OutOfResources: out of resource: shared memory, Required: 106496, Hardware limit: 101376. Reducing block sizes or `num_stages` may help.
@@ -853,6 +971,8 @@ something is launched.
 
 ### 7.4 TileLang will not compile the third HC kernel above 96 threads
 
+**Track:** both — a TileLang compile limit, with no rank term.
+
 ```
 min_reg_num < INT64_MAX is false
 ```
@@ -863,6 +983,8 @@ about 40 % of its own ceiling. **Not adopted standalone.**
 
 ### 7.5 TileLang's config surface is a cliff, and the module shipped with a bad default **[SILENT]**
 
+**Track:** both — a kernel autotuning cliff and a bad shipped default.
+
 A one-step configuration change moves the kernel from 187.8 GB/s to 79.4 or 44.5. **The default the
 module shipped with was one of the bad ones (79.4).** Sweep, and re-sweep on every hardware or shape
 change.
@@ -872,6 +994,8 @@ is 256; the shipped module sets `MIN_M = _env_int("HAREM_MHC_FUSED_MIN_M", 1024)
 measured and found to **lose** (+37.7 % at M=512). **Read the code, not the comment.**
 
 ### 7.6 TileLang's `flashinfer.comm` preload is swallowed **[SILENT]**
+
+**Track:** both — a swallowed preload inside the TileLang module; image-level.
 
 **Symptom.** An **illegal address at kernel launch much later, on a different rank, at a time that
 looks random.**
@@ -886,6 +1010,8 @@ try/print/raise so a failed preload stops the rank in its first second with a na
 cache so N ranks do not race it. Default unset → upstream behaviour byte for byte.
 
 ### 7.7 CUDA graphs are off, and the log names the reason
+
+**Track:** both — spec-decode against FlashInfer's cudagraph support level; no rank term.
 
 ```
 CUDAGraphMode.FULL_AND_PIECEWISE is not supported with spec-decode for attention backend
@@ -905,6 +1031,8 @@ already been tried and read the same tok/s, and costs 5.6 % of pool. The whole l
 
 ### 7.8 Full scope is a **prefill regression** on the dense path
 
+**Track:** both, measured at TP=3 only — the M=1,792 dense profile is production 9's; TP=2 prefill was unmeasurable.
+
 ```
 dense stage @ M=1792 : 167.39 ms (bf16, 457 calls)
                      : 184.73 ms (128.38 EXL3 GEMM + 19.89 had_in + 36.46 bf16, 695 calls)
@@ -922,6 +1050,8 @@ than bf16 cuBLAS from M=64–256 upward) and **withdrew the "cuBLAS parity" clai
 
 ### 7.9 The NVFP4-era 22-head decode kernel bug — no EXL3 analogue, and that is deliberate
 
+**Track:** **TP=3 only** — 22 heads is the TP=3 pad, and the guards are the pad checks.
+
 On the NVFP4 stack a decode kernel silently computed the wrong thing at 22 heads (TP=3), because the
 lab had tested TP=2 and TP=4 only. **An untested shape.** The exact error string was never recorded,
 because there was no error — only fluent, confident nonsense.
@@ -933,6 +1063,8 @@ fabricated rows after `load_weights`. **Both guards exist because of a failure m
 elsewhere.**
 
 ### 7.10 Binary hashes cannot certify this build
+
+**Track:** both — cubin nondeterminism in the NVCC and ptxas toolchain.
 
 The compiled extension is the same size everywhere and has a **different sha256 and a different ELF
 Build-ID on each node**. The divergence is entirely in `.nv_fatbin`; `.text`, `.rodata`, `.data` and
@@ -948,6 +1080,8 @@ between commits is itself the finding.
 
 ### 7.11 One node's build wall clock disagrees with its own build timer by 90 seconds
 
+**Track:** both — an unexplained build-timer anomaly on one node.
+
 `head`'s outer bracket for the serve layer was ~3 s while that build's own step timer reported
 `#4 DONE 93.5s`. Clock skew, Docker version and ccache were all checked and ruled out. **Unexplained,
 and recorded rather than rounded away** — in this series the anomalies that looked cosmetic were twice
@@ -958,6 +1092,8 @@ the ones worth chasing.
 ## 8. Measurement and tooling
 
 ### 8.1 The MLA tuner's warm-up is longer than two sweep rounds, and it turned the winner into a disaster
+
+**Track:** both, measured at TP=3 only — the tune-storm arm and its prefill and C8 figures are three-node.
 
 **Symptom.** An arm measured prefill **1,373 → 698 tok/s**, C8 **140 → 105**. Re-measured on the
 *same running engine* minutes later with nothing changed but the clock: prefill 1,483–1,515, C8
@@ -980,6 +1116,8 @@ hand, and nothing enforces that.
 
 ### 8.2 Boot-to-boot variance is 15.9 % on C8 with nothing changed
 
+**Track:** both, measured at TP=3 only — boot-to-boot spread has only ever been measured at three ranks.
+
 Same image, same environment file, two boots: C8 **118.44 / 137.23 / 135.56**.
 
 **A difference under about 5 % is not a result.** Within one settled arm the declared bands are
@@ -991,11 +1129,15 @@ reproduce.
 
 ### 8.3 Prefill measured on a repeated prompt reads 56 % high **[SILENT]**
 
+**Track:** both, measured at TP=3 only — two 3,328-token blocks; both figures come from a three-node arm.
+
 Run the fixed-seed script twice inside one boot and the second run reads up to **1,596 tok/s where the
 honest number is 1,025**. The prefix cache serves two whole 3,328-token blocks and nothing says so.
 Use `bench/prefill-fresh.py`, which draws a new seed per request.
 
 ### 8.4 Our own harness disagreed with its own documentation for a day
+
+**Track:** both — the harness header disagreed with its own body.
 
 The quick-arm script carried the header "5 rounds, the first 2 discarded" and its body ran **three**.
 Applied literally, the rule would have left a median of one. Nothing was published from the wrong
@@ -1003,6 +1145,8 @@ reading, **but a tool that describes itself incorrectly is the same failure clas
 reads high: it will eventually be believed instead of read.**
 
 ### 8.5 `CUDA_EXL3_DEBUG_NAMES` printed nothing, and silence looks exactly like a clean run **[SILENT]**
+
+**Track:** both — the image configures only vLLM's logger; third-party INFO is discarded.
 
 **Symptom.** The designed boot-time acceptance gate produced **no output at all**. The flag reached
 the container and the code was right.
@@ -1015,6 +1159,8 @@ stayed BF16, with running tallies. **An acceptance gate has to be verified befor
 any other instrument. A gate whose passing state is silence must be checked for *presence*.**
 
 ### 8.6 The expert-parallel evidence line was discarded by the logging configuration **[SILENT]**
+
+**Track:** both — the same logger misconfiguration; the tensor-slice warning applies anywhere.
 
 The line that should appear on every rank:
 
@@ -1030,6 +1176,8 @@ logging — but the evidence line and a "routed experts are being TENSOR-sliced"
 net, were invisible. **That is exactly backwards.**
 
 ### 8.7 The profiler answered 404 for a week, because of a second launcher copy **[SILENT]**
+
+**Track:** both — launcher copies and `--profiler-config`; tooling, not rank.
 
 **Symptom.** `POST /start_profile` returns **404** on a running engine.
 
@@ -1048,6 +1196,8 @@ an afternoon.
 second copy exists, it is not a backup, it is a coin flip.**
 
 ### 8.8 CUPTI manufactures 2 ms of GPU idle out of nothing **[SILENT]**
+
+**Track:** both, measured at TP=3 only — the CUPTI overhead figures come from the production 7 and 9 traces.
 
 A trace showed **5.45 ms of C1 GPU idle (5.8 %)** and a CUDA-graph lever worth +6 % single-stream.
 Both wrong in the same direction.
@@ -1076,6 +1226,8 @@ exact target-versus-draft split. That corrected the k=7 drafter's cost from 19.5
 
 ### 8.9 Both rulers were brochures, and every efficiency percentage was ~22 % optimistic
 
+**Track:** both — single-device bandwidth and GEMM rulers.
+
 Device read bandwidth **225.2 GB/s** against a vendor 273; BF16 dense GEMM peak **97.3 TFLOP/s**
 against ~125 implied. Two tools, both in `bench/`, both a few seconds: `bench/bw.py` and
 `bench/gemmpeak.py`. **Run them in the same binary and the same run as whatever you are measuring, and
@@ -1088,6 +1240,8 @@ comparison for a kernel that only writes.
 
 ### 8.10 The model-free MoE bench overstates small-M by 1.5–1.7× **[SILENT]**
 
+**Track:** both — a model-free bench against the real build's kernel set.
+
 **Carry the *shape* of a model-free result to the engine, not the absolute number.** Two of this
 repository's ranked targets were model-free measurements carried onto the production path without
 checking that the path still had them: `exl3_moe_combine` (**the kernel does not exist in this
@@ -1096,11 +1250,15 @@ build** — it is fused into the down-projection epilogue, so the class is 0 %) 
 
 ### 8.11 The real prefill chunk is 1,792 tokens, not 2,048
 
+**Track:** both — 1,792 = 7 x 256 is a block granularity, and rank-independent.
+
 Every "per chunk" conversion built on `--max-num-batched-tokens` is 12.5 % off. The real chunk is
 **1,792 (7 × 256)** because of the 256-token block granularity, so 12.5 % of the budget is unused.
 `MNBT 2304` would give a full 2,048-token chunk at a KV price that has not been measured.
 
 ### 8.12 Tier-B arms carry no category numbers, and the tables did it silently **[SILENT]**
+
+**Track:** both — the quick-arm script omits the category step.
 
 The quick-arm script does not include the category step at all, so results tables carried the previous
 arm's category figures forward. **Say `[not tested]` rather than carrying figures forward.**
@@ -1111,6 +1269,8 @@ arm's category figures forward. **Say `[not tested]` rather than carrying figure
 
 ### 9.1 `disable_tp` on the shared expert triples its contribution **[SILENT]**
 
+**Track:** **TP=3 only** — it needs expert parallelism and the shared-expert pad, both TP=3 only.
+
 The model stays fluent and the answers go wrong. The MoE runner all-reduces the combined MoE output
 whenever `ep_size > 1`, and the model builds the shared MLP with `reduce_results=False` precisely
 because the runner owns that reduction — so a replicated shared expert is summed once per rank, a
@@ -1118,6 +1278,8 @@ because the runner owns that reduction — so a replicated shared expert is summ
 instead.
 
 ### 9.2 A padded drafter head holding allocator garbage **[SILENT]**
+
+**Track:** **TP=3 only** — the 32/8 -> 36/9 drafter pad exists only at TP=3.
 
 Acceptance falls, nothing crashes, and no log line says why. A padded head whose q/k/v rows are **zero**
 produces a zero attention output and a zero `o_proj` contribution — an exact no-op. Garbage does not.
@@ -1143,6 +1305,8 @@ outcome**); and a config that is not `checkpoint + zero pad`.
 
 ### 9.3 The target's EXL3 pad invariant was holding **by accident** **[SILENT]**
 
+**Track:** **TP=3 only** — the A10 pad audit; the pad lives on the last of three ranks.
+
 The audit line, **whose absence is a failure**:
 
 ```
@@ -1157,6 +1321,8 @@ A single-rank test could not have seen it; **at TP=3 the last rank is mandatory,
 there.**
 
 ### 9.4 The shard-index trap — a wrong index loads without error **[SILENT]**
+
+**Track:** both — the tuple shard ids are the S3 KDA split, shared with the TP=2 tree.
 
 **A tuple shard id must start at 0.** `weight_loader_v2` indexes the tuple *relatively*, so `(3,4,5)`
 would load without error and write to the wrong slice. **vLLM's own "following weights were not
@@ -1175,6 +1341,8 @@ and two mixed-precision entries.
 
 ### 9.5 A DFlash2 drafter on the V1 model runner degrades to DFlash1 **[SILENT]**
 
+**Track:** both — a DFlash2 port property: the V1 runner against the V2 one.
+
 The engine boots, produces correct-looking text, and quietly loses acceptance, because on V1 the same
 checkpoint drafts through a proposer that never calls the candidate selector. Forced to the V2 runner
 and guarded by a **build-time** gate that asserts every ported symbol resolves — **if any check fails,
@@ -1182,11 +1350,15 @@ no image is produced.** Expect one line: `DFLASH2 PORT BUILD GATE: OK`.
 
 ### 9.6 `draft_logits_spec()` with `torch.zeros` **[SILENT]**
 
+**Track:** both — the drafter's logits hook; a port property.
+
 DFlash2's kernel writes only the K candidate columns; the base's `torch.zeros` would leave
 non-candidates at probability **0 rather than excluded**, so the walk and the sampler read different
 distributions. DFlash2 overrides the hook to fp32 / `-inf`.
 
 ### 9.7 The KV-zeroing gate refuses to boot on this checkpoint, by design
+
+**Track:** both — the hybrid layout's co-ownership of KV slots by MLA and Mamba/KDA layers.
 
 With the zeroing disabled the engine `raise`s at startup rather than serving, naming the reason: the
 region is **co-owned by attention and Mamba/KDA layers**. vLLM's zeroer visibly skips Mamba layers,
@@ -1201,6 +1373,8 @@ Mamba slot sharing, not precision, and draft KV at fp8 is a 5.6 % pool gain that
 
 ### 9.8 Dual-batch overlap would corrupt KDA state, fluently and silently **[SILENT]**
 
+**Track:** both — 34 of 45 layers are KDA; the batch splitter's alignment has no rank term.
+
 34 of 45 layers are KDA/Mamba, and the batch splitter does not align to request boundaries, so a fresh
 prompt split in two has its second half **start its recurrent state from zero and write it into the
 same state slot.** vLLM's own code blocks it (`assert not should_ubatch`). **Do not build DBO.** It
@@ -1213,6 +1387,8 @@ parallelism** removes ~98 % of collective bytes at ~3× single-stream decode lat
 because "just turn on SP" is the obvious next reflex and it is wrong on this workload.
 
 ### 9.9 The RoPE-convention hypothesis — on paper the bug, refuted by measurement
+
+**Track:** both — the drafter-versus-target RoPE convention, refuted by acceptance.
 
 A helper upstream carries a comment describing precisely the symptom we had gone looking for: the
 mismatch is silent, *"acceptance collapses, the output stays correct"*. GLM-5.3's attention uses
@@ -1228,6 +1404,8 @@ temperature 0 does not exercise that path.
 
 ### 9.10 Non-English prose collapses draft acceptance to 10–13 % **[SILENT]**
 
+**Track:** both — a drafter-training property; low prose acceptance shows in the TP=2 arms too.
+
 Single-stream prose at 29.1 tok/s against 61.7 for code, on production 9. The drafter predicts English
 far better. **Every speed table in this repository was measured with English prompts; treat them as
 English-workload numbers.** No fix available on this side — it is a drafter-training question.
@@ -1238,6 +1416,8 @@ this hardware.**
 
 ### 9.11 The chat template's provenance is unverified
 
+**Track:** both — chat template provenance, at checkpoint level.
+
 The served `chat_template.jinja` matches **neither** checkpoint on disk, and has never been verified
 against a named source. **Open** — the only provenance claim in the retraction audit still open.
 
@@ -1246,6 +1426,8 @@ against a named source. **Open** — the only provenance claim in the retraction
 ## 10. Operations
 
 ### 10.1 A reboot brings up the sibling NVFP4 engine, not this one **[SILENT]**
+
+**Track:** both — two engines on one node's memory; explicitly not a rank-count hazard.
 
 The failure that made this entry: an unattended reboot did **not** leave the cluster down — it brought
 up the **other engine**, on the same GPUs and the same unified memory, which is worse than nothing if
@@ -1263,6 +1445,8 @@ The rest of the old entry is closed: the preflight
 boot with the preflight and the settle gate in front of it. See §10.1a for what is still not solved.
 
 ### 10.1a Rebooting one node kills the fabric, and the unit will happily start into half of it
+
+**Track:** both, measured at TP=3 only — the rule transfers to two nodes; only the three-node reboot test was run.
 
 **Reboot all three nodes together, or none.** This is the oldest rule in this stack and the autostart
 unit does not change it: bringing one node back takes down the far end of that node's links and the
@@ -1298,15 +1482,21 @@ minutes, the preflight is waiting on the fabric and its own message will say whi
 
 ### 10.2 Environment files must never be copied between nodes
 
+**Track:** both — each node's env file carries node-specific values, at any rank count.
+
 Each node's env file carries node-specific values. **Derive each node's file with `sed`, never `scp`
 it.** Every env token in this repository is documented that way.
 
 ### 10.3 Do not touch the patch directory while a boot is in progress
 
+**Track:** both, measured at TP=3 only — the manifest identity only exists where a fast-load sidecar was built.
+
 It is mounted **live** into the container, so an edit changes the manifest identity underneath a
 running dump. This has happened once and it cost the boot.
 
 ### 10.4 Two patch trees, and a fix in one does not reach the other **[SILENT]**
+
+**Track:** both, measured at TP=3 only — the divergence is forced by the fast-load manifest, never built at TP=2.
 
 `patches/tp3/` and `patches/tp3full/` diverge in exactly two constants plus one patch. **The code did
 not have to diverge** — the two constants are provable no-ops at TP≤2, so one tree could serve both.

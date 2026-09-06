@@ -169,7 +169,38 @@ acceptance is a property of the draft model. It is not a law of nature.
 |---|---|
 | Lower `k` for prose | k=5 raises prose 22.0 → 22.8 tok/s (+3.6 % at C1, +15 % at C4) and costs **every other category and every concurrency level** 3.5 – 6.4 % ([docs/04](../../docs/04-dflash2-port.md) §6) `[measured-here]` |
 | Per-request `k` | Not available. `num_speculative_tokens` lives in `--speculative-config` and is fixed when the engine starts; the OpenAI-compatible API has no per-request override. One value serves the whole engine, and it is k=7 `[measured-here]` |
-| A newer revision of the same drafter | Tested on production 12 on 7 September: acceptance **equal** (C1 62.08 → 61.32 %, C8 60.53 → 61.61 %, signs opposite, both inside the 60–65 % band), all gates full first time. The ~5 % speed reading on that arm is a whole-boot effect, not the draft — **prefill fell by the same 5 %, and prefill does not use the drafter** ([docs/04](../../docs/04-dflash2-port.md) §8.1). The per-category split was not run on that arm `[not tested]` |
+| A newer revision of the same drafter | Tested on production 12 on 7 September: aggregate acceptance **equal** (C1 62.08 → 61.32 %, C8 60.53 → 61.61 %, signs opposite, both inside the 60–65 % band), all gates full first time. The ~5 % speed reading on that arm is a whole-boot effect, not the draft — **prefill fell by the same 5 %, and prefill does not use the drafter** ([docs/04](../../docs/04-dflash2-port.md) §8.1). Its **per-category** split was then run as well, §2.5 below: **prose does not move** |
+
+### 2.5 The newer drafter revision, split by category: prose does not move
+
+The aggregate comparison above could in principle have hidden a prose gain, so the category probe was
+run on the newer revision too, the same night, on the same stack. Same script byte for byte, same
+prompt set, same settings, only the draft directory differing; the newer arm ran the shortened
+protocol — one warm-up round and **one** measured round — so this is a round-to-round comparison
+rather than median against median `[measured-here]`:
+
+| C1 | acceptance, `dc77ff1c` | acceptance, `bf582e4e` | change | tokens per step | decode tok/s |
+|---|---|---|---|---|---|
+| **prose** | 12.97 % | **12.04 %** | **−0.93 pt** | 1.91 → 1.84 | 29.04 → 27.70 |
+| code | 45.94 % | 45.91 % | −0.03 pt | 4.22 → 4.21 | 61.46 → 61.07 |
+| math | 57.11 % | **60.36 %** | **+3.24 pt** | 5.00 → 5.23 | 76.11 → 82.92 |
+| JSON | 51.69 % | 52.01 % | +0.32 pt | 4.62 → 4.64 | 71.43 → 70.74 |
+
+At C4 the same four rows read −0.10, +2.02, +0.61 and +0.31 points.
+
+**Read prose against the arm's own spread before reading it as a loss.** The newer arm's two rounds
+bracket the older one: its warm round put prose acceptance at **13.1 %** and its measured round at
+**12.0 %**, a 1.1-point swing inside one boot, against production 12's own 0.15-point spread over
+three rounds. So prose on the newer revision is **12.0 – 13.1 %** — the same band the drafter has
+occupied across all ten arms on this page. **It is not better. The row does not move.**
+
+**Math is the one column that may have moved**, and it is recorded as an observation rather than a
+result: 60.0 % on the warm round and 60.4 % on the measured one, both **above** the 55.0 – 58.0 %
+band every previous arm has read, worth +9.0 % of decode rate at C1 — but this is one boot, on a
+stack whose boot-to-boot spread is 15.9 % ([09](../../docs/09-measurement-protocol.md) §2), and at C4
+the same comparison falls to +0.61 points. It did not carry the aggregate: that arm's overall
+acceptance came back equal. **The pin stays on `dc77ff1c`**; if the math reading is chased later it
+is a two-boot question, not a promotion.
 
 **So the honest statement is the plain one.** Prose is slow because the DFlash2 draft agrees with the
 target model about one token in eight on free-running prose, and there is nothing in this stack's
@@ -195,8 +226,8 @@ prose) or a second engine, and neither is taken.
   at two nodes on an older image, so the per-category "worth" column is an estimate rather than a
   measurement. One boot without `--speculative-config`, one category run, and that column becomes
   `[measured-here]`. It is about 25 minutes of engine time and nobody has spent it.
-- **The per-category split on a newer drafter.** The revision tested on 7 September was compared on
-  the aggregate prompt set only. A drafter that moved prose without moving the aggregate would be
-  invisible to that comparison.
+- ~~**The per-category split on a newer drafter.**~~ **Done the same night** `[measured-here]`, §2.5:
+  prose does not move. What is left from that arm is its **math** reading, 3.2 points of acceptance
+  above every previous arm on one boot — a two-boot question `[not tested]`.
 - **Mixed load on the production configuration** `[not tested]`, still. `scripts/mixed-load-probe.py`
   has not run since the fast-boot arm.

@@ -40,10 +40,15 @@ speculative step costs **1.58×** a plain one, putting break-even at **8.3 % acc
 **No configuration lever exists for it, and this is said plainly rather than left implied.** `k=5`
 buys prose 3.6 % at C1 and costs every other category and every concurrency level 3.5 – 6.4 %;
 per-request `k` does not exist, because `num_speculative_tokens` is fixed at engine start; and the
-newer drafter revision in the entry below came back with acceptance equal. **A better draft
-checkpoint is the only thing that moves this row**, and a different drafter demonstrably can — an MTP
-head at k=3, in the same session, wins prose 21.3 against 18.5 tok/s while losing every other
-category by 20–40 %. Written up as [docs/10 §1.2](docs/10-results-and-roofline.md); the two stale
+newer drafter revision in the entry below came back with acceptance equal — and then, an hour later,
+**split by category on that same revision, prose still does not move**: 12.0 % acceptance on its
+measured round and 13.1 % on its warm one, a 1.1-point swing inside one boot that brackets production
+12's 12.97 % rather than beating it, with code and JSON equal to a third of a point `[measured-here]`.
+The one column that may have moved there is **math**, 3.2 points of acceptance above every previous
+arm on a single boot — not carried by the aggregate, and left as a two-boot question rather than a
+result; the pin stays on `dc77ff1c`. **A better draft checkpoint is the only thing that moves the
+prose row**, and a different drafter demonstrably can — an MTP head at k=3, in the same session, wins
+prose 21.3 against 18.5 tok/s while losing every other category by 20–40 %. Written up as [docs/10 §1.2](docs/10-results-and-roofline.md); the two stale
 `[not tested]` claims about content types in that page are corrected, and **mixed load is still
 unrun** `[not tested]`, as is an unspeculated three-node arm, which would turn the
 return-on-speculation column from an estimate into a measurement. Cost of the work: one 28-minute

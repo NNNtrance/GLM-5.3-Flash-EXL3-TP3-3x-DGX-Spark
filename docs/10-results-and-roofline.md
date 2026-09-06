@@ -227,7 +227,14 @@ same drafter was booted on production 12 on 7 September** and came back equal �
 61.32 % at C1 and 60.53 → 61.61 % at C8, opposite signs, both inside the 60–65 % band, all gates full
 first time; the ~5 % speed reading on that arm belongs to the boot rather than the draft, because
 prefill fell by the same 5 % and prefill does not use the drafter ([04](04-dflash2-port.md) §8.1).
-Its per-category split was not run `[not tested]`.
+**Its per-category split was then run as well, and prose does not move**: acceptance 12.0 % on that
+arm's measured round and 13.1 % on its warm one, a 1.1-point swing inside one boot that brackets
+production 12's 12.97 % rather than beating it, while code and JSON are equal to a third of a point
+`[measured-here]`. The one column that may have moved on that arm is **math**, 3.2 points of
+acceptance above every previous arm — one boot, not carried by the aggregate, and left as a two-boot
+question rather than a result
+([`../results/speed/category-speeds-production-12.md`](../results/speed/category-speeds-production-12.md)
+§2.5).
 
 **So the plain statement.** Prose is slow because the DFlash2 draft agrees with the target model
 about one token in eight on free-running prose. It is not the checkpoint, not the kernels, not the
@@ -1198,6 +1205,7 @@ argued about (§5.2, [11](11-open-issues.md) §2.5) `[measured-here]`.
 - ~~**Content types and mixed load on the production configuration.**~~ **Content types: done on
   production 12 on 7 September** `[measured-here]` — §1.2 and
   [`../results/speed/category-speeds-production-12.md`](../results/speed/category-speeds-production-12.md).
+  The newer drafter revision was split by category on the same night, and prose does not move.
   **Mixed load is still unrun** `[not tested]`: `scripts/mixed-load-probe.py` has not gone since the
   fast-boot arm, and §1 carries that arm's figure. Also still absent on the category side is an
   **unspeculated three-node arm** — one boot without `--speculative-config`, about 25 minutes, which

@@ -56,16 +56,19 @@ this configuration:
 
 Two DGX Spark nodes, TP=2, **expert parallelism off**, the same full-scope checkpoint,
 `gpu-memory-utilization` **0.85** — the three-node rung is not transferable and the two-node
-ladder has never been derived — same harness and same protocol, 6 September 2026 `[measured-here]`:
+ladder has never been derived — same harness and same protocol, 6 September 2026 `[measured-here]`.
+**Candidate C** (the indexer-workspace bound carried to two ranks, [docs/15 §5.9](docs/15-tp2-track.md)) is
+the published configuration since 6 September evening; its speed rows are a different session from
+candidate B's and are inside the bands:
 
 | | |
 |---|---|
-| Single-stream decode (C1) | **58.50** tok/s aggregate (**62.55** per stream) |
-| Aggregate at 8 concurrent streams (C8) | **155.75** tok/s |
-| Prefill, fresh unseen ~8.4K prompts | **1,400** tok/s |
-| KV pool at `max_model_len` 1,000,000 | **2,128,571** tokens — about 2.1 concurrent 1M-token requests |
-| Quality | correctness probe **10/10**, code exam **12/12** cold and warm, tool-call **8/8**, needle-lite **6/6**; MMLU sample (1,995 q) **86.02 ±0.75** |
-| Cold boot, fast-load | **272 s** (the one-off dump boot that writes the sidecar is 998 s) |
+| Single-stream decode (C1) | **60.08** tok/s aggregate (**65.96** per stream) |
+| Aggregate at 8 concurrent streams (C8) | **157.71** tok/s |
+| Prefill, fresh unseen ~8.4K prompts | **1,414** tok/s |
+| KV pool at `max_model_len` 1,000,000 | **2,692,857** tokens — about 2.7 concurrent 1M-token requests (candidate B: 2,128,571; **+26.5 %** from the workspace bound) |
+| Quality | correctness probe **10/10**, code exam **12/12** cold and warm, tool-call **8/8**, needle-lite **6/6**, one ~1M-token request and 8 × ~128K concurrent lanes correct; MMLU sample (1,995 q) **86.02 ±0.75** is candidate B's, not re-run on C |
+| Cold boot, fast-load | **272 s** (the one-off dump boot that writes the sidecar is 956 s) |
 | Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes. **No reboot test yet** `[not tested]` |
 
 **Two ranks are 77–84 % of the speed on a third of the pool, at quality that is inside one error bar.**

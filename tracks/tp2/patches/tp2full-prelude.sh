@@ -86,6 +86,39 @@ if [ "${HAREM_TILELANG_FAILLOUD:-}" = "1" ]; then
   run python3 "$TP2_DIR/patch-tilelang-failloud-tp3.py" --root "$VLLM_PY"
 fi
 
+# --- The sparse indexer's K-gather workspace (6 September 2026) --------------
+# Upstream sizes it as 40 * max_model_len ENTRIES -- a constant chosen against
+# DeepSeek-V3.2's 163,840-token context, where it comes to 825 MB. At
+# max_model_len 1,000,000 the same constant reserves 40,000,000 x 132 B =
+# 4.92 GiB, during the profile run, locked by lock_workspace() for the life of
+# the engine, and charged to the residual the profiler subtracts BEFORE it sizes
+# the KV pool. The buffer only ever holds ONE indexer chunk's COMPRESSED
+# context, so its real ceiling is
+#     max_num_seqs * ceil((max_model_len + num_spec + 1) / index_kpool).
+#
+# EVERY TERM IS PER ENGINE, NOT PER RANK, so the same 4.92 GiB is reserved at
+# two ranks as at three -- against a pool that is a third the size. Measured on
+# both: +10.25 % of pool at three ranks, +32.14 % at two on the same eager-boot
+# comparison, and +26.5 % against the previous two-node recipe once the fast-load
+# sidecar is back. Measurements: results/memory/indexer-workspace-ab.md and
+# docs/15 section 5.9. The file is the three-node track's, unchanged: the bound
+# reads nothing that knows the rank count.
+#
+# The patch is applied UNCONDITIONALLY here and its BEHAVIOUR is env-gated,
+# default OFF:
+#   HAREM_INDEXER_WS_MODE unset / off / upstream  -> upstream sizing, byte for
+#       byte, guards L2+L3 disarmed (one environment read at import).
+#   HAREM_INDEXER_WS_MODE=bound                   -> real-bound sizing (512 MB)
+#       and the two run-time guards armed. This is the two-node recipe.
+# READ-ONLY OVERLAY: model_executor/layers/sparse_attn_indexer_kpool.py is
+# bind-mounted read-only from $OVERLAY_DIR, so that half must be pre-applied to
+# the host-side overlay copy; the script then reports "already patched" for it
+# here and writes only the image's own indexer.py. Run it against a copy of the
+# overlay, not against the overlay a running engine is mounting.
+# Same fail-closed `run` wrapper as every arm above: a drifted anchor stops the
+# rank instead of serving a silently-wrong model.
+run python3 "$TP2_DIR/patch-indexer-workspace-tp3.py" --root "$VLLM_PY"
+
 # --- Full-scope EXL3 at two ranks -------------------------------------------
 # S1 packed_modules_mapping, S2 stop hard-wiring MLA+KDA to bf16, S3 KDA
 # refactorisation. No A9/A10: those are the padded-load audit and there is no

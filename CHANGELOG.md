@@ -11,6 +11,52 @@ rounds, which is what the persisted MLA tuner cache bought — see
 
 ---
 
+## 2026-09-06 — The workspace bound at two ranks: +32.14 % of pool on an A/B, +26.5 % as shipped, and candidate C becomes the TP=2 recipe
+
+**The same patch, the same file, three times the gain — and the reason is a denominator.** vLLM sizes
+the sparse indexer's K-gather workspace as `40 × max_model_len` **entries**, which is 4.92 GiB at
+`max_model_len` 1,000,000. **Every term of that expression is per engine, not per rank**, so two
+nodes reserve exactly what three do, against a pool a third the size. The prediction written down
+before the run was +27.5 % against the three-node track's measured +10.25 %; the measurement came in
+at **+32.14 %**. New section: [docs/15](docs/15-tp2-track.md) §5.9; raw in
+[`results/speed/tp2-production-candidate.md`](results/speed/tp2-production-candidate.md)
+`[measured-here]`.
+
+**A same-session A/B, one environment line apart, both arms booting eagerly** so that neither could
+reuse a sidecar: locked workspace **5,036.40 → 513.00 MB** on both ranks — the three-node figures to
+the decimal, and the patch's own startup line word for word, because it needed no two-node variant —
+and KV pool **1,800,000 → 2,378,571**. Consumed memory per node 84.7/85.0 → 79.5/80.4 GiB. Gates
+**10/10 and 12/12 cold and warm on both arms**, tool-call 8/8, needle-lite 6/6; one **969,468**-token
+request correct; **eight concurrent ~128K lanes 8/8**, 640,904 prompt tokens at 2,225 tok/s of
+prefill, each lane carrying its own needle; exactly one workspace resize per rank after the stress and
+**none of the four safety layers fired**; swap 0.000 GiB.
+
+**Shipped as candidate C, and the pool figure was predicted before it was measured.** A fresh 78 GB
+per-rank sidecar and one 956 s dump boot later, the two-node recipe reads **2,128,571 → 2,692,857
+tokens, +26.5 %**, at an identical 272 s fast-load boot. Candidate B's own eager→fast-load difference
+is +310,714 tokens; adding it to the bound arm's eager figure predicted **2,689,285** against a
+measured **2,692,857** — **0.13 % out**. [`tracks/tp2/`](tracks/tp2/) now carries the patch, the
+prelude hook, the environment example and the unit; the previous recipe is one environment file away.
+
+**Two things recorded as costs rather than rounded off.** First, **all five concurrency levels moved
+the same way** — −1.16 to −2.63 %, mean −2.0 % — where the three-node arm read mixed signs. Every
+level is inside its band and the per-stream, TTFT and acceptance rows are flat, but five out of five
+in one direction is not what noise usually looks like, and **no clock, temperature or power telemetry
+was sampled**; `vmstat` only shows that neither arm was CPU-starved, over windows of different
+lengths, with the arms run in a fixed order 25 minutes apart. It is written down as **unexplained**.
+Second, diagnostic margin: 20× the scheduler's largest possible load becomes 2.03×.
+
+**The 1M gate failed first, and the engine was not the reason.** The probe scored `message.content`
+alone; the first attempt returned an **empty** answer — not a wrong one — and at
+`reasoning_effort: low` this model sometimes puts a short answer entirely into `reasoning_content`.
+The identical request, same seed, passed on the next attempt with the code in `content`. Two
+attempts, one empty, one correct, **no wrong code in either**, and the fixed probe now scores both
+fields: [`bench/needle-1m-bothfields.py`](bench/needle-1m-bothfields.py). A gate that cannot tell an
+empty answer from a wrong one is a ruler with a missing tick — the second time on this project that
+the instrument, and not the engine, was the thing that failed.
+
+---
+
 ## 2026-09-06 — CUDA graphs at three ranks are off because of a wrong declaration, not a kernel limit; filed upstream as vllm#55581, and left off
 
 **No configuration changed.** The item the owner queued — "what did eager cost us?" — was answered by

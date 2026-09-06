@@ -19,7 +19,7 @@ Three nodes instead of two: [tracks/tp3](../tp3/) and the [README quick start](.
 | File | What it is |
 |---|---|
 | [`env.tp2-full.example`](env.tp2-full.example) | **The production-candidate template.** `NNODES=2`, `TP_SIZE=2`, `ENABLE_EP=0`, no padding sidecar, `gpu-memory-utilization` **0.85** rather than the three-node 0.83, and four settings that are not optional at two ranks |
-| [`patches/`](patches/) | The in-container patch tree — thirteen files against the three-node tree's twenty-two, because nothing here has to pad anything. [`patches/README.md`](patches/README.md) is the inventory |
+| [`patches/`](patches/) | The in-container patch tree — fourteen files against the three-node tree's twenty-two, because nothing here has to pad anything. [`patches/README.md`](patches/README.md) is the inventory |
 | [`harem-exl3-tp2.service`](harem-exl3-tp2.service) | The autostart unit. It is a unit **of its own** — you do not edit the three-node one. Installed, started, health-checked and stopped on both nodes on 6 September 2026, and left `disabled`, because exactly one of the two units may be enabled |
 | [`motor-onkosul-exl3-tp2.sh`](motor-onkosul-exl3-tp2.sh) | Its preflight — `FABRIC_PEERS` is **one** address per node rather than two; the ConnectX-7 check stays `4/4`, because it counts ports on the node, not peers |
 
@@ -67,7 +67,8 @@ here is weight-bandwidth bound, and adding a rank cuts each rank's weight traffi
 
 ## The numbers
 
-**The TP=2 production candidate, measured 6 September 2026** — two nodes, TP=2, EP off, image
+**The TP=2 recipe, measured 6 September 2026 — candidate C** (the full-scope candidate plus the
+sparse-indexer workspace bound, [docs/15](../../docs/15-tp2-track.md) §5.9) — two nodes, TP=2, EP off, image
 `exl3-zeus:754421f`, the full-scope checkpoint (`turboderp/GLM-5.3-Flash-exl3` at 4.05 bpw), KV fp8
 and an fp8 draft cache, DFlash2 k=7, `--block-size 256`, `HAREM_SW_BLOCK_SIZE=256`,
 `--max-num-batched-tokens 2048`, `--max-num-seqs 8`, `--max-model-len 1000000`,
@@ -76,17 +77,27 @@ temperature 0, reasoning effort `low`, median of sweep rounds 2-4 `[measured-her
 
 | | |
 |---|---|
-| Single-stream decode (C1) | **58.50** tok/s aggregate (**62.55** per stream) |
-| Aggregate at 8 concurrent streams (C8) | **155.75** tok/s |
-| Prefill, fresh unseen ~8.4K prompts | **1,400** tok/s |
-| KV pool at `max_model_len` 1,000,000 | **2,128,571** tokens — about 2.1 concurrent 1M-token requests |
-| TTFT, C1 / C8 | **0.407** / **1.077** s |
+| Single-stream decode (C1) | **60.08** tok/s aggregate (**65.96** per stream) |
+| Aggregate at 8 concurrent streams (C8) | **157.71** tok/s |
+| Prefill, fresh unseen ~8.4K prompts | **1,414** tok/s |
+| KV pool at `max_model_len` 1,000,000 | **2,692,857** tokens — about 2.7 concurrent 1M-token requests, **+26.5 %** over the candidate it replaces |
+| TTFT, C1 / C8 | **0.381** / **1.054** s |
 | Quality | correctness probe **10/10**, code exam **12/12** cold and warm, tool-call **8/8**, needle-lite **6/6**; MMLU sample (1,995 q) **86.02 ±0.75** |
-| Cold boot, fast-load | **272 s** (the one-off dump boot that writes the sidecar is 998 s) |
+| Cold boot, fast-load | **272 s** (the one-off dump boot that writes the sidecar is 956 s) |
 | Autostart unit → `/health` 200 | **261 s**, `systemctl start` on both nodes. **No reboot test yet** `[not tested]` |
-| Consumed memory per node | **84.8 GiB** |
+| Consumed memory per node | **79.5 / 80.4 GiB** |
 
-**There are two candidates and this is the recommended one.** Candidate A serves the
+**MMLU is candidate B's**: candidate C changes no weight and no kernel, only the size of a
+scratch buffer, and the short quality gates were taken as sufficient `[not tested]`.
+
+**How candidate C was separated from candidate B.** Not by comparing the two tables above — those
+are different sessions. A same-session A/B with **one environment line** between the arms, both
+booting eagerly so that neither could reuse a sidecar: KV pool **1,800,000 → 2,378,571, +32.14 %**,
+every gate full on both arms, and all five concurrency levels inside their declared bands.
+[docs/15](../../docs/15-tp2-track.md) §5.9 has the table, the cost, and the one speed reading that is
+recorded as unexplained rather than as noise.
+
+**There are two candidates below this one and this is the recommended lineage.** Candidate A serves the
 routed-experts-only checkpoint and is kept for anyone who already has those 164 GB: it is slower on
 every concurrency and its pool is 1,500,000 rather than 2,128,571. The full-scope candidate B is
 **+20.0 % at C1, +13.3 % at C8, +41.9 % of pool and 4.5 GiB lighter per node**, with MMLU 0.35

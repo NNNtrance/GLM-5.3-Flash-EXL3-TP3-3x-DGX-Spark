@@ -1,8 +1,8 @@
-# tracks/tp2/patches — the two-node patch tree (TP=2 production candidate)
+# tracks/tp2/patches — the two-node patch tree (TP=2 recipe, candidate C)
 
 **Applies to: TP=2 only.** This is the tree the two-node production candidate of
 [docs/15](../../../docs/15-tp2-track.md) §5 runs. It is [`tracks/tp3/patches/`](../../tp3/patches/) with every
-file that exists only to serve a pad removed, plus the two-node full-scope loader patch. Thirteen
+file that exists only to serve a pad removed, plus the two-node full-scope loader patch. Fourteen
 files against twenty-two.
 
 **Why a tree of its own and not a flag.** The directory's **file list and content are the fast-load
@@ -25,6 +25,7 @@ trees have to be kept in step by hand.** Every shared file here is byte-identica
 | `patch-kvdiag-tp3.py` | byte-identical | logging only: the per-group decomposition of the KV pool arithmetic. Every arm |
 | `patch-swblock-tp3.py` | byte-identical | the draft KV page, 16 → 256 tokens. **Mandatory in practice** at two ranks ([docs/15](../../../docs/15-tp2-track.md) §4) |
 | `patch-draftkv-tp3.py` | byte-identical | the drafter's own cache at fp8: **+15.1 % of pool** at two ranks |
+| `patch-indexer-workspace-tp3.py` | byte-identical | bounds the sparse indexer's K-gather workspace, 4.92 GiB → 512 MB: **+32.14 % of pool** on an eager-boot A/B at two ranks, **+26.5 %** against the recipe it replaces once the sidecar is back. Gated on `HAREM_INDEXER_WS_MODE=bound`; unset is upstream byte for byte. The file needs no two-node variant — every term of the bound is per engine, not per rank ([docs/15](../../../docs/15-tp2-track.md) §5.9, [`tracks/tp3/patches/indexer-workspace/`](../../tp3/patches/indexer-workspace/) for the derivation and the four safety layers). **Half of it lands on a read-only overlay file** — pre-apply that half on the host, see the prelude |
 | `patch-tilelang-failloud-tp3.py` | byte-identical | a silent `contextlib.suppress` becomes a named error. Gated |
 | `patch-epfilter-tp3.py` | byte-identical | EP weight filter for `.trellis`. **Inert here** — it needs `--enable-ep-weight-filter`, which needs EP, and EP is off. Kept anyway, so that trying EP at two ranks needs no tree change and therefore no new dump boot |
 | `patch-fastload-tp3.py` | byte-identical | installs the sidecar hook into vLLM's loader. Inert unless `HAREM_FASTLOAD_MODE` is set |
@@ -70,7 +71,8 @@ two and leave whole 128-column Hadamard blocks ([docs/15](../../../docs/15-tp2-t
 
 `patch-kvdiag` → `patch-swblock` → `patch-epfilter` → `patch-fastload` → (`patch-draftkv` if
 `HAREM_DRAFT_KV_DTYPE`) → (`patch-tilelang-failloud` if `HAREM_TILELANG_FAILLOUD=1`) →
-(`patch-fullscope-tp2` if `HAREM_EXL3_FULLSCOPE=1`) → `flashinfer-warmup` → `preflight-tp3` →
+`patch-indexer-workspace` → (`patch-fullscope-tp2` if `HAREM_EXL3_FULLSCOPE=1`) →
+`flashinfer-warmup` → `preflight-tp3` →
 (`preflight-fastload` if `HAREM_FASTLOAD_MODE`) → `exec vllm serve`.
 
 `TP2_STRICT=0` turns a failed patch into a warning. Do not use it to get past a broken anchor: a

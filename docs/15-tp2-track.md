@@ -464,10 +464,15 @@ whether two ranks can serve an 8K prompt depends on the host's state at boot.**
 ## 5. The TP=2 production candidate — measured, 6 September 2026
 
 Two complete candidates, identical in every respect except the checkpoint and the one patch and one
-flag that serving it needs. **Candidate B, the full-scope one, is the recommended configuration**:
+flag that serving it needs. **Candidate B, the full-scope one, is the better of the two**:
 it is faster on every concurrency, has a 42 % larger pool, is lighter in host memory, and its
 quality gates are indistinguishable. Candidate A is kept for anyone who has the 164 GB
 routed-experts-only checkpoint and does not want to fetch the other one.
+
+**§5.9 adds a third, and it is the one to run.** Candidate C is candidate B plus one environment
+line — the sparse-indexer workspace bound — and it is **+26.5 % of pool** for no measured quality
+cost. Everything §5.1–§5.8 says about candidate B applies to it unchanged; only the pool, the memory
+rows and the sidecar directory move.
 
 ### 5.1 What both candidates are
 
@@ -653,6 +658,162 @@ Full raw record: [`results/speed/tp2-production-candidate.md`](../results/speed/
 
 ---
 
+### 5.9 Candidate C — the indexer workspace bound at two ranks, measured 6 September 2026
+
+**The recommended configuration.** Candidate B plus `HAREM_INDEXER_WS_MODE=bound`, the patch the
+three-node track adopted the same day ([`tracks/tp3/patches/indexer-workspace/`](../tracks/tp3/patches/indexer-workspace/),
+[`results/memory/indexer-workspace-ab.md`](../results/memory/indexer-workspace-ab.md)). Nothing else
+changes: same checkpoint, same image, same kernels, same 0.85.
+
+**Why it was worth measuring separately rather than assumed.** vLLM sizes the sparse indexer's
+K-gather workspace as `40 × max_model_len` **entries** — 4.92 GiB at `max_model_len` 1,000,000,
+reserved during the profile run, locked for the life of the engine, and charged to the residual the
+profiler subtracts *before* it sizes the KV pool. **Every term of that expression is per engine, not
+per rank.** So two ranks reserve exactly the same 4.92 GiB per rank as three do — against a pool
+that is a third the size. The bound is arithmetic, not a rank-count question, and the prediction
+made before the run was **+27.5 %** against the three-node track's measured +10.25 %.
+
+#### The workspace itself
+
+`VLLM_DEBUG_WORKSPACE=1` is an upstream variable and needs no patch. One resize per rank, on both
+ranks, in both arms — so no other consumer sets this buffer and the gain is not capped by somebody
+else's requirement:
+
+| Arm | `WorkspaceManager` line | Grown by |
+|---|---|---|
+| control | `0.00 MB -> `**`5036.40 MB`** | `sparse_attn_indexer_kpool.py:295` |
+| bound | `0.00 MB -> `**`513.00 MB`** | `sparse_attn_indexer_kpool.py:295` |
+
+**Both numbers are the three-node track's, to the decimal.** The patch's own startup line is
+identical too — `max_model_len=1000000 compress_ratio=4 entry_bytes=132 max_num_seqs=8 num_spec=7`,
+`per_request_floor=250002`, `scheduler_ceiling=2000016`, `headroom=2.03x`. The file needed no
+two-node variant.
+
+#### The A/B, one environment line apart `[measured-here]`
+
+Both arms booted **eagerly** — no fast-load — because a new `patch-*.py` and a changed prelude
+change the sidecar's manifest identity, and when the arms ran there was not enough free disk for a
+second two-node sidecar. The comparison is therefore control-versus-bound on the same boot path,
+never against the §5.2 table:
+
+| | **control** (knob unset) | **bound** | delta |
+|---|---:|---:|---:|
+| Locked workspace | 5,036.40 MB | **513.00 MB** | −4.42 GiB |
+| **KV pool at 1M** | 1,800,000 | **2,378,571** | **+578,571, +32.14 %** |
+| Maximum concurrency at 1M | 1.80× | **2.38×** | +32 % |
+| Available KV, rank 0 / rank 1 | 13.65 / 13.60 GiB | 18.20 / **17.96** GiB | +4.55 / **+4.36** |
+| Consumed memory per node | 84.68 / 85.00 GiB | 79.50 / 80.40 GiB | −4.23 / −4.60 |
+| Peak activation | 5.06 / 4.79 GiB | 4.74 / 5.02 GiB | unchanged |
+| CUDAGraph memory | 1.07 / 1.10 GiB | 1.10 / 1.10 GiB | unchanged — graphs still capture here, vllm#55581 |
+| Boot, eager | 333 s | 333 s | identical |
+| C1 / C2 / C4 / C6 / C8 aggregate | 61.91 / 85.15 / 121.13 / 142.68 / 160.43 | 60.76 / 84.16 / 117.94 / 139.40 / 157.15 | −1.86 / −1.16 / −2.63 / −2.30 / −2.04 % |
+| C1 per stream | 67.09 | 67.46 | +0.55 % |
+| TTFT, C1 / C8 | 0.372 / 1.047 s | 0.381 / 1.036 s | equal |
+| acceptance, C1 / C8 | 61.13 / 62.10 % | 60.39 / 61.29 % | equal |
+| Prefill, 3 fresh unseen ~8.4K prompts | 1,413 tok/s | 1,403 tok/s | −0.7 % |
+| Correctness / code, **cold and warm** | 10/10 · 12/12 both | 10/10 · 12/12 both | equal |
+| Tool-call gate | 8/8 | 8/8 | equal |
+| Needle-lite, 64K + 128K × 3 depths | 6/6 | 6/6 | equal |
+| Swap used, peak | 0.00 GiB | 0.000 GiB | flat |
+
+**The conversion checks out against an independently measured ruler.** 578,571 tokens ÷ 4.36 GiB on
+the binding rank = **132,700 tokens/GiB**, against the 132,456 the candidate-B boot gives from
+2,128,571 ÷ 16.07. Two derivations, one number.
+
+**Why three times the three-node gain.** The memory freed is the same on both — about 4.4 GiB per
+rank. The pool it is freed *into* is 13.6 GiB at two ranks and 44.5 GiB at three. The whole
+difference between +32.14 % and +10.25 % is the denominator.
+
+**A control worth having.** The control arm's 1,800,000 is within **0.98 %** of the 1,817,857 that
+candidate B's own dump boot — the same eager path — produced hours earlier. The arms are comparable
+and the control is not a one-off.
+
+#### The stress the buffer actually has to survive
+
+| Gate | Result |
+|---|---|
+| One **~1M-token** request | 969,468 prompt tokens, needle correct — see the harness note below |
+| **Eight concurrent ~128K** prompts, each with its own needle | **8/8**, 640,904 prompt tokens, 288.0 s wall, 2,225 tok/s aggregate prefill |
+| A resize after `lock_workspace()` | **none** — exactly one resize line per rank, the boot one |
+| The patch's four safety layers | **none fired** — no `AssertionError`, no `HAREM-IDXWS refuses`, no `K-gather workspace too small` |
+| `MemAvailable` floor / swap | 7.0 and 8.0 GiB / **0.000 GiB**, swap-out 9 and 7 pages |
+
+The eight-lane gate is the one that matters: the buffer holds *one indexer chunk's* compressed
+context for every prefill request the scheduler batches together, so many long prompts at once is
+its worst case, not one long prompt. Each lane carried a **different** needle, so a gather that read
+past its slice would surface as a **wrong code**, not as a plausible number. It did not.
+
+#### The measuring instrument was wrong before the engine was `[measured-here]`
+
+The 1M gate first read **FAIL**: 969,468 prompt tokens, 660.6 s, and an **empty** answer — not a
+wrong one. The probe scored `message.content` only. At `reasoning_effort: low` this model sometimes
+puts a short answer entirely in `reasoning_content` and leaves `content` empty; that is a measured
+property of the extractor, not a miss. The identical request, same seed, same settings, re-run:
+**PASS**, the code in `content`, 662.7 s.
+
+Recorded honestly: **two attempts, one empty, one correct, and no wrong code in either.** The first
+attempt's `reasoning_content` was discarded by the probe, so the artefact cannot be *proved* for that
+specific request — only that the failure had the artefact's shape. The fixed harness scores both
+fields and prints which one hit:
+[`bench/needle-1m-bothfields.py`](../bench/needle-1m-bothfields.py). A probe that reads one of two
+fields is a ruler with a missing tick, and this is the second time on this project that the
+instrument, not the engine, was the thing that failed.
+
+#### One reading recorded as unexplained, not as noise
+
+All five concurrency levels moved the **same way**: −1.16 %, −1.86 %, −2.04 %, −2.30 %, −2.63 %,
+mean −2.0 %. Every one is inside its declared band, and the per-stream C1, the TTFT and the
+acceptance rows are all flat. But at three ranks the same patch gave **mixed** signs (+1.4, −1.0,
++0.8, +0.9, −1.5 %; mean +0.1 %), and five out of five in one direction is not what noise usually
+looks like.
+
+**We cannot attribute it, and we are not going to call it noise.** No clock, temperature or power
+telemetry was sampled during either arm — only `MemAvailable`, swap and `vmstat`. What `vmstat`
+shows is that neither arm was CPU-starved (87–93 % idle, run queue 1.4–2.7), but the two windows are
+not the same length (23 minutes against 54, because the stress gates ran in the bound arm), so even
+that is not a like-for-like reading. A second confound is **order**: the control ran first and the
+bound arm started 25 minutes deeper into a loaded cluster. Thermal drift is a plausible hypothesis
+and an unmeasured one.
+
+**Verdict: same sign, inside band, unexplained.** If you repeat this, reverse the arm order and
+sample clock, temperature and power per arm `[not tested]`.
+
+#### The production configuration, with the sidecar back
+
+Once the disk was found, candidate C got its own dump and a fast-load boot:
+
+| | Candidate B | **Candidate C** | delta |
+|---|---:|---:|---:|
+| **KV pool at 1M** | 2,128,571 | **2,692,857** | **+564,286, +26.5 %** |
+| Maximum concurrency at 1M | 2.13× | **2.69×** | +26.5 % |
+| Available KV, rank 0 / rank 1 | 16.07 / 16.23 GiB | 21.31 / 20.33 GiB | +5.24 / +4.10 |
+| Consumed memory per node | 84.77 / 84.51 GiB | 79.50 / 80.35 GiB | −5.3 / −4.2 |
+| Boot, fast-load | 272 s | **272 s** | identical |
+| Weight restore | 88.0 s, 918 MB/s | 92.4 / 86.4 s, 873 / 934 MB/s | equal |
+| Sidecar per rank | 75.2 GiB, 32 files | 78 GB, 32 files | same content |
+| One-off dump boot | 998 s | 956 s | equal |
+| C1 aggregate · per stream | 58.50 · 62.55 | 60.08 · 65.96 | different session, §5.9 note |
+| C8 aggregate | 155.75 | 157.71 | different session |
+| Gates cold + warm · tool-call · needle-lite | 10/10 · 12/12 · 8/8 · 6/6 | 10/10 · 12/12 · 8/8 · 6/6 | equal |
+
+**The pool figure was predicted before it was measured.** Candidate B's own eager→fast-load
+difference is 2,128,571 − 1,817,857 = **+310,714** tokens; adding it to the bound arm's eager
+2,378,571 predicts **2,689,285**. Measured: **2,692,857** — **+0.13 %**. The two speed columns are
+**different sessions and not an A/B**; the clean comparison is the control-versus-bound table above.
+
+#### What it cost, and the line is not left empty
+
+1. **Diagnostic margin.** The indexer had 20× the largest load the scheduler can produce and now has
+   **2.03×**, against a startup refusal and three run-time guards, none of which fired here.
+2. **Disk and one dump boot.** A fresh 78 GB-per-rank sidecar and 956 s. Adding a file to a patch
+   tree changes the fast-load manifest identity, so this is not optional — budget it.
+3. **The unexplained speed sign** above. Not free until it is explained.
+4. **MMLU was not re-run** `[not tested]`. Candidate C changes no weight and no kernel — only the
+   size of a scratch buffer — and the short quality gates were taken as sufficient. Candidate B's
+   86.02 ±0.75 on the same checkpoint and stack is the standing figure.
+
+---
+
 ## 6. What is still **not** measured at two ranks
 
 This list is much shorter than it was, and every row now carries a reason rather than an omission.
@@ -664,6 +825,8 @@ This list is much shorter than it was, and every row now carries a reason rather
 | **Expert parallelism at two ranks** | Legal (§1.1), never measured. It changes which kernel path the MoE stage takes ([05](05-expert-parallel-and-cuda-exl3-fixes.md)) and `tracks/tp2/patches/` already carries `patch-epfilter-tp3.py` so that trying it needs no tree change — and therefore no new dump boot `[not tested]` |
 | **A second boot of each candidate**, and a boot-to-boot spread | Every number in §5 is a median of three rounds on **one** boot per candidate. At three ranks the boot-median spread is C1 1.1 %, C8 2.5 %, **C4 7.4 %**. The pool, memory, boot-time and gate rows are far too large a difference to be boot noise; the speed rows carry that uncertainty and the B-over-A margins (+13 to +21 %) clear it comfortably `[not tested]` |
 | **`patch-vllm-tp3.py` at two ranks** | A no-op by arithmetic (§1.1), deliberately not shipped, therefore never measured. If you keep one tree for both rank counts you will run it; we do not expect a difference and we have not shown one `[not tested]` |
+| **Why the bounded arm's five concurrency levels all moved the same way** (§5.9) | Inside band, mean −2.0 %, and mixed-signed at three ranks. No clock, temperature or power telemetry was sampled during either arm, and the arms ran in a fixed order 25 minutes apart, so neither thermal drift nor anything else can be ruled in or out. Repeat with the arm order reversed and per-arm telemetry `[not tested]` |
+| **MMLU on candidate C** | It changes no weight and no kernel — only a scratch buffer's size — and the short gates were taken as sufficient. Candidate B's 86.02 ±0.75 on the same checkpoint and stack stands `[not tested]` |
 | **Anything at one or four nodes** | Out of scope for this page; [00-start-here](00-start-here.md) says what we can and cannot say about other node counts |
 
 Two rows that used to live here are gone: the fast-load sidecar and the dual-cable plugin patch are
@@ -683,19 +846,24 @@ harness and the same protocol. The rank counts run at different memory rungs —
 0.83 at three — because neither ladder is transferable; that difference is called out in the pool row
 `[measured-here]`:
 
-| | **TP=2 candidate B** (2 nodes, 0.85) | **TP=3 production 10** (3 nodes, 0.83) | two-node share |
+| | **TP=2 candidate C** (2 nodes, 0.85) | **TP=3 production 10** (3 nodes, 0.83) | two-node share |
 |---|---|---|---|
-| C1 aggregate | 58.50 | 70.5 | 83 % |
-| C1 per stream | 62.55 | 76.9 | 81 % |
-| C8 aggregate | 155.75 | 194.0 | 80 % |
-| Prefill, fresh unseen ~8.4K prompts | 1,400 | 1,769 | 79 % |
-| **KV pool at 1M** | **2,128,571** | **5,619,834** | **38 %** — and the two rungs differ |
-| TTFT, C1 / C8 | 0.407 / 1.077 s | 0.280 / 0.826 s | +45 % / +30 % worse |
-| Consumed memory per node | 84.8 GiB | 58.3–59.1 GiB | the whole story |
+| C1 aggregate | 60.08 | 70.5 | 85 % |
+| C1 per stream | 65.96 | 76.9 | 86 % |
+| C8 aggregate | 157.71 | 194.0 | 81 % |
+| Prefill, fresh unseen ~8.4K prompts | 1,414 | 1,769 | 80 % |
+| **KV pool at 1M** | **2,692,857** | **5,619,834** | **48 %** — and the two rungs differ |
+| TTFT, C1 / C8 | 0.381 / 1.054 s | 0.280 / 0.826 s | +36 % / +28 % worse |
+| Consumed memory per node | 79.5–80.4 GiB | 58.3–59.1 GiB | the whole story |
 | Boot, fast-load | 272 s | 251 s | comparable |
-| Sidecar per rank | 75.2 GiB | 53 GiB | EP is why |
+| Sidecar per rank | 78 GB | 53 GiB | EP is why |
 | Quality gates · tool-call | 10/10 · 12/12 · 8/8 | 10/10 · 12/12 | equal |
-| MMLU sample | §5.8 | 86.47 ±0.74 | |
+| MMLU sample | §5.8 (candidate B's, carried) | 86.47 ±0.74 | |
+
+**One asymmetry to read the pool row with.** The two-node column carries the indexer workspace
+bound (§5.9) and production 10 does not — it predates it. The three-node figure that does carry it
+is production 12, whose headline pool is 7,041,322, against which the two-node share is **38 %** rather than
+48 %. The speed rows are unaffected: the bound costs nothing measurable at either rank count.
 
 **Why the third node also wins on latency.** A decode step here is weight-bandwidth bound, and the
 profile says so: at production 7 the dense BF16 GEMM alone was 45.3 % of a single-stream step, and in

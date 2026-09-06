@@ -263,3 +263,91 @@ Logs, sweep JSONs, gate outputs, container logs, `DRY_RUN` command lines, port c
 ledgers for both candidates live under our own measurement directory, not in this repository:
 `prod/` (candidate A), `prod-fs/` (candidate B), `dump/` and `dump-fs/` (the sidecar boots),
 `dry-tp2prod*.txt`, `ab-tp2full.sh`, `dump-tp2full.sh`, `summary.tsv`.
+
+---
+
+# Candidate C — candidate B plus the indexer workspace bound, measured 6 September 2026
+
+**The recommended configuration.** Everything above holds; the only change is
+`HAREM_INDEXER_WS_MODE=bound` in `EXTRA_ENV`, which sizes the sparse indexer's K-gather workspace
+from its real bound instead of `40 × max_model_len`. Narrative and cost: [docs/15](../../docs/15-tp2-track.md) §5.9.
+
+## The A/B that separated it — one environment line, both arms eager `[measured-here]`
+
+Neither arm could use a fast-load sidecar: adding `patch-indexer-workspace-tp3.py` to the tree
+changes the manifest identity, and there was no disk for a second two-node sidecar when the arms
+ran. So both booted eagerly and the comparison is control-versus-bound, never against the tables
+above.
+
+| | control (knob unset) | bound | delta |
+|---|---:|---:|---:|
+| Locked workspace, both ranks | 5,036.40 MB | **513.00 MB** | −4.42 GiB |
+| **KV pool at `max_model_len` 1,000,000** | 1,800,000 | **2,378,571** | **+578,571, +32.14 %** |
+| Maximum concurrency at 1M | 1.80× | 2.38× | +32 % |
+| Available KV, rank 0 / rank 1 | 13.65 / 13.60 GiB | 18.20 / 17.96 GiB | +4.55 / +4.36 |
+| Consumed per node | 84.68 / 85.00 GiB | 79.50 / 80.40 GiB | −4.23 / −4.60 |
+| Peak activation | 5.06 / 4.79 GiB | 4.74 / 5.02 GiB | unchanged |
+| CUDAGraph memory | 1.07 / 1.10 GiB | 1.10 / 1.10 GiB | unchanged |
+| Boot, eager | 333 s | 333 s | identical |
+| C1 aggregate · per stream | 61.91 · 67.09 | 60.76 · 67.46 | −1.86 % · +0.55 % |
+| C2 / C4 / C6 aggregate | 85.15 / 121.13 / 142.68 | 84.16 / 117.94 / 139.40 | −1.16 / −2.63 / −2.30 % |
+| C8 aggregate | 160.43 | 157.15 | −2.04 % |
+| TTFT median, C1 / C8 | 0.372 / 1.047 s | 0.381 / 1.036 s | equal |
+| acceptance · tokens per step, C1 / C8 | 61.13 · 5.28 / 62.10 · 5.35 | 60.39 · 5.23 / 61.29 · 5.29 | equal |
+| Prefill, 3 fresh unseen ~8.4K prompts | 1,413 tok/s | 1,403 tok/s | −0.7 % |
+| Prefill, 7,382 tokens, uncached | 1,315 tok/s | 1,232 single shot; **1,321 / 1,302 / 1,296** repeated | equal |
+| Correctness / code, cold and warm | 10/10 · 12/12 both | 10/10 · 12/12 both | equal |
+| Tool-call gate · needle-lite | 8/8 · 6/6 | 8/8 · 6/6 | equal |
+| `MemAvailable` floor / swap peak | 7.0, 9.0 GiB / 0.00 | 7.0, 8.0 GiB / 0.000 | flat |
+
+**Every level moved the same way** (−1.16 … −2.63 %, mean −2.0 %) and every one is inside its band.
+That is recorded in [docs/15](../../docs/15-tp2-track.md) §5.9 as **unexplained**, not as noise: no
+clock, temperature or power telemetry was sampled, and the arms ran in a fixed order.
+
+**The single-shot prefill7k reading is the reason repeats exist.** 1,232 looked like −6.3 % until it
+was run three more times on the same engine and landed at 1,321 / 1,302 / 1,296 — the control's
+1,315 sits in the middle of that spread.
+
+## Stress, bound arm
+
+| Gate | Result |
+|---|---|
+| One ~1M-token request | **969,468** prompt tokens, needle correct, 662.7 s — two attempts, see below |
+| Eight concurrent ~128K prompts, each with its own needle | **8/8**, 640,904 prompt tokens, 288.0 s wall, **2,225 tok/s** aggregate prefill |
+| Resize after `lock_workspace()` | **none** — one resize line per rank, the boot one |
+| The patch's four safety layers | **none fired** |
+| Swap-out over the whole window | 9 and 7 pages |
+
+**The 1M gate failed the first time and the engine was not the reason.** The probe scored
+`message.content` only; the first attempt returned an **empty** answer — not a wrong one — in
+660.6 s, and this model at `reasoning_effort: low` sometimes puts a short answer entirely into
+`reasoning_content`. The identical request, same seed, returned the correct code in `content` on the
+next attempt. Two attempts, one empty, one correct, **no wrong code in either**. The fixed probe
+scores both fields: [`bench/needle-1m-bothfields.py`](../../bench/needle-1m-bothfields.py).
+
+## The production configuration, fast-load restored
+
+| | Candidate B | **Candidate C** | delta |
+|---|---:|---:|---:|
+| **KV pool at 1M** | 2,128,571 | **2,692,857** | **+26.5 %** |
+| Available KV, rank 0 / rank 1 | 16.07 / 16.23 GiB | 21.31 / 20.33 GiB | +5.24 / +4.10 |
+| Consumed per node | 84.77 / 84.51 GiB | 79.50 / 80.35 GiB | −5.3 / −4.2 |
+| Boot, fast-load | 272 s | **272 s** | identical |
+| Weight restore | 88.0 s, 918 MB/s | 92.4 / 86.4 s, 873 / 934 MB/s | equal |
+| Sidecar per rank | 75.2 GiB, 32 files | 78 GB, 32 files | same content |
+| One-off dump boot | 998 s | 956 s | equal |
+| C1 aggregate · per stream | 58.50 · 62.55 | 60.08 · 65.96 | different session |
+| C2 / C4 / C6 / C8 aggregate | 82.45 / 112.62 / 137.37 / 155.75 | 82.92 / 120.94 / 140.84 / 157.71 | different session |
+| TTFT median, C1 / C8 | 0.407 / 1.077 s | 0.381 / 1.054 s | different session |
+| Prefill fresh · 7,382 uncached | 1,400 · 1,289 | 1,414 · 1,289 | equal |
+| Gates cold + warm · tool-call · needle-lite | 10/10 · 12/12 · 8/8 · 6/6 | 10/10 · 12/12 · 8/8 · 6/6 | equal |
+| `MemAvailable` floor / swap | 5.7, 7.0 GiB / 0.03, 0.02 | 5.0, 7.0 GiB / 0.00, 0.00 | flat |
+
+**The pool was predicted before it was measured.** Candidate B's own eager→fast-load difference is
+2,128,571 − 1,817,857 = +310,714 tokens; added to the bound arm's eager 2,378,571 that predicts
+**2,689,285**. Measured **2,692,857** — **+0.13 %**.
+
+**The two speed columns are different sessions and are not an A/B.** The clean comparison is the
+control-versus-bound table above. MMLU was not re-run: candidate C changes no weight and no kernel
+`[not tested]`.
+

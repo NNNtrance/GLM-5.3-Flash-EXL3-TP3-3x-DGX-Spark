@@ -6,9 +6,13 @@ sparse indexer's K-gather workspace from its real bound instead of `40 × max_mo
 **no measured speed cost**. It moved from `patches-optional/` into the recipe when the disk for a
 fresh fast-load sidecar was found — see [What promotion cost](#what-promotion-cost).
 
-**Applies to: TP=3 as measured and shipped; the patch itself is rank-agnostic.** The buffer is sized from
-`max_model_len` alone, so a two-node stack reserves the same 4.92 GiB — where the pool is far
-scarcer, and therefore worth more `[not tested]`.
+**Applies to: both tracks, measured on both.** The buffer is sized from `max_model_len` alone, so a
+two-node stack reserves the same 4.92 GiB per rank — against a pool a third the size, and therefore
+worth more. Measured the same day on two nodes: **+32.14 %** of pool on a same-session eager-boot
+A/B and **+26.5 %** against the two-node recipe it replaced, with every gate full and every
+concurrency level inside its band — this file, unchanged, is what
+[`tracks/tp2/patches/`](../../../tp2/patches/) ships
+([docs/15](../../../../docs/15-tp2-track.md) §5.9) `[measured-here]`.
 
 Everything measured is in
 [`results/memory/indexer-workspace-ab.md`](../../../../results/memory/indexer-workspace-ab.md); the

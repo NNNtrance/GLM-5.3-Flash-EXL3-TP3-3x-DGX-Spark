@@ -361,10 +361,14 @@ promoting it means a fresh sidecar of about **53 GB per node** — which does no
 - **`HAREM_INDEXER_WS_MB`, the explicit override, was never booted.** Only `MODE=bound` ran on the
   engine; the override is covered by the CPU unit test, including its refusals `[not tested]` on
   hardware.
-- **Two ranks.** The buffer is sized from `max_model_len`, so a two-node stack reserves the same
-  4.92 GiB, where the pool is far scarcer ([docs/15](../../docs/15-tp2-track.md)). Nothing was booted
-  at TP=2 with this patch `[not tested]` — and at two ranks the pool **binds**, so it is worth more
-  there than here.
+- **Two ranks — measured the same day, and it is worth three times as much there.** The buffer is
+  sized from `max_model_len`, so a two-node stack reserves the same 4.92 GiB per rank against a pool
+  a third the size. A same-session eager-boot A/B on two nodes, this file unchanged, one environment
+  line between the arms: locked workspace **5,036.40 → 513.00 MB** — the numbers above to the decimal
+  — and KV pool **1,800,000 → 2,378,571, +32.14 %** against +10.25 % here. With the fast-load sidecar
+  restored the two-node recipe went **2,128,571 → 2,692,857, +26.5 %**. Gates full, stress clean,
+  every concurrency level inside its band. [docs/15](../../docs/15-tp2-track.md) §5.9 and
+  [`results/speed/tp2-production-candidate.md`](../speed/tp2-production-candidate.md) `[measured-here]`.
 - **Other context lengths.** Everything above is at `max_model_len` 1,000,000. The upstream sizing is
   linear in it, so a 256,000-token deployment reserves 1.26 GiB and the gain shrinks with it
   `[estimate]`.

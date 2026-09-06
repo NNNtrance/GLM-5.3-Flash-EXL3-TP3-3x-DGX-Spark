@@ -89,3 +89,18 @@ production 11 (0.87 + sm_12x correctness set),2,6,99.3,95.4,102.3,53.9,0.422,,18
 production 11 (0.87 + sm_12x correctness set),4,6,141.0,133.1,148.7,42.3,0.577,,23.64,63.1,5.42,6382920
 production 11 (0.87 + sm_12x correctness set),6,6,173.8,167.7,179.1,33.4,0.696,,29.94,62.0,5.34,6382920
 production 11 (0.87 + sm_12x correctness set),8,6,201.1,196.7,207.2,29.5,0.806,,33.86,62.8,5.40,6382920
+"TP=2 indexer-workspace A/B, control (eager, 0.85)",1,3,61.9,61.4,64.1,67.1,0.372,,14.91,61.1,5.28,1800000
+"TP=2 indexer-workspace A/B, control (eager, 0.85)",2,3,85.2,85.1,86.2,46.6,0.532,,21.45,61.4,5.30,1800000
+"TP=2 indexer-workspace A/B, control (eager, 0.85)",4,3,121.1,119.2,121.7,34.9,0.738,,28.69,64.1,5.49,1800000
+"TP=2 indexer-workspace A/B, control (eager, 0.85)",6,3,142.7,141.8,146.0,27.4,0.892,,36.51,62.7,5.39,1800000
+"TP=2 indexer-workspace A/B, control (eager, 0.85)",8,3,160.4,156.6,160.7,23.4,1.047,,42.77,62.1,5.35,1800000
+"TP=2 indexer-workspace A/B, bound (eager, 0.85)",1,3,60.8,59.7,60.9,67.5,0.381,,14.82,60.4,5.23,2378571
+"TP=2 indexer-workspace A/B, bound (eager, 0.85)",2,3,84.2,82.4,89.2,48.2,0.543,,20.74,61.0,5.27,2378571
+"TP=2 indexer-workspace A/B, bound (eager, 0.85)",4,3,117.9,114.4,121.4,34.9,0.751,,28.62,63.3,5.43,2378571
+"TP=2 indexer-workspace A/B, bound (eager, 0.85)",6,3,139.4,138.1,143.4,27.0,0.902,,37.04,61.9,5.33,2378571
+"TP=2 indexer-workspace A/B, bound (eager, 0.85)",8,3,157.2,155.9,161.0,23.2,1.036,,43.03,61.3,5.29,2378571
+"TP=2 production candidate C (full-scope + workspace bound, 0.85)",1,3,60.1,60.0,63.5,66.0,0.381,,15.16,60.5,5.24,2692857
+"TP=2 production candidate C (full-scope + workspace bound, 0.85)",2,3,82.9,82.5,83.2,45.1,0.527,,22.15,60.2,5.21,2692857
+"TP=2 production candidate C (full-scope + workspace bound, 0.85)",4,3,120.9,119.1,121.0,34.6,0.734,,28.89,65.3,5.57,2692857
+"TP=2 production candidate C (full-scope + workspace bound, 0.85)",6,3,140.8,139.4,141.5,27.3,0.928,,36.66,62.5,5.38,2692857
+"TP=2 production candidate C (full-scope + workspace bound, 0.85)",8,3,157.7,157.3,158.3,23.5,1.054,,42.63,62.6,5.38,2692857

@@ -50,8 +50,17 @@ fast-load off, which is the item's one open caveat: the production pool figure w
 is an `[estimate]` until a promoted boot prints it. Narrative:
 [docs/11](docs/11-open-issues.md) §2.28; ledger context: [docs/17](docs/17-memory-ledger.md) §2.5.
 **The upstream half — a sizing constant linear in `max_model_len` that skips the `compress_ratio`
-division the DeepSeek-V4 call site applies — is not filed anywhere and is now
-[HELP-WANTED](HELP-WANTED.md) §9.**
+division the DeepSeek-V4 call site applies — turned out to be filed already**, three days before we
+measured it, as part 2 of [vllm-project/vllm#55221](https://github.com/vllm-project/vllm/issues/55221)
+(fixes [#55222](https://github.com/vllm-project/vllm/pull/55222) and
+[#51252](https://github.com/vllm-project/vllm/pull/51252)). We added our numbers and three points to
+[that thread](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5559336290) on 6
+September rather than opening a second issue: the two fixes want to land together or the chunker's
+budget stays 4× its buffer; after the division the size is still linear in `max_model_len`, which the
+`max_num_seqs × per-request` bound removes (0.73 of our 4.42 GiB); and the 40's justification is
+borrowed from the `flashmla_sparse` workspace, which calls itself "free" because it sits below a MoE
+workspace — where our control arm logged exactly one resize event, the indexer's.
+[HELP-WANTED](HELP-WANTED.md) §9 now carries what is still open.
 
 ---
 

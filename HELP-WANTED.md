@@ -384,13 +384,23 @@ profile it, which sub-kernel or code path accounts for the gap.
 
 ---
 
-## 9. An upstream issue we have measured and not filed: the indexer workspace grows with `max_model_len`
+## 9. The indexer workspace that grows with `max_model_len` — filed upstream, and the part still open
 
-**Effort: an hour to write it up, if you would rather file it than we would. Nothing to measure — it
-is measured** `[measured-here]`. This is the one item on this page that needs no hardware at all, and
-the one we are least well placed to carry, because it belongs in vLLM rather than here.
+**Effort: none, if you only want the outcome. It is filed and it is measured** `[measured-here]`.
+This item asked, until 6 September, for someone to carry our measurement into vLLM. It no longer
+needs carrying: the same bug was reported upstream three days earlier from entirely different
+hardware, and we have added our numbers to that thread rather than opening a second one.
 
-**The finding.** `get_max_prefill_buffer_size()`
+**Where it lives now.**
+
+| | |
+|---|---|
+| Issue | [vllm-project/vllm#55221](https://github.com/vllm-project/vllm/issues/55221) — part 2 of it is this finding |
+| Our confirmation | [comment on #55221](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5559336290) |
+| Fix, model side | [#55222](https://github.com/vllm-project/vllm/pull/55222) — divides the glm5next call site by `index_kpool` |
+| Fix, builder side | [#51252](https://github.com/vllm-project/vllm/pull/51252) — the same division in `DeepseekV32IndexerMetadataBuilder`, generically |
+
+**The finding, unchanged.** `get_max_prefill_buffer_size()`
 (`vllm/v1/attention/backends/mla/indexer.py`) returns `max_model_len * 40` **entries** for the sparse
 indexer's K-gather workspace. Upstream's own comment gives the provenance: 40 was chosen against
 DeepSeek-V3.2's `max_model_len` of 163,840, where 40 × 163,840 × 132 B = 825 MB. The constant is
@@ -410,7 +420,7 @@ the model it was tuned for. The exact ceiling is
 `max_num_seqs × ceil((max_model_len + num_spec + 1) / compress_ratio)` — **251.8 MB** at our
 settings, against 4.92 GiB reserved.
 
-**What we measured, so an issue does not have to start from scratch** — three-node TP=3, one A/B in
+**What we measured, so the thread does not have to take it on trust** — three-node TP=3, one A/B in
 one session, everything else held: bounding the buffer to 512 MB (2.03× that ceiling) moves the KV
 pool **6,289,256 → 6,933,884 tokens, +10.25 %**, with the gates full cold and warm, a 969,468-token
 single request and eight concurrent long-context lanes all correct, and no speed level outside its
@@ -418,21 +428,33 @@ band. Tables: [`results/memory/indexer-workspace-ab.md`](results/memory/indexer-
 Our env-gated patch, which is a local workaround rather than a proposed fix, is
 [`tracks/tp3/patches-optional/indexer-workspace/`](tracks/tp3/patches-optional/indexer-workspace/).
 
-**What an upstream fix probably looks like**, and we say "probably" because we have not written it:
-divide by `compress_ratio` in the function rather than at one call site, and bound the result by
-`max_num_seqs × per-request` instead of leaving it linear in `max_model_len`. Both consumers take the
-value from the same function, so it is one change. The risk to weigh is that a smaller buffer makes
-the splitter emit more chunks — it does not make it emit wrong ones — and in our six-geometry check
-the chunk list came out **identical**, because the constraint never bound at either size.
+**Three things we put in the thread that were not already in it**, and any of them can be argued
+with:
 
-**What we cannot do here.** We run one model on one part with one set of patches; an upstream issue
-wants the DeepSeek paths checked too, and a maintainer's view on whether the 40 is protecting
-something we have not found. The comment calls it "a magic number for controlling the prefill buffer
-size" and does not say what it is holding at bay, so the honest position is that it may be a real
-constraint on a path we do not run. **If you
-file it, we will link it from here and from
-[docs/11](docs/11-open-issues.md) §2.28 rather than filing a second one.** If you would rather we
-filed it, say so in an issue and we will.
+1. **#55222 and #51252 want to land together, not merely to compose.** #55222 divides the buffer's
+   *shape* at the glm5next call site; the builder's admission budget still comes from the undivided
+   value and is what the chunker compares compressed sequence lengths against. With one of the two,
+   the chunker may admit 4× what the buffer it writes into can hold. The net is upstream's own
+   locked-workspace `AssertionError`, so this is a loud failure rather than a silent one — and it is
+   unreachable at a 1M context with 32 sequences — but the shape permits the drift.
+2. **After the division the size is still linear in `max_model_len`** and blind to how many requests
+   can exist. Of the 4.42 GiB we freed, the division accounts for 3.69 GiB and the
+   `max_num_seqs × per-request` bound for the remaining 0.73 GiB. The second is the smaller half; it
+   is also the half that removes the `max_model_len` term. We offered a PR for it.
+3. **The 40 is documented, and its justification is borrowed.** We had written here that the comment
+   "does not say what it is holding at bay" — that was **wrong**, or at least a version behind. On
+   current `main` the comment derives 40 from the `flashmla_sparse` workspace, and *that* workspace
+   justifies itself with "This fits nicely below the typical MoE workspace size of >2GB so this is
+   'free'". Both statements are true at 163,840 tokens and neither survives 1M — and our control arm
+   logged exactly **one** workspace resize event, grown by the indexer, which says there is no larger
+   MoE workspace amortising it here. "Free" is a scale-dependent claim.
+
+**What is still genuinely open, and where a reader can help.** We run one model on one part. Nobody
+in the thread has checked whether the `max_num_seqs` bound is safe on the DeepSeek-V3.2 and V4 paths,
+which is where the constant came from and where a chunker behaviour we have not seen may bind; and
+part 1 of #55221 — an fp8 KV cache rejected by the SM90 sparse MLA `plan()` — is untested by us
+because there is no SM90 hardware here. If you have either, **the thread is the place**, not a new
+issue and not this page.
 
 ---
 

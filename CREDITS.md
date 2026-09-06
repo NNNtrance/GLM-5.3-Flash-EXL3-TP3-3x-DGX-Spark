@@ -489,8 +489,10 @@ was added on 6 September. It is ours, the finding behind it is ours — read out
 and then confirmed with an upstream debug switch — and it is **not in production**: it bounds the
 sparse indexer's K-gather workspace, worth +10.25 % of KV pool
 ([`results/memory/indexer-workspace-ab.md`](results/memory/indexer-workspace-ab.md)). The defect it
-works around belongs upstream rather than here, and we have not filed it
-([HELP-WANTED](HELP-WANTED.md) §9).
+works around belongs upstream rather than here, where it was already reported three days before we
+measured it; our numbers are on that thread
+([vllm-project/vllm#55221](https://github.com/vllm-project/vllm/issues/55221),
+[HELP-WANTED](HELP-WANTED.md) §9).
 
 The published copies are **scrubbed** — internal paths in comments replaced by references to these
 docs — so their `sha256` does not match the ones our nodes' manifests record. That only matters

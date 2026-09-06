@@ -1261,7 +1261,10 @@ The patch and its knobs:
 [`../tracks/tp3/patches-optional/indexer-workspace/`](../tracks/tp3/patches-optional/indexer-workspace/).
 The mechanism in its ledger context: [17](17-memory-ledger.md) §2.5. **The upstream half of it — a
 sizing constant that grows linearly with `max_model_len` and skips a division the sibling path
-applies — is not filed anywhere yet and is [HELP-WANTED](../HELP-WANTED.md) §9.**
+applies — was reported upstream on 3 September, three days before we measured it, as part 2 of
+[vllm-project/vllm#55221](https://github.com/vllm-project/vllm/issues/55221); our confirmation and
+three additions are [in that thread](https://github.com/vllm-project/vllm/issues/55221#issuecomment-5559336290),
+and what is still open is [HELP-WANTED](../HELP-WANTED.md) §9.**
 
 ---
 
